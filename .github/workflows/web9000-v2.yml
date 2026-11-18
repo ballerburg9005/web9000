@@ -35,6 +35,7 @@ jobs:
           node --check v2/network/mirror-policy.js
           node --check v2/network/peer-identity.mjs
           node --check v2/network/peer-identity.test.mjs
+          node --check v2/network/smoke-ui.mjs
       - name: Protocol and view tests
         working-directory: v2
         run: npm test
@@ -65,3 +66,7 @@ jobs:
         working-directory: v2/network
         timeout-minutes: 3
         run: npm run test:independent-indexes
+      - name: Real headless Chromium browser across independent HTTP origins
+        working-directory: v2/network
+        timeout-minutes: 3
+        run: npm run test:browser-ui
