@@ -697,3 +697,37 @@ dialog::backdrop{background:#000b}
  overflow-wrap:anywhere;line-height:1.55;font-size:12px;margin:7px 0}
 .publication-history .history-post-tags{font-size:10px;color:#dcbccb}
 .publication-history .history-post-media{font-size:10px;color:#b9a6b1}
+/* Primary MIME type determines the tile player, never its grid width. */
+.post .media-video-tile{display:block;width:100%;height:100%;object-fit:cover;
+ aspect-ratio:1/1;background:#110e14}
+.grid.blog .post .media-video-tile{aspect-ratio:auto;width:100%;height:100%}
+.grid.mixed .post .media-video-tile{aspect-ratio:1/1}
+.mixed-media-gallery{display:flex;flex-direction:column;gap:8px;
+ width:100%;align-items:center}
+.mixed-media-gallery .mixed-gallery-stage{width:min(100%,820px);min-height:120px;
+ display:flex;flex-direction:column;gap:8px;align-items:center;
+ background:#151218}
+.mixed-media-gallery .mixed-gallery-stage>img{display:block;width:auto;max-width:100%;
+ max-height:72vh;object-fit:contain}
+.mixed-media-gallery .mixed-gallery-stage .mini-audio{margin:14px 0;width:min(100%,760px)}
+.mixed-media-gallery .mixed-gallery-stage .mini-video-player{margin:auto}
+.mixed-media-gallery .gallery-navigation{width:min(100%,810px)}
+.mixed-media-gallery .mixed-gallery-thumbnails{width:min(100%,810px);
+ display:flex;flex-wrap:nowrap;overflow-x:auto;gap:5px;max-width:100%}
+.mixed-attachment-chip{display:flex;align-items:center;justify-content:center;
+ min-width:55px;min-height:44px;background:#2d2630;color:#e4cadd;
+ border:1px solid #6b556d;border-radius:2px;padding:3px 7px;font-size:12px}
+.mixed-attachment-chip.active{box-shadow:inset 0 0 0 2px #c5a66e}
+.mixed-attachment-chip .gallery-thumb-image{width:52px;height:40px;object-fit:cover}
+.mixed-media-kind{font-size:11px;font-weight:700;color:#e4be78;
+ letter-spacing:.08em;text-align:center;margin-top:16px}
+.compose-preview-media video{width:120px;height:90px;object-fit:contain;
+ border-radius:2px;background:#110e16}
+.compose-preview-media audio{width:120px;height:30px;order:3}
+.compose-preview-audio{display:flex;align-items:center;justify-content:center;
+ width:120px;height:90px;background:#362a3d;color:#dfc3de;font-size:16px}
+.compose-preview-retained{display:flex;flex-wrap:wrap;gap:7px;margin:8px 0}
+.compose-preview-retained label{font-size:10px;color:#c9bac7;
+ border:1px solid #635466;padding:6px}
+.compose-preview-retained input[type=radio]{width:14px;height:14px;
+ margin-right:6px;accent-color:#d6b072}

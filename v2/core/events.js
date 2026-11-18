@@ -34,6 +34,17 @@ export function validatePayload(p) {
     if (p.body.media !== undefined && (!Array.isArray(p.body.media) || p.body.media.length > 12 || p.body.media.some(m => typeof m !== 'string' || !/^ipfs:\/\/[A-Za-z0-9]{20,120}$/.test(m)))) throw Error('Media must be IPFS CIDs');
     // body.fields is an arbitrary JSON object: market listings, event dates, job positions etc.
     if (p.body.fields !== undefined && (!p.body.fields || typeof p.body.fields !== 'object' || Array.isArray(p.body.fields))) throw Error('Invalid custom fields');
+    // Ordered MIME metadata describes the matching CID entries. It does not
+    // embed binary bytes or grant media-host authority to a post author.
+    const mime=p.body.fields?.mediaTypes;
+    if(mime!==undefined&&(!Array.isArray(mime)||mime.length!==(p.body.media||[]).length||
+      mime.some(type=>!['image/jpeg','image/png','image/webp','audio/mpeg',
+        'audio/ogg','audio/wav','video/mp4','video/webm'].includes(type))))
+      throw Error('Invalid ordered media MIME metadata');
+    const primary=p.body.fields?.primaryMediaIndex;
+    if(primary!==undefined&&(!Number.isInteger(primary)||primary<0||
+      primary>=(p.body.media||[]).length))throw Error('Invalid primary media selection');
+
     // A correction is a NEW signed post referring to a previous immutable
     // publication. No event mutates, overwrites or deletes the previous one.
     if (p.kind === 'post' && p.body.fields?.revises !== undefined &&

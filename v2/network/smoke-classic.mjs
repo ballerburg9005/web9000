@@ -20,6 +20,7 @@ import {LevelBlockstore} from 'blockstore-level';
 import {createOrbitDB} from '@orbitdb/core';
 import {openPublicIndex} from './orbit-index.js';
 import {createBrowserBridge} from './browser-bridge.mjs';
+import {createImageGateway} from './media-node.mjs';
 import {Replica} from '../core/replica.js';
 import {generateIdentity,signEvent} from '../core/events.js';
 import {DEMO_CATALOG} from '../demo-catalog.js';
@@ -29,7 +30,8 @@ import {sha256} from 'multiformats/hashes/sha2';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const base=await mkdtemp(path.join(os.tmpdir(),'w9-classic-'));
-const servers=[];let browser,libp2p,helia,orbitdb,index,bridge,demoIdentity,demoCid,demoBytes;
+const servers=[];
+let browser,libp2p,helia,orbitdb,index,bridge,mediaGateway,demoIdentity,demoCid,demoBytes;
 function serve(){
  const mime={'.html':'text/html','.css':'text/css','.js':'text/javascript',
    '.jpg':'image/jpeg','.mp4':'video/mp4','.mp3':'audio/mpeg'};
@@ -44,7 +46,7 @@ function serve(){
      res.writeHead(200,{'content-type':'application/json'});
      res.end(JSON.stringify({format:'web9000-peer-suggestions-v1',
        peers:[{name:'ephemeral independent test peer',url:bridge.url,
-         mediaUrl:'http://'+req.headers.host+'/v2/media'}]}));
+         mediaUrl:'http://127.0.0.1:'+mediaGateway.port}]}));
      return;
    }
    if(url.pathname==='/v2/media/ipfs/'+demoCid){
@@ -94,6 +96,13 @@ try{
  demoIdentity=await generateIdentity();
  demoBytes=await readFile(path.join(root,'thumb','thumb01.jpg'));
  demoCid=CID.createV1(raw.code,await sha256.digest(demoBytes)).toString();
+ mediaGateway=await createImageGateway({ipfs:helia,port:0,host:'127.0.0.1',
+   manifestFile:path.join(base,'media-manifest.json'),uploadEnabled:true,
+   richMediaEnabled:true,maxTotal:30*1024*1024});
+ const fixture=await fetch('http://127.0.0.1:'+mediaGateway.port+'/upload',
+   {method:'POST',headers:{'content-type':'image/jpeg'},body:demoBytes});
+ assert.equal(fixture.status,201,'actual media peer retains the original test-image CID');
+ assert.equal((await fixture.json()).cid,'ipfs://'+demoCid);
  for(const [i,spec] of DEMO_CATALOG.entries()){
    const fields={presentation:spec.type,tags:spec.tags,demo:true,
      ...(spec.poll?{poll:spec.poll}:{}),
@@ -845,12 +854,97 @@ try{
  assert.ok(bridge.replica.list().some(e=>e.id===withdraw.id));
  await eventually(()=>b.evaluate(id=>!!document.querySelector('.post[data-id="'+id+'"]'),
    originalPost.id),'a signed restore request returns content to another independent viewer');
+ // Publish a REAL mixed media post: a site-hosted MP3, an actual MP4 clip
+ // and a JPEG are read into the local browser FileList, then uploaded as
+ // independently stored IPFS blocks/UnixFS from the normal preview UI.
+ await c.evaluate(async()=>{
+   document.querySelector('.post.selected')?.click();
+   document.querySelector('[data-sort="new"]').click();
+   document.getElementById('postNew').click();
+   document.getElementById('composeTitle').value='Mixed images, sound and video';
+   document.getElementById('composeText').value='Each signed CID has a matching MIME type, with video chosen as the primary visual.';
+   const dt=new DataTransfer();
+   for(const [url,name,type] of [
+     ['/content/festival_theme.mp3','tune.mp3','audio/mpeg'],
+     ['/thumb/thumb10.mp4','demo.mp4','video/mp4'],
+     ['/thumb/thumb01.jpg','photo.jpg','image/jpeg']
+   ]){
+     const data=await(await fetch(url)).arrayBuffer();
+     dt.items.add(new File([data],name,{type}));
+   }
+   const picker=document.getElementById('composeFiles');
+   picker.files=dt.files;
+   picker.dispatchEvent(new Event('change',{bubbles:true}));
+   document.getElementById('postForm').requestSubmit();
+ });
+ await eventually(()=>c.evaluate(()=>document.getElementById('composePreviewDialog').open),
+   'mixed format preview is available to the human author');
+ assert.equal(await c.$$eval('.compose-preview-gallery input[type=radio]',els=>els.length),3);
+ assert.equal(await c.$$eval('.compose-preview-gallery img',els=>els.length),1);
+ assert.equal(await c.$$eval('.compose-preview-gallery video',els=>els.length),1);
+ assert.equal(await c.$$eval('.compose-preview-gallery audio',els=>els.length),1);
+ await c.evaluate(()=>{
+   const radio=document.querySelector('.compose-preview-gallery input[value="1"]');
+   radio.click();
+   document.getElementById('composePermanentAck').click();
+   document.getElementById('confirmPublishPost').click();
+ });
+ await eventually(()=>bridge.replica.list().some(e=>e.payload.kind==='post'&&
+   e.payload.body.title==='Mixed images, sound and video'),
+   'audio and video sent through independent media peer and signed metadata published');
+ const mixed=bridge.replica.list().find(e=>e.payload.kind==='post'&&
+   e.payload.body.title==='Mixed images, sound and video');
+ assert.deepEqual(mixed.payload.body.fields.mediaTypes,
+   ['audio/mpeg','video/mp4','image/jpeg']);
+ assert.equal(mixed.payload.body.fields.primaryMediaIndex,1);
+ assert.equal(mixed.payload.body.media.length,3);
+ assert.equal(new Set(mixed.payload.body.media).size,3);
+ await eventually(()=>c.evaluate(id=>
+   !!document.querySelector('.post[data-id="'+id+'"] .media-video-tile'),
+   mixed.id),'video is used as the author-selected primary tile visual');
+ await c.evaluate(id=>document.querySelector('.post[data-id="'+id+'"]').click(),mixed.id);
+ assert.equal(await c.$$eval('.mixed-media-gallery',all=>all.length),1);
+ assert.equal(await c.$$eval('.mixed-media-gallery .mixed-attachment-chip',all=>all.length),3);
+ assert.equal(await c.$$eval('.mixed-media-gallery .mini-video-player',all=>all.length),1,
+   'chosen video renders in custom full-size viewer');
+ await c.evaluate(()=>document.querySelector('.mixed-media-gallery .gallery-next').click());
+ assert.equal(await c.$$eval('.mixed-media-gallery .gallery-stage img',all=>all.length),1,
+   'next mixed attachment displays the JPEG');
+ await c.evaluate(()=>document.querySelector('.mixed-media-gallery .gallery-next').click());
+ assert.equal(await c.$$eval('.mixed-media-gallery .mini-audio',all=>all.length),1,
+   'next mixed attachment shows shared audio mini-player');
+ const realUpload=await fetch('http://127.0.0.1:'+mediaGateway.port+
+   '/ipfs/'+mixed.payload.body.media[1].slice(7),{headers:{range:'bytes=12-45'}});
+ assert.equal(realUpload.status,206);
+ assert.equal((await realUpload.arrayBuffer()).byteLength,34);
+ // The restored signing key at a different origin can render its own
+ // media, while an unrelated viewer must choose whether to download bytes.
+ await eventually(()=>b.evaluate(id=>
+   !!document.querySelector('.post[data-id="'+id+'"]'),mixed.id),
+   'independent browser receives interoperable signed mixed-media post');
+ await b.evaluate(id=>document.querySelector('.post[data-id="'+id+'"]').click(),mixed.id);
+ assert.equal(await b.$$eval('.mixed-gallery-stage .mini-video-player',all=>all.length),1,
+   'same portable signing identity sees its selected video on another website');
+ await a.evaluate(()=>{
+   document.getElementById('spaceName').value='demo';
+   document.getElementById('goSpace').click();
+   document.querySelector('[data-sort="new"]').click();
+   const raw=document.getElementById('showUnverified');
+   if(!raw.checked)raw.click();
+ });
+ await eventually(()=>a.evaluate(id=>!!document.querySelector('.post[data-id="'+id+'"]'),mixed.id),
+   'independent viewer can browse a signed post from an unknown author');
+ await a.evaluate(id=>document.querySelector('.post[data-id="'+id+'"]').click(),mixed.id);
+ assert.equal(await a.$$eval('.mixed-gallery-stage .gallery-load',all=>all.length),1,
+   'unknown author rich media requires an explicit reader download click');
+ console.log('CLASSIC checkpoint 21: actual mixed JPEG+MP3+MP4 uploads, selected video thumbnail, IPFS UnixFS seek and safe peer replication');
  console.log('CLASSIC checkpoint 20: authenticated corrections and reversible author withdrawal, every signed version retained');
  console.log('PASS classic board, threads, audit, attributes, identity portability and append-only revision/withdrawal');
 }finally{
  try{await browser?.close();}catch{}
  for(const server of servers)await new Promise(resolve=>server.close(resolve));
  try{await bridge?.close();}catch{}
+ try{await mediaGateway?.close();}catch{}
  try{await index?.close();}catch{}
  try{await orbitdb?.stop();}catch{}
  try{await helia?.stop();}catch{}

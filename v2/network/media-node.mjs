@@ -1,143 +1,187 @@
-// Optional media-only HTTP gateway for independent test peers.
-//
-// This stores a few manually submitted, size-limited raster images in Helia's
-// IPFS blockstore. It is not a global IPFS takedown service and is NOT enabled
-// by default. Media is never fetched merely while synchronizing text indexes.
-// A local peer operator retains sole power to quarantine/delete its own blocks.
+// Independently operated media peer. Only an explicit operator opt-in permits
+// uploads, and a SECOND opt-in permits audio/video. Binary media is not
+// replicated with signed text events. No universal removal authority exists.
 import {createServer} from 'node:http';
 import {readFile,writeFile,rename,mkdir} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
 import path from 'node:path';
 import {CID} from 'multiformats/cid';
 import * as raw from 'multiformats/codecs/raw';
 import {sha256} from 'multiformats/hashes/sha2';
+import {unixfs} from '@helia/unixfs';
 
-const MAX_UPLOAD=256*1024;
-const DAILY_PER_IP=12;
-const MAX_TOTAL=64*1024*1024;
-const allowed={
-  'image/jpeg':b=>b[0]===0xff&&b[1]===0xd8&&b[2]===0xff,
-  'image/png':b=>b.length>=8&&[137,80,78,71,13,10,26,10].every((v,i)=>b[i]===v),
-  'image/webp':b=>b.length>=12&&b.toString('ascii',0,4)==='RIFF'&&b.toString('ascii',8,12)==='WEBP'
+const IMAGE_MAX=256*1024,AUDIO_MAX=8*1024*1024,VIDEO_MAX=12*1024*1024;
+const MAX_TOTAL=64*1024*1024,DAILY_IMAGES=12,DAILY_RICH=2;
+export const MEDIA_LIMITS=Object.freeze({
+ 'image/jpeg':IMAGE_MAX,'image/png':IMAGE_MAX,'image/webp':IMAGE_MAX,
+ 'audio/mpeg':AUDIO_MAX,'audio/ogg':AUDIO_MAX,'audio/wav':AUDIO_MAX,
+ 'video/mp4':VIDEO_MAX,'video/webm':VIDEO_MAX
+});
+const imageTypes=new Set(['image/jpeg','image/png','image/webp']);
+const starts=(bytes,sig)=>bytes.length>=sig.length&&sig.every((v,i)=>bytes[i]===v);
+const checks={
+ 'image/jpeg':b=>starts(b,[255,216,255]),
+ 'image/png':b=>starts(b,[137,80,78,71,13,10,26,10]),
+ 'image/webp':b=>b.length>=12&&b.toString('ascii',0,4)==='RIFF'&&b.toString('ascii',8,12)==='WEBP',
+ 'audio/mpeg':b=>starts(b,[73,68,51])||(b.length>=2&&b[0]===255&&(b[1]&224)===224),
+ 'audio/ogg':b=>starts(b,[79,103,103,83]),
+ 'audio/wav':b=>b.length>=12&&b.toString('ascii',0,4)==='RIFF'&&b.toString('ascii',8,12)==='WAVE',
+ 'video/mp4':b=>b.length>=12&&b.toString('ascii',4,8)==='ftyp',
+ 'video/webm':b=>starts(b,[26,69,223,163])
 };
 function send(res,status,body,headers={}){
-  const data=JSON.stringify(body);
-  res.writeHead(status,{'content-type':'application/json; charset=utf-8',
-    'cache-control':'no-store','x-content-type-options':'nosniff',
-    'access-control-allow-origin':'*',...headers});
-  res.end(data);
+ res.writeHead(status,{'content-type':'application/json; charset=utf-8',
+  'cache-control':'no-store','x-content-type-options':'nosniff',
+  'access-control-allow-origin':'*',...headers});
+ res.end(JSON.stringify(body));
 }
 async function readLimited(req,max){
-  const chunks=[];let total=0;
-  for await(const chunk of req){
-    total+=chunk.length;
-    if(total>max){const e=Error('Image exceeds test-peer size limit');e.status=413;throw e;}
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks,total);
+ const parts=[];let total=0;
+ for await(const part of req){
+  total+=part.length;
+  if(total>max){const e=Error('Media exceeds peer limit');e.status=413;throw e;}
+  parts.push(part);
+ }
+ return Buffer.concat(parts,total);
+}
+function parseRange(value,length){
+ if(value===undefined)return {start:0,end:length-1,partial:false};
+ const m=/^bytes=(\d*)-(\d*)$/.exec(value);
+ if(!m||(!m[1]&&!m[2]))return null;
+ let start,end;
+ if(!m[1]){
+  const n=Number(m[2]);if(!Number.isSafeInteger(n)||n<=0)return null;
+  start=Math.max(0,length-n);end=length-1;
+ }else{
+  start=Number(m[1]);end=m[2]?Number(m[2]):length-1;
+  if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||start>=length||end<start)return null;
+  end=Math.min(length-1,end);
+ }
+ return {start,end,partial:true};
 }
 export async function createImageGateway({
-  ipfs,host='127.0.0.1',port=8788,manifestFile,
-  uploadEnabled=false,maxTotal=MAX_TOTAL
+ ipfs,host='127.0.0.1',port=8788,manifestFile,uploadEnabled=false,
+ richMediaEnabled=false,maxTotal=MAX_TOTAL
 }={}){
-  if(!ipfs||typeof manifestFile!=='string')throw Error('Helia and manifest file required');
-  // Small images use standard IPFS raw-codec blocks: CIDv1 + SHA-256.
-  // This avoids a large UnixFS dependency for a <=256 KiB single-block demo.
-  let manifest={};
-  try{
-    const parsed=JSON.parse(await readFile(manifestFile,'utf8'));
-    if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))throw Error('Invalid image manifest');
-    manifest=parsed;
-  }catch(err){if(err.code!=='ENOENT')throw err;}
-  const dayCounts=new Map();
-  let totalBytes=Object.values(manifest).reduce((sum,item)=>sum+(item?.bytes||0),0);
-  let writing=Promise.resolve();
-  async function save(){
-    const tmp=manifestFile+'.tmp';
-    await mkdir(path.dirname(manifestFile),{recursive:true});
-    await writeFile(tmp,JSON.stringify(manifest),{mode:0o600});
-    await rename(tmp,manifestFile);
+ if(!ipfs||typeof manifestFile!=='string')throw Error('Helia and manifest required');
+ // Keep old entrypoint name for operator scripts and existing image CIDs.
+ const fs=unixfs(ipfs);
+ let manifest={};
+ try{
+  const parsed=JSON.parse(await readFile(manifestFile,'utf8'));
+  if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))throw Error('Invalid manifest');
+  manifest=parsed;
+ }catch(err){if(err.code!=='ENOENT')throw err;}
+ let totalBytes=Object.values(manifest).reduce((n,e)=>n+(e?.bytes||0),0),reserved=0;
+ let writing=Promise.resolve();
+ const daily=new Map();
+ async function save(){
+  const tmp=manifestFile+'.tmp';
+  await mkdir(path.dirname(manifestFile),{recursive:true});
+  await writeFile(tmp,JSON.stringify(manifest),{mode:0o600});
+  await rename(tmp,manifestFile);
+ }
+ const server=createServer(async(req,res)=>{
+  const url=new URL(req.url,'http://localhost');
+  if(req.method==='OPTIONS'){
+   res.writeHead(204,{'access-control-allow-origin':'*',
+    'access-control-allow-methods':'POST,GET,HEAD,OPTIONS',
+    'access-control-allow-headers':'content-type,range','access-control-max-age':'300',
+    'cache-control':'no-store'});res.end();return;
   }
-  const server=createServer(async(req,res)=>{
-    const url=new URL(req.url,'http://localhost');
-    if(req.method==='OPTIONS'){
-      res.writeHead(204,{'access-control-allow-origin':'*',
-        'access-control-allow-methods':'POST, GET, OPTIONS',
-        'access-control-allow-headers':'content-type',
-        'access-control-max-age':'300','cache-control':'no-store'});
-      res.end();return;
+  if(req.method==='GET'&&url.pathname==='/health'){
+   send(res,200,{service:'web9000-independent-media-peer',enabled:uploadEnabled,
+    richMediaEnabled,images:Object.values(manifest).filter(e=>imageTypes.has(e.type)).length,
+    files:Object.keys(manifest).length,totalBytes,limit:IMAGE_MAX,
+    imageLimit:IMAGE_MAX,audioLimit:AUDIO_MAX,videoLimit:VIDEO_MAX});
+   return;
+  }
+  if(req.method==='POST'&&url.pathname==='/upload'){
+   if(!uploadEnabled)return send(res,403,{error:'Operator disabled media ingestion'});
+   const type=String(req.headers['content-type']||'').split(';')[0].trim().toLowerCase();
+   if(!Object.hasOwn(checks,type))return send(res,415,{error:'Unsupported media MIME type'});
+   const rich=!imageTypes.has(type);
+   if(rich&&!richMediaEnabled)return send(res,403,{error:'Operator disabled audio/video ingestion'});
+   const cap=MEDIA_LIMITS[type],size=Number(req.headers['content-length']);
+   if(!Number.isSafeInteger(size)||size<1||size>cap)
+    return send(res,413,{error:'Media must be 1..'+cap+' bytes'});
+   // Remote address, not an attacker-provided X-Forwarded-For header.
+   const key=Math.floor(Date.now()/86400000)+'|'+
+    String(req.socket.remoteAddress||'unknown')+'|'+(rich?'rich':'image');
+   if((daily.get(key)||0)>=(rich?DAILY_RICH:DAILY_IMAGES))
+    return send(res,429,{error:'Operator daily upload quota reached'});
+   if(totalBytes+reserved+size>maxTotal)return send(res,507,{error:'Operator storage quota exceeded'});
+   daily.set(key,(daily.get(key)||0)+1);
+   reserved+=size;
+   try{
+    const bytes=await readLimited(req,cap);
+    if(bytes.length!==size||!checks[type](bytes))
+     return send(res,415,{error:'Bytes do not match declared media type'});
+    const cid=rich?await fs.addBytes(bytes):CID.createV1(raw.code,await sha256.digest(bytes));
+    if(!rich)await ipfs.blockstore.put(cid,bytes);
+    const id=cid.toString();
+    if(manifest[id]&&manifest[id].type!==type)
+     return send(res,409,{error:'Existing CID is already retained with a different MIME type'});
+    if(!manifest[id]){
+     manifest[id]={type,bytes:bytes.length,time:Date.now(),codec:rich?'unixfs':'raw',
+      sha256:createHash('sha256').update(bytes).digest('hex')};
+     totalBytes+=bytes.length;
+     writing=writing.then(save);await writing;
     }
-    if(req.method==='GET'&&url.pathname==='/health'){
-      send(res,200,{service:'web9000-independent-image-peer',enabled:uploadEnabled,
-        images:Object.keys(manifest).length,totalBytes,limit:MAX_UPLOAD});
-      return;
+    send(res,201,{cid:'ipfs://'+id,type,bytes:bytes.length});
+   }catch(e){send(res,e.status||500,{error:'Media storage failed'});}
+   finally{reserved-=size;}
+   return;
+  }
+  const match=url.pathname.match(/^\/ipfs\/([A-Za-z0-9]{20,120})$/);
+  if(['GET','HEAD'].includes(req.method)&&match){
+   const entry=manifest[match[1]];
+   if(!entry)return send(res,404,{error:'Peer does not retain this CID'});
+   if(!Object.hasOwn(checks,entry.type)||!Number.isSafeInteger(entry.bytes)||
+    entry.bytes<1||entry.bytes>MEDIA_LIMITS[entry.type])
+    return send(res,503,{error:'Invalid stored media metadata'});
+   const range=parseRange(req.headers.range,entry.bytes);
+   if(!range){
+    res.writeHead(416,{'content-range':'bytes */'+entry.bytes,
+     'cache-control':'no-store','access-control-allow-origin':'*'});res.end();return;
+   }
+   try{
+    const cid=CID.parse(match[1]);
+    const source=entry.codec==='unixfs'?fs.cat(cid.toString(),{offline:true}):
+     cid.code===raw.code?ipfs.blockstore.get(cid):null;
+    if(!source)throw Error('Unknown stored block codec');
+    let n=0;const chunks=[];
+    for await(const part of source){
+     n+=part.byteLength;if(n>entry.bytes)throw Error('Oversized stored bytes');
+     chunks.push(Buffer.from(part));
     }
-    if(req.method==='POST'&&url.pathname==='/upload'){
-      if(!uploadEnabled)return send(res,403,{error:'Operator disabled media ingestion'});
-      const type=(req.headers['content-type']||'').split(';')[0].trim().toLowerCase();
-      if(!allowed[type])return send(res,415,{error:'Only JPEG, PNG, WebP raster images'});
-      const len=Number(req.headers['content-length']);
-      if(!Number.isSafeInteger(len)||len<1||len>MAX_UPLOAD)
-        return send(res,413,{error:'Image must be 1..256 KiB with Content-Length'});
-      const ip=String(req.headers['x-real-ip']||req.socket.remoteAddress||'unknown');
-      const budgetKey=Math.floor(Date.now()/86400000)+'|'+ip;
-      if((dayCounts.get(budgetKey)||0)>=DAILY_PER_IP)
-        return send(res,429,{error:'Local independent test peer daily upload limit'});
-      if(totalBytes+len>maxTotal)return send(res,507,{error:'Operator storage quota exceeded'});
-      dayCounts.set(budgetKey,(dayCounts.get(budgetKey)||0)+1);
-      try{
-        const bytes=await readLimited(req,MAX_UPLOAD);
-        if(bytes.length!==len||!allowed[type](bytes))
-          return send(res,415,{error:'Image content does not match its declared format'});
-        const digest=await sha256.digest(bytes);
-        const cid=CID.createV1(raw.code,digest).toString();
-        await ipfs.blockstore.put(CID.parse(cid),bytes);
-        if(!manifest[cid]){
-          manifest[cid]={type,bytes:bytes.length,time:Date.now()};
-          totalBytes+=bytes.length;
-          writing=writing.then(save);await writing;
-        }
-        send(res,201,{cid:'ipfs://'+cid,bytes:bytes.length,type});
-      }catch(error){send(res,error.status||500,{error:'Media ingest failed'});}
-      return;
+    const full=Buffer.concat(chunks,n);
+    if(n!==entry.bytes||!checks[entry.type](full))throw Error('Corrupt stored media');
+    const sum=createHash('sha256').update(full).digest('hex');
+    if(entry.sha256&&sum!==entry.sha256)throw Error('Incorrect stored checksum');
+    if(!entry.sha256&&cid.code===raw.code){
+     const hash=await sha256.digest(full);
+     if(!Buffer.from(hash.bytes).equals(Buffer.from(cid.multihash.bytes)))
+      throw Error('Incorrect raw CID');
     }
-    const match=url.pathname.match(/^\/ipfs\/([A-Za-z0-9]{20,120})$/);
-    if(req.method==='GET'&&match){
-      const record=manifest[match[1]];
-      if(!record)return send(res,404,{error:'No image retained by this peer'});
-      // Human-initiated client image fetch; do not cache into intermediate CDNs.
-      try{
-        const cid=CID.parse(match[1]);
-        if(cid.code!==raw.code)throw Error('Unsupported image block codec');
-        const chunks=[];let size=0;
-        // Helia's blockstore.get returns AsyncIterable<Uint8Array>, not a
-        // single byte array. Enforce the cap during streaming retrieval.
-        for await(const chunk of ipfs.blockstore.get(cid)){
-          size+=chunk.byteLength;
-          if(size>MAX_UPLOAD)throw Error('Stored image exceeds local size limit');
-          chunks.push(Buffer.from(chunk));
-        }
-        const bytes=Buffer.concat(chunks,size);
-        const digest=await sha256.digest(bytes);
-        if(Buffer.compare(Buffer.from(digest.bytes),Buffer.from(cid.multihash.bytes))!==0)
-          throw Error('Stored image failed CID checksum');
-        if(bytes.length!==record.bytes||!allowed[record.type]?.(bytes))
-          throw Error('Local image corrupted');
-        res.writeHead(200,{'content-type':record.type,'content-length':bytes.length,
-          'cache-control':'no-store','x-content-type-options':'nosniff',
-          'cross-origin-resource-policy':'cross-origin','access-control-allow-origin':'*'});
-        res.end(bytes);
-      }catch{send(res,503,{error:'IPFS bytes not available on this peer'});}
-      return;
-    }
-    send(res,404,{error:'Unknown media path'});
-  });
-  await new Promise((resolve,reject)=>{
-    server.once('error',reject);server.listen(port,host,resolve);
-  });
-  return {
-    host,port:server.address().port,uploadEnabled,
-    get count(){return Object.keys(manifest).length;},
-    get totalBytes(){return totalBytes;},
-    async close(){await new Promise(resolve=>server.close(resolve));}
-  };
+    const data=full.subarray(range.start,range.end+1);
+    res.writeHead(range.partial?206:200,{
+     'content-type':entry.type,'content-length':data.length,
+     'accept-ranges':'bytes',
+     ...(range.partial?{'content-range':'bytes '+range.start+'-'+range.end+'/'+entry.bytes}:{}),
+     'cache-control':'no-store','x-content-type-options':'nosniff',
+     'cross-origin-resource-policy':'cross-origin','access-control-allow-origin':'*',
+     'access-control-expose-headers':'content-range,accept-ranges,content-length'
+    });
+    if(req.method==='HEAD')res.end();else res.end(data);
+   }catch(error){console.error('Local media read failure:',error.message);send(res,503,{error:'Verified IPFS media unavailable on this peer'});}
+   return;
+  }
+  send(res,404,{error:'Unknown media path'});
+ });
+ await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,host,resolve);});
+ return {host,port:server.address().port,uploadEnabled,richMediaEnabled,
+  get count(){return Object.keys(manifest).length;},
+  get totalBytes(){return totalBytes;},
+  async close(){await new Promise(resolve=>server.close(resolve));}};
 }

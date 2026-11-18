@@ -164,8 +164,8 @@
 <label>Presentation <select id="composePresentation"><option value="image">Image board</option><option value="text">Text / blog</option><option value="event">Event</option><option value="offer">Listing / offer</option><option value="job">Job / position</option><option value="project">Project</option><option value="idea">Idea / initiative</option><option value="discussion">Discussion</option></select></label></div>
 <label>Headline (optional) <input id="composeTitle" maxlength="160" placeholder="What is this about?"></label>
 <label>Text <textarea id="composeText" rows="4" maxlength="16000" placeholder="Write something. Plain text and paragraphs work."></textarea></label>
-<label>Images (optional) <input type="file" id="composeFiles" accept="image/jpeg,image/png,image/webp" multiple></label>\n<input type="hidden" id="composePrimaryIndex" value="0">
-<p class="fine">File uploads use the optional selected media peer, not a centralized website database. Images cannot be published as arbitrary inline code. If no upload peer is configured, publishing image files is refused with an explanation.</p>
+<label>Attachments (optional) <input type="file" id="composeFiles" accept="image/jpeg,image/png,image/webp,audio/mpeg,audio/ogg,audio/wav,video/mp4,video/webm" multiple></label>\n<input type="hidden" id="composePrimaryIndex" value="0">
+<p class="fine">Up to 6 attachments: JPEG/PNG/WebP ≤256 KiB, MP3/Ogg/WAV ≤8 MiB, MP4/WebM ≤12 MiB each. Your independently selected media peer must explicitly enable rich-media uploads. All files are uploaded only after preview and confirmation. Other peers may keep or refuse these bytes independently.</p>
 <label>Tags <input id="composeTags" placeholder="cats, memes, funny (comma separated)" maxlength="400"></label>
 <label id="composePriceWrap" hidden>Offer price / terms (optional)
   <input id="composePrice" maxlength="100" placeholder="e.g. $25, trade, free"></label>
@@ -184,7 +184,7 @@
 <dialog id="composePreviewDialog" class="compose-preview-dialog" aria-labelledby="composePreviewTitle">
 <div class="dialog-inner">
 <div class="dialog-title"><strong id="composePreviewTitle">Preview before publishing</strong><button type="button" id="closeComposePreview" aria-label="Close preview">×</button></div>
-<p class="fine">This is exactly the text, space, tags and file order you are about to sign. Attachments are not uploaded until you confirm.</p>
+<p class="fine">Review the text, space, tags, primary attachment and file order you are about to sign. Attachments are not uploaded until you confirm.</p>
 <section id="composePreviewContent" class="compose-preview-content" aria-label="Your unpublished post"></section>
 <label class="compose-ack"><input type="checkbox" id="composePermanentAck"> I understand that information published to independent peers cannot reliably be deleted or recalled, even if I later retract or revise it.</label>
 <p class="fine">No central owner can guarantee removal from other people’s independent replicas. Do not publish sensitive personal information, passwords or illegal media.</p>

@@ -1,5 +1,6 @@
 // Search & discovery are LOCAL views over already verified signed records.
 // No website or namespace "owner" can remove an index entry from a peer.
+import {primaryMedia} from './media.js';
 export const SEARCH_KINDS=['image','video','audio','event','poll','text','discussion','job','project','offer'];
 const norm=s=>String(s??'').toLocaleLowerCase();
 export function postKind(item){
@@ -7,6 +8,9 @@ export function postKind(item){
   if(f.poll)return 'poll';
   if(f.schedule)return 'event';
   const p=f.presentation;
+  const primary=primaryMedia(b);
+  if(primary?.kind==='audio')return 'audio';
+  if(primary?.kind==='video')return 'video';
   if(p==='audio'||p==='sound')return 'audio';
   if(p==='video'||f.video)return 'video';
   if(p==='event'||p==='meetup')return 'event';

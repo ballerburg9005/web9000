@@ -9,6 +9,8 @@
   "dependencies": {
     "@chainsafe/libp2p-noise": "^17.0.0",
     "@chainsafe/libp2p-yamux": "^8.0.1",
+    "@helia/unixfs": "^8.0.9",
+    "@libp2p/crypto": "^5.2.0",
     "@libp2p/gossipsub": "^17.2.1",
     "@libp2p/identify": "^4.1.18",
     "@libp2p/tcp": "^11.0.32",
@@ -17,9 +19,8 @@
     "blockstore-level": "^3.0.2",
     "helia": "^6.0.22",
     "libp2p": "^3.5.1",
-    "ws": "^8.18.3",
-    "@libp2p/crypto": "^5.2.0",
-    "multiformats": "^13.4.1"
+    "multiformats": "^13.4.1",
+    "ws": "^8.18.3"
   },
   "scripts": {
     "test:peers": "node smoke.mjs",

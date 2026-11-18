@@ -85,7 +85,8 @@ try {
     media=await createImageGateway({ipfs,host:process.env.WEB9000_MEDIA_HOST||'127.0.0.1',
       port:Number(process.env.WEB9000_MEDIA_PORT||8788),
       manifestFile:path.join(dir,'media-manifest.json'),
-      uploadEnabled:process.env.WEB9000_MEDIA_UPLOAD==='1'});
+      uploadEnabled:process.env.WEB9000_MEDIA_UPLOAD==='1',
+      richMediaEnabled:process.env.WEB9000_MEDIA_RICH_UPLOAD==='1'});
     console.log('MEDIA GATEWAY',media.host+':'+media.port,'uploads enabled:',media.uploadEnabled);
   }
   console.log('WEB9000 bridge is not an authoritative registry or relay and does not serve media.');

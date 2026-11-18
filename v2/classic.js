@@ -11,6 +11,8 @@ import {exportIdentityBackup,importIdentityBackup} from './core/identity-backup.
 import {searchPosts,tagCloud,availableSpaces,postKind} from './core/search.js';
 import {deriveGroup} from './core/governance.js';
 import {buildPostLifecycles} from './core/lifecycle.js';
+import {mediaItems,primaryMedia,choosePrimaryMediaIndex,categoryForType,
+  validateLocalUploads} from './core/media.js';
 
 const $=id=>document.getElementById(id);
 const state={
@@ -352,19 +354,33 @@ function tile(item,i,replyCounts){
     const img=document.createElement('img');img.className='post-thumb';img.loading='lazy';img.src=item.thumb;img.alt=b.title||'Demo picture';
     card.append(img);
   } else if(b.media?.length){
-    if(item.decision?.visible && state.mediaBase && trustedForMedia(p.author)){
-      // Only self-uploaded images or identities this viewer explicitly trusts.
-      // Raw publications by strangers NEVER trigger media download.
-      const img=document.createElement('img');
-      img.className='post-thumb';img.loading='lazy';img.alt=b.title||'Trusted image';
-      const mainIndex=Number.isInteger(b.fields?.primaryMediaIndex)&&
-        b.fields.primaryMediaIndex>=0&&b.fields.primaryMediaIndex<b.media.length?
-        b.fields.primaryMediaIndex:0;
-      img.src=mediaURL(b.media[mainIndex]);
-      img.onerror=()=>img.replaceWith(element('div','post-reveal','Media unavailable · click to inspect CID'));
-      card.append(img);
+    const primary=primaryMedia(b);
+    if(item.decision?.visible&&state.mediaBase&&trustedForMedia(p.author)&&primary){
+      // Browser media is only fetched from a viewer-chosen media peer
+      // for authored or explicitly trusted records, never all raw posts.
+      const src=mediaURL(primary.cid);
+      if(primary.kind==='audio'){
+        card.classList.add('sound-tile');
+        card.append(miniAudio(src,{compact:true}));
+      }else if(primary.kind==='video'){
+        const frame=document.createElement('video');
+        frame.className='post-thumb media-video-tile';
+        frame.src=src;frame.playsInline=true;frame.muted=true;
+        frame.loop=true;frame.preload='metadata';
+        frame.setAttribute('aria-label','Video thumbnail from your selected media peer');
+        frame.onmouseenter=()=>frame.play().catch(()=>{});
+        frame.onmouseleave=()=>{frame.pause();frame.currentTime=0;};
+        card.append(frame);
+      }else{
+        const img=document.createElement('img');
+        img.className='post-thumb';img.loading='lazy';img.alt=b.title||'Trusted image';
+        img.src=src;
+        img.onerror=()=>img.replaceWith(element('div','post-reveal',
+          'Media unavailable · open to inspect'));
+        card.append(img);
+      }
     } else {
-      card.append(element('div','post-reveal','IPFS image · open to load'));
+      card.append(element('div','post-reveal','IPFS media · open to choose what to load'));
     }
   }else{
     card.append(element('div','post-text-preview',b.text||b.title||'Text post'));
@@ -379,7 +395,7 @@ function tile(item,i,replyCounts){
   const kind=b.fields?.presentation||'image';
   if(item.video||(p.author===state.demoAuthor&&p.space==='demo'&&b.fields?.demoVideo))
     icons.push('▶ Video');
-  else if(b.media?.length>1)icons.push('▣ '+b.media.length+' images');
+  else if(b.media?.length>1)icons.push('▤ '+b.media.length+' attachments');
   else if(kind==='offer')icons.push('◇ Offer');
   else if(kind==='project')icons.push('◆ Project');
   else if(kind==='idea')icons.push('✦ Idea');
@@ -403,7 +419,7 @@ function tile(item,i,replyCounts){
           ' on this post. Open to view the conversation.':
         text.includes('meetup')?'This post includes an event date/location':
         text.includes('poll')?'This post contains a poll with voting options':
-        text.includes('images')?'This post has multiple image attachments':
+        text.includes('attachments')?'This post contains multiple image, audio or video attachments':
         text.includes('jobs')||text.includes('roles')?'Open positions associated with this post':
         text.includes('offer')?'Marketplace offer/listing':
         text.includes('project')?'Collaborative project post':
@@ -884,8 +900,79 @@ function showMultiImageGallery(body,post){
   },'gallery-copy cid-copy'));
   draw();body.append(area);
 }
+// Attachment carousel can combine any supported media category. Selecting an
+// item is an explicit user action; unknown authors do not trigger media fetch.
+function showMixedMediaGallery(body,post){
+  const items=mediaItems(post.payload.body).slice(0,12);
+  const primary=primaryMedia(post.payload.body);
+  let selected=primary?.index||0;
+  const trusted=trustedForMedia(post.payload.author)&&!!state.mediaBase;
+  const allowed=new Set(trusted?items.map(x=>x.cid):[]);
+  const area=element('div','attachments media-gallery mixed-media-gallery');
+  const stage=element('div','gallery-stage mixed-gallery-stage');
+  const navigation=element('div','gallery-navigation');
+  const thumbs=element('div','gallery-thumbnails mixed-gallery-thumbnails');
+  const count=element('span','gallery-count');
+  const kinds={image:'Image',audio:'Sound',video:'Video'};
+  function draw(){
+    const item=items[selected];
+    for(const video of stage.querySelectorAll('video'))video.pause();
+    stage.replaceChildren();thumbs.replaceChildren();
+    if(allowed.has(item.cid)){
+      const src=mediaURL(item.cid);
+      if(item.kind==='image'){
+        const image=document.createElement('img');
+        image.src=src;image.loading='eager';
+        image.alt='Image '+(selected+1)+' of '+items.length;
+        image.onerror=()=>image.replaceWith(element('div','gallery-placeholder',
+          'Image unavailable from your selected peer.'));
+        stage.append(image);
+      }else if(item.kind==='audio'){
+        stage.append(element('div','mixed-media-kind','♪ AUDIO · '+(selected+1)+' / '+items.length));
+        stage.append(miniAudio(src));
+      }else if(item.kind==='video'){
+        stage.append(miniVideo(src));
+      }
+    }else{
+      const box=element('div','gallery-placeholder',
+        kinds[item.kind]+' attachment '+(selected+1)+
+        ' · no automatic download from unknown authors');
+      box.append(button('Load this attachment',()=>{
+        if(!state.mediaBase)return toast('Connect to an independent media peer first.');
+        allowed.add(item.cid);draw();
+      },'gallery-load'));
+      stage.append(box);
+    }
+    count.textContent=(selected+1)+' / '+items.length;
+    for(const [index,other] of items.entries()){
+      const chip=button('',()=>{selected=index;draw();},
+        'gallery-thumb mixed-attachment-chip'+(index===selected?' active':''));
+      chip.title=kinds[other.kind]+' attachment '+(index+1);
+      chip.setAttribute('aria-label',chip.title);
+      if(other.kind==='image'&&allowed.has(other.cid)){
+        const thumb=document.createElement('img');
+        thumb.className='gallery-thumb-image';thumb.src=mediaURL(other.cid);
+        thumb.alt='';thumb.loading='lazy';chip.append(thumb);
+      }else chip.textContent=(other.kind==='audio'?'♪':other.kind==='video'?'▶':'▣')+
+        ' '+(index+1);
+      thumbs.append(chip);
+    }
+    syncAudioPlayers();
+  }
+  if(items.length>1){
+    navigation.append(button('‹ Previous',()=>{selected=(selected+items.length-1)%items.length;draw();},
+      'gallery-prev'),count,
+      button('Next ›',()=>{selected=(selected+1)%items.length;draw();},'gallery-next'));
+  }else navigation.append(count);
+  area.append(stage,navigation,thumbs);
+  draw();body.append(area);
+}
 function showMedia(body,post){
   if(!post.payload.body.media?.length)return;
+  if(mediaItems(post.payload.body).some(item=>item.kind!=='image')){
+    showMixedMediaGallery(body,post);
+    return;
+  }
   if(post.payload.body.media.length>1){
     showMultiImageGallery(body,post);
     return;
@@ -1003,7 +1090,7 @@ function expand(id,{focus=true}={}){
     if(value)body.append(element('div','listing-price','Listed price: '+value));
   }
   const structured=new Set(['tags','presentation','schedule','poll','positions','price','demo',
-    'demoVersion','demoVideo','media','primaryMediaIndex','revises']);
+    'demoVersion','demoVideo','media','mediaTypes','primaryMediaIndex','revises']);
   const other=element('dl','extra-attributes');
   let attributes=0;
   for(const [name,value] of Object.entries(field)){
@@ -1459,6 +1546,7 @@ function resetComposition(){
   $('composeSpace').readOnly=false;
   $('composeSpace').value=state.space;
   $('composePrimaryIndex').value='0';
+  $('composePrimaryIndex').dataset.userSelected='false';
   $('composeError').hidden=true;
   $('composePreviewError').hidden=true;
   $('submitPost').textContent='Preview post';
@@ -1486,7 +1574,9 @@ function openCorrection(item){
   $('composePollQuestion').value=body.fields?.poll?.question||'';
   $('composePollOptions').value=(body.fields?.poll?.options||[]).join('\n');
   $('composePositions').value=(body.fields?.positions||[]).join('\n');
-  $('composePrimaryIndex').value=String(body.fields?.primaryMediaIndex||0);
+  $('composePrimaryIndex').value=String(body.fields?.primaryMediaIndex||
+    choosePrimaryMediaIndex((body.fields?.mediaTypes||body.media?.map(()=> 'image/jpeg'))||[]));
+  $('composePrimaryIndex').dataset.userSelected='true';
   $('submitPost').textContent='Preview signed correction';
   updateComposeType();
   $('postDialog').showModal();
@@ -1531,10 +1621,7 @@ function checkComposeInputs(){
   const title=$('composeTitle').value.trim(),text=$('composeText').value.trim();
   const files=[...$('composeFiles').files];
   if(!title&&!text&&!files.length&&!state.editingMedia.length)throw Error('Provide a headline, text or image');
-  if(files.length>3)throw Error('Maximum three images per test post');
-  for(const file of files)
-    if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>256*1024)
-      throw Error('Example image uploader supports JPEG/PNG/WebP up to 256 KiB each.');
+  validateLocalUploads(files,{existingCount:state.editingMedia.length});
   const options=$('composePollOptions').value.split(/\n/).map(x=>x.trim()).filter(Boolean);
   if($('composePollQuestion').value.trim()&&options.length<2)
     throw Error('Polls need at least two options');
@@ -1564,27 +1651,60 @@ function openComposePreview(event){
     const files=input.files;
     if(files.length){
       const gallery=element('div','compose-preview-gallery');
-      const label=element('strong','','Primary image (chosen thumbnail)');
-      gallery.append(label);
+      gallery.append(element('strong','','Choose the main thumbnail · Other files appear in the attachment gallery'));
+      const selected=Number($('composePrimaryIndex').value);
       for(const [index,file] of files.entries()){
         const card=element('label','compose-preview-media');
         const radio=document.createElement('input');
-        radio.type='radio';radio.name='composePrimaryImage';
+        radio.type='radio';radio.name='composePrimaryMedia';
         radio.value=String(index);
-        radio.checked=index===Math.min(Math.max(0,Number($('composePrimaryIndex').value)||0),files.length-1);
-        radio.onchange=()=>$('composePrimaryIndex').value=radio.value;
-        const image=document.createElement('img');
+        radio.checked=index===selected;
+        radio.onchange=()=>{
+          $('composePrimaryIndex').value=radio.value;
+          $('composePrimaryIndex').dataset.userSelected='true';
+        };
         const url=URL.createObjectURL(file);composerPreviewObjectURLs.push(url);
-        image.src=url;image.alt='Local preview '+(index+1)+' '+file.name;
-        card.append(radio,image,element('span','',file.name));
+        let visual;
+        if(file.type.startsWith('image/')){
+          visual=document.createElement('img');
+          visual.src=url;visual.alt='Local image '+(index+1);
+        }else if(file.type.startsWith('video/')){
+          visual=document.createElement('video');
+          visual.src=url;visual.preload='metadata';visual.muted=true;visual.playsInline=true;
+          visual.setAttribute('aria-label','Local video preview '+(index+1));
+        }else{
+          visual=element('span','compose-preview-audio','♪ AUDIO');
+          const preview=document.createElement('audio');
+          preview.src=url;preview.preload='none';preview.controls=true;
+          card.append(preview);
+        }
+        card.append(radio,visual,element('span','',
+          file.name+' · '+categoryForType(file.type)));
         gallery.append(card);
       }
       region.append(gallery);
     }
-    if(state.editingMedia.length&&!files.length)
+    if(state.editingMedia.length&&!files.length){
       region.append(element('p','preview-post-meta',
         'Retaining '+state.editingMedia.length+' previously signed attachment(s). '+
-        'Selecting new image files replaces the attachment set in this correction; old bytes may still exist on independent peers.'));
+        'Selecting new files replaces the attachment set in this correction; previous bytes may still exist on independent peers.'));
+      const oldTypes=state.editingFields?.mediaTypes||
+        state.editingMedia.map(()=> 'image/jpeg');
+      const list=element('div','compose-preview-retained');
+      for(const [index,cid] of state.editingMedia.entries()){
+        const radio=document.createElement('input');
+        radio.type='radio';radio.name='composePrimaryMedia';radio.value=String(index);
+        radio.checked=index===Number($('composePrimaryIndex').value);
+        radio.onchange=()=>{
+          $('composePrimaryIndex').value=radio.value;
+          $('composePrimaryIndex').dataset.userSelected='true';
+        };
+        const row=element('label','',
+          categoryForType(oldTypes[index])+' · attachment '+(index+1)+' · '+cid.slice(7,22)+'…');
+        row.prepend(radio);list.append(row);
+      }
+      region.append(list);
+    }
     if($('composePollQuestion').value.trim())
       region.append(element('p','preview-post-meta',
         'Poll · '+$('composePollQuestion').value.trim()+
@@ -1618,7 +1738,7 @@ function addComposeAttributeRow(){
 }
 function customComposeFields(){
   const fields={};
-  const reserved=new Set(['tags','presentation','price','poll','schedule','positions','media','demo','demoVersion','demoVideo','revises','primaryMediaIndex']);
+  const reserved=new Set(['tags','presentation','price','poll','schedule','positions','media','mediaTypes','demo','demoVersion','demoVideo','revises','primaryMediaIndex']);
   for(const row of $('composeAttributeRows').children){
     const key=row.querySelector('.attribute-key').value.trim().toLowerCase();
     const value=row.querySelector('.attribute-value').value.trim();
@@ -1787,6 +1907,11 @@ function bind(){
   $('spaceName').onkeydown=e=>{if(e.key==='Enter')$('goSpace').click();};
   $('postNew').onclick=()=>{resetComposition();modal('postDialog');};
   $('composePresentation').onchange=updateComposeType;
+  $('composeFiles').onchange=()=>{
+    const types=[...$('composeFiles').files].map(file=>file.type);
+    if(!$('composePrimaryIndex').dataset.userSelected)
+      $('composePrimaryIndex').value=String(Math.max(0,choosePrimaryMediaIndex(types)));
+  };
   $('addComposeAttribute').onclick=addComposeAttributeRow;
   $('closeComposer').onclick=()=>close('postDialog');$('cancelPost').onclick=()=>close('postDialog');
   $('joinNetwork').onclick=()=>modal('networkDialog');$('closeNetwork').onclick=()=>close('networkDialog');
@@ -1856,18 +1981,21 @@ function parseCSV(value){return [...new Set(value.split(/[,;\n]/).map(x=>x.trim(
 async function uploadMedia(files){
   if(!files.length)return [];
   if(!state.mediaBase)throw Error('No media peer configured. Connect or choose a voluntary media provider first.');
-  if(files.length>3)throw Error('Maximum three images per test post');
+  validateLocalUploads(files);
   const uploaded=[];
   for(const file of files){
-    if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>256*1024)
-      throw Error('Test upload supports JPEG/PNG/WebP files up to 256 KiB each.');
     const response=await fetch(state.mediaBase.replace(/\/$/,'')+'/upload',
       {method:'POST',headers:{'content-type':file.type},body:file});
-    if(!response.ok)throw Error('Media peer refused upload ('+response.status+'). Try an independently operated peer.');
+    if(!response.ok){
+      const reason=await response.json().then(x=>x.error).catch(()=>null);
+      throw Error('Independent media peer refused '+file.name+' ('+response.status+
+        '): '+(reason||'check its upload settings and file-size limits'));
+    }
     const data=await response.json();
-    if(typeof data.cid!=='string'||!/^ipfs:\/\/[A-Za-z0-9]{20,120}$/.test(data.cid))
-      throw Error('Media peer returned invalid CID');
-    uploaded.push(data.cid);
+    if(typeof data.cid!=='string'||!/^ipfs:\/\/[A-Za-z0-9]{20,120}$/.test(data.cid)||
+      data.type!==file.type)
+      throw Error('Media peer returned invalid CID or incorrect MIME type');
+    uploaded.push({cid:data.cid,type:file.type});
   }
   return uploaded;
 }
@@ -1893,11 +2021,20 @@ async function compose(event){
     const positions=$('composePositions').value.split(/\n/).map(x=>x.trim()).filter(Boolean).slice(0,20);
     if(!title&&!text&&!files.length&&!state.editingMedia.length)
       throw Error('Provide a headline, text or image');
-    const media=files.length?await uploadMedia(files):[...state.editingMedia];
+    const descriptors=files.length?await uploadMedia(files):
+      state.editingMedia.map((cid,index)=>({
+        cid,type:state.editingFields?.mediaTypes?.[index]||'image/jpeg'
+      }));
+    const media=descriptors.map(item=>item.cid);
     const fields={...(state.editingFields||{}),tags,presentation:$('composePresentation').value};
-    if(media.length)fields.primaryMediaIndex=
-      Math.min(media.length-1,Math.max(0,Number($('composePrimaryIndex').value)||0));
-    else delete fields.primaryMediaIndex;
+    if(media.length){
+      fields.mediaTypes=descriptors.map(item=>item.type);
+      const preference=Number($('composePrimaryIndex').value);
+      fields.primaryMediaIndex=choosePrimaryMediaIndex(fields.mediaTypes,
+        Number.isInteger(preference)&&preference>=0&&preference<media.length?preference:undefined);
+    }else{
+      delete fields.primaryMediaIndex;delete fields.mediaTypes;
+    }
     Object.assign(fields,customComposeFields());
     if(root)fields.revises=root.id;
     else delete fields.revises;

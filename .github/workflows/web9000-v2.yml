@@ -26,6 +26,7 @@ jobs:
           node --check v2/core/governance.js
           node --check v2/core/reputation.js
           node --check v2/network/smoke.mjs
+          node --check v2/core/media.js
           node --check v2/core/media-policy.js
           node --check v2/test/media-policy.test.js
           node --check v2/network/browser-mesh.js
@@ -79,7 +80,7 @@ jobs:
         working-directory: v2/network
         timeout-minutes: 3
         run: npm run test:browser-ui
-      - name: Real Helia IPFS raw-block image upload, retrieve and refusals
+      - name: Real Helia IPFS raw images and chunked UnixFS audio/video with byte-range seeks
         working-directory: v2/network
         timeout-minutes: 3
         run: npm run test:media
