@@ -54,3 +54,13 @@ test('repeat reports by the same reviewer do not inflate moderation weight',asyn
   const p={...DEFAULT_POLICY,reviewerWeights:{[reviewer.author]:1},minLabelWeight:2};
   assert.equal(decide(post,[post,...labels],p).visible,true);
 });
+
+test('a claimed dictator view can hide even trusted outsiders, never revoke their posts',async()=>{
+ const siteOwner=await generateIdentity(),other=await generateIdentity(),post=await signEvent(other,{space:'their-site',body:{title:'outside',text:'allowed to publish'}});
+ const ordinary={...DEFAULT_POLICY,followedSpaces:['their-site'],trustedAuthors:[other.author]};
+ assert.equal(decide(post,[post],ordinary).visible,true);
+ const preferred={...ordinary,ownerPreference:{'their-site':siteOwner.author}};
+ assert.equal(decide(post,[post],preferred).visible,false);
+ assert.equal(decide(post,[post],{...preferred,ownerAllowedAuthors:{'their-site':[other.author]}}).visible,true);
+ assert.equal(await verifyEvent(post),true);
+});

@@ -39,6 +39,12 @@
     </aside>
     <main class="main">
       <div class="intro"><div><p class="eyebrow">THE OPEN CONTENT MESH <span class="version">PROTOCOL V2 / PREVIEW</span></p><h1>Information without permission.</h1><p class="intro-copy">One open publication layer. Infinite independent communities, viewpoints and ways to organize.</p></div><div class="intro-graphic" aria-hidden="true"><span class="mesh mesh-1"></span><span class="mesh mesh-2"></span><span class="mesh mesh-3"></span><span class="mesh mesh-4"></span><span class="mesh mesh-5"></span><span class="mesh mesh-6"></span></div></div>
+      <div id="siteSpaceBanner" class="site-banner" hidden>
+        <span class="site-icon">◈</span><span><strong>Website-suggested space: <span id="siteSpaceName"></span></strong>
+        <small>This is a preferred view, not a privileged database namespace. Other authors may publish here regardless.</small>
+        </span>
+        <label id="siteOwnerArea" hidden><input id="honorSiteOwner" type="checkbox" checked> Prefer site owner's posts <small id="siteOwnerKey"></small></label>
+      </div>
       <section class="feed-controls" aria-label="Feed controls"><div class="controls-row"><div class="segmented" id="layoutOptions"><button class="selected" data-layout="grid">▦ Grid</button><button data-layout="list">☷ List</button></div><div class="sort-wrap"><span class="small-label">SORT</span><select id="sortBy"><option value="new">Newest first</option><option value="old">Oldest first</option></select></div><div class="search"><span>⌕</span><input id="searchInput" type="search" placeholder="Search your local index..." autocomplete="off"></div></div><div class="filter-row"><div id="typeFilters" class="filters"></div><div class="results-summary"><span id="resultCount">0 records</span> <span class="sep">·</span> <button id="hiddenToggle">Show filtered</button></div></div></section>
       <div class="network-strip"><span class="peer-dot"></span><strong>NETWORK</strong><span id="networkSummary">No peers configured</span><button id="managePeers" class="ghost small" type="button">Manage peers</button></div>
       <div id="peerSettings" class="peer-settings" hidden>

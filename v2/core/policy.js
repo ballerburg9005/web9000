@@ -40,7 +40,7 @@ export function decide(event, events, policy=DEFAULT_POLICY, viewer=null) {
   const hit=tags.find(t=>(policy.hideTags||[]).includes(t) && scoreFor(t)>=(policy.minLabelWeight||1));
   if(hit) return {visible:false,quarantined:(policy.quarantineTags||[]).includes(hit),reason:'label: '+hit,labels};
   const preferred=policy.ownerPreference?.[p.space];
-  if(preferred && p.author!==preferred && !policy.trustedAuthors.includes(p.author) && p.author!==viewer)
+  if(preferred && p.author!==preferred && p.author!==viewer && !(policy.ownerAllowedAuthors?.[p.space]||[]).includes(p.author))
     return {visible:false,reason:'optional space-owner preference',labels};
   const known=p.author===viewer || policy.trustedAuthors.includes(p.author);
   if(!known && !policy.showUnknown) return {visible:false,reason:'unknown author',labels};

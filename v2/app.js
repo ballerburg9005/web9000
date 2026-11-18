@@ -6,12 +6,13 @@ import {exportIdentityBackup,importIdentityBackup} from './core/identity-backup.
 import {openLocal,getItem,setItem} from './core/persist.js';
 import {BrowserPeerMesh,parsePeerUrls} from './network/browser-mesh.js';
 import {mirrorDecision} from './network/mirror-policy.js';
+import {readSiteContext} from './network/site-context.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const spaces={commons:'Commons',art:'Creative works',organize:'Organize',exchange:'Exchange',projects:'Projects'};
 const types=['All','Discussion','Art','Event','Offer','Project','Job'];
-const state={replica:new Replica(),identity:null,db:null,space:'all',type:'All',layout:'grid',sort:'new',search:'',showFiltered:false,showUnknown:true,subscribed:[],policy:null,selected:null,fixtureKeys:{},localIds:[],groupIds:{},compiledGroups:{},groupViews:[],userTrusted:[],followedSpaces:Object.keys(spaces),mesh:null,peerUrls:[],replicationScopes:Object.keys(spaces),pending:[],lastConnected:0,autoMirror:false};
+const state={replica:new Replica(),identity:null,db:null,space:'all',type:'All',layout:'grid',sort:'new',search:'',showFiltered:false,showUnknown:true,subscribed:[],policy:null,selected:null,fixtureKeys:{},localIds:[],groupIds:{},compiledGroups:{},groupViews:[],userTrusted:[],followedSpaces:Object.keys(spaces),mesh:null,peerUrls:[],replicationScopes:Object.keys(spaces),pending:[],lastConnected:0,autoMirror:false,siteContext:null,honorSiteOwner:true};
 // Moderation authority derives from signed group checkpoints, not hard-coded group objects.
 const previewContent=[
  {space:'art',type:'Art',title:'Some interesting visual experiments',text:'A small collection of sketches and procedural compositions. What should be explored next?',image:'../thumb/thumb11.jpg',fields:{media:'Image gallery',count:4},author:'maker'},
@@ -34,7 +35,9 @@ function policy() {
   return {...DEFAULT_POLICY,followedSpaces:state.followedSpaces,showUnknown:state.showUnknown,
     trustedAuthors:[...new Set([state.identity.author,...Object.values(state.fixtureKeys).filter(x=>x.name!=='outsider').map(x=>x.author),...(state.userTrusted || [])])],
     groups:state.compiledGroups,subscriptions:state.subscribed,
-    reviewerWeights:{[state.identity.author]:1}
+    reviewerWeights:{[state.identity.author]:1},
+    ownerPreference:state.honorSiteOwner&&state.siteContext?.space&&state.siteContext?.preferredAuthor?
+      {[state.siteContext.space]:state.siteContext.preferredAuthor}:{}
   };
 }
 async function saveLocal() {
@@ -104,7 +107,12 @@ async function setupNetwork(){
     state.replicationScopes=await getItem(state.db,'replicate-scopes')||Object.keys(spaces);
     state.followedSpaces=await getItem(state.db,'followed-spaces')||Object.keys(spaces);
     state.autoMirror=await getItem(state.db,'auto-mirror')===true;
+    const savedScopes=await getItem(state.db,'replicate-scopes');
+    if(!savedScopes && state.siteContext?.space)
+      state.replicationScopes=[...new Set([...state.replicationScopes,state.siteContext.space])];
   }
+  if(!state.db && state.siteContext?.space)
+    state.replicationScopes=[...new Set([...state.replicationScopes,state.siteContext.space])];
   $('#autoMirror').checked=state.autoMirror;
   for(const name of state.followedSpaces)ensureSpace(name);
   $('#networkEndpoints').value=state.peerUrls.join('\n');
@@ -152,6 +160,7 @@ async function init() {
     state.identity=await getItem(state.db,'identity');
     if(!state.identity){state.identity=await generateIdentity({extractable:true});await setItem(state.db,'identity',state.identity);}
   } catch (e) { console.warn('IndexedDB unavailable',e);state.identity=await generateIdentity({extractable:true});newToast('Browser storage unavailable: session is temporary'); }
+  state.siteContext=readSiteContext(location.href);
   refreshIdentityUI();
   for(const name of ['maker','organizer','thinker','outsider','guildReviewer','safetyReviewer']){
     state.fixtureKeys[name]=await generateIdentity();
@@ -183,7 +192,7 @@ async function init() {
     if((await state.replica.ingest(event)).accepted) state.localIds.push(event.id);
   }
   await refreshGroups();
-  bindEvents();await setupNetwork();render();
+  bindEvents();await setupNetwork();applySiteContext();render();
 }
 async function refreshGroups() {
   const events=state.replica.list(), compiled={},views=[];
@@ -208,6 +217,20 @@ function renderGroupChoices() {
     const mark=textEl('span','federation-mark mark-blue','C'),copy=textEl('span','','');
     copy.append(textEl('strong','',info.name),textEl('small','',info.ambiguous?'Conflicting histories: founder rules':'Signed group · '+info.id.slice(0,16)+'…'));
     label.append(input,mark,copy);target.append(label);
+  }
+}
+function applySiteContext(){
+  const ctx=state.siteContext;
+  if(ctx?.embedded)document.body.classList.add('embedded');
+  if(!ctx?.space)return;
+  followSpace(ctx.space);
+  state.space=ctx.space;
+  $('#siteSpaceName').textContent=ctx.space;
+  $('#siteSpaceBanner').hidden=false;
+  if(ctx.preferredAuthor){
+    $('#siteOwnerArea').hidden=false;
+    $('#siteOwnerKey').textContent=shortAuthor(ctx.preferredAuthor);
+    $('#honorSiteOwner').checked=state.honorSiteOwner;
   }
 }
 function refreshIdentityUI(){
@@ -293,6 +316,7 @@ function openDetail(event) {
   $('#detail').showModal();
 }
 function bindEvents(){
+  $('#honorSiteOwner').onchange=e=>{state.honorSiteOwner=e.target.checked;render();};
   $('#managePeers').onclick=()=>{$('#peerSettings').hidden=!$('#peerSettings').hidden;};
   $('#autoMirror').onchange=async e=>{
     state.autoMirror=e.target.checked;

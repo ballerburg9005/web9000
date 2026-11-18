@@ -88,3 +88,18 @@ For deployment on HTTPS websites, use `wss://` (TLS reverse proxy in front of th
 ## Multiple unrelated indexes and selective mirroring
 
 WEB9000 does **not** require all peers to agree on one OrbitDB address. The browser may connect to several unrelated indexes. When **Mirror trusted records between peers** is explicitly enabled, the local view can relay verified signed posts it trusts to each other chosen peer, subject to independently selected replication scopes and moderation. This is opt-in and off by default. The **Mirror approved records now** button sends currently retained and locally approved posts to configured peers without downloading media. A peer can still decline a record; no index can invalidate a signed record held elsewhere. This is a simple browser-carried bridge between different indexes, not automatic global discovery. It does not claim universal reachability or compliance screening of unseen data.
+
+## Embed the board on an independent website
+
+Copy the static `v2/` folder to any ordinary HTTP(S) host. The code host is not the content database. Set `?space=` to suggest a namespace, `&owner=ed25519:...` to optionally prefer one signing identity's posts, and `&embed=1` for compact embedding. Example (substitute your **own** static host):
+
+```html
+<iframe
+  src="https://your-site.example/v2/?space=your-local-board&embed=1"
+  title="WEB9000 community board"
+  style="width:100%;height:800px;border:0"
+  sandbox="allow-scripts allow-same-origin allow-downloads">
+</iframe>
+```
+
+If an `owner=` key is supplied, the embedded board exposes a toggle to **ignore the site's owner-preferred view**. The preference never grants exclusive writes, removes outside authors' signed records or changes another client's policy. The site's host cannot silently pick WebSocket peers by query string; visitors configure their own peer endpoints. In embedded cross-origin iframes, browser storage partitioning and third-party restrictions may affect persistence—self-hosting on the same origin is preferred. No privacy anonymity is promised by this transport.
