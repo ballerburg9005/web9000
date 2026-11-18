@@ -277,6 +277,9 @@ try{
  assert.ok(overflow<=2,'classic mobile layout has no horizontal overflow '+overflow);
  await b.evaluate(()=>scrollTo(0,0));
  await b.screenshot({path:path.join(artifacts,'classic-mobile.png'),fullPage:true});
+ // Deliberately close the stable expanded discussion before displaying new
+ // feed items. Network updates must never detach active comment editors.
+ await b.evaluate(()=>document.querySelector('.detail-close')?.click());
  // One independent record may refer to a whole image gallery. Navigation
  // changes only the selected attachment and never requires raw-CID input.
  const galleryRecord=await signEvent(demoIdentity,{
@@ -313,6 +316,120 @@ try{
     'new voluntary group appears in its creator UI');
  await b.evaluate(()=>document.getElementById('closeClans').click());
  console.log('CLASSIC checkpoint 15: group creation publishes an independent signed charter');
+ // Reply threading is a *tree*, not a flat list with an indiscriminate
+ // vertical line across text. Verify a second-level signed reply and that
+ // collapse changes only that subtree, not the parent or other comments.
+ const firstPost=bridge.replica.list().find(e=>e.payload.kind==='post'&&
+   e.payload.body.title==='My first actual cats post');
+ const firstReply=bridge.replica.list().find(e=>e.payload.kind==='reply'&&
+   e.payload.body.text==='A separate, real signed comment');
+ assert.ok(firstPost&&firstReply,'original signed post and comment required');
+ await b.evaluate(id=>document.querySelector('.post[data-id="'+id+'"]').click(),firstPost.id);
+ await b.evaluate(id=>{
+   document.querySelector('[data-comment-id="'+id+'"] > .comment-actions .comment-reply').click();
+ },firstReply.id);
+ const nestedSelector='[data-comment-id="'+firstReply.id+'"] > .comment-form textarea';
+ await b.type(nestedSelector,'Nested signed reply with visible threaded indentation',{delay:3});
+ await b.evaluate(id=>{
+   document.querySelector('[data-comment-id="'+id+'"] > .comment-form button').click();
+ },firstReply.id);
+ await eventually(()=>bridge.replica.list().some(e=>e.payload.kind==='reply'&&
+   e.payload.body.parent===firstReply.id&&
+   e.payload.body.text==='Nested signed reply with visible threaded indentation'),
+   'independent peer persisted signed nested reply');
+ const nestedReply=bridge.replica.list().find(e=>e.payload.kind==='reply'&&
+   e.payload.body.parent===firstReply.id&&
+   e.payload.body.text.startsWith('Nested signed reply'));
+ await eventually(()=>b.evaluate((rootId,nestedId)=>
+   !!document.querySelector('[data-comment-id="'+rootId+'"] .comment-children > [data-comment-id="'+nestedId+'"]'),
+   firstReply.id,nestedReply.id),'nested reply appears underneath its signed parent');
+ const commentGeometry=await b.evaluate((rootId,nestedId)=>{
+   const root=document.querySelector('[data-comment-id="'+rootId+'"]');
+   const child=document.querySelector('[data-comment-id="'+nestedId+'"]');
+   const rootRect=root.getBoundingClientRect(),textRect=root.querySelector(':scope > .comment-text').getBoundingClientRect();
+   const childRect=child.getBoundingClientRect();
+   return {rail:rootRect.left,body:textRect.left,child:childRect.left};
+ },firstReply.id,nestedReply.id);
+ assert.ok(commentGeometry.body>commentGeometry.rail+8,
+   'root comment text must never overlap its own vertical rail: '+JSON.stringify(commentGeometry));
+ assert.ok(commentGeometry.child>commentGeometry.body,
+   'nested child rail must be indented past parent text: '+JSON.stringify(commentGeometry));
+ await b.evaluate(id=>document.querySelector('[data-comment-id="'+id+'"] .comment-collapse').click(),firstReply.id);
+ assert.equal(await b.evaluate(id=>document.querySelector('[data-comment-id="'+id+'"] .comment-children').hidden,firstReply.id),true);
+ await b.evaluate(id=>document.querySelector('[data-comment-id="'+id+'"] .comment-collapse').click(),firstReply.id);
+ assert.equal(await b.evaluate(id=>document.querySelector('[data-comment-id="'+id+'"] .comment-children').hidden,firstReply.id),false);
+ console.log('CLASSIC checkpoint 16: signed nested thread, aligned comment rails and collapse');
+
+ // A viewer's self-signed spam report can hide a post from that viewer only.
+ // A second independent viewer still sees the signed original. The first
+ // viewer can inspect and locally ignore the allegation from Trash.
+ await b.evaluate(()=>document.querySelector('.report-control > summary').click());
+ await b.type('.report-form textarea','Automated commercial advertisements copied repeatedly.');
+ await b.evaluate(()=>document.querySelector('.report-submit').click());
+ await eventually(()=>bridge.replica.list().some(e=>e.payload.kind==='label'&&
+   e.payload.body.target===firstPost.id&&e.payload.body.tag==='spam'),'signed spam allegation delivered');
+ const reportLabel=bridge.replica.list().find(e=>e.payload.kind==='label'&&
+   e.payload.body.target===firstPost.id&&e.payload.body.tag==='spam');
+ await eventually(()=>b.evaluate(id=>!document.querySelector('.post[data-id="'+id+'"]'),firstPost.id),
+   'reporting viewer hides own flagged post under own moderation policy');
+ assert.equal(await a.evaluate(id=>!!document.querySelector('.post[data-id="'+id+'"]'),firstPost.id),true,
+   'report cannot globally delete the original from another viewer');
+ await b.evaluate(()=>document.getElementById('viewAudited').click());
+ await eventually(()=>b.evaluate(id=>!!document.querySelector('.post[data-id="'+id+'"]'),firstPost.id),
+   'signed post is still inspectable in local Trash');
+ await b.evaluate(id=>document.querySelector('.post[data-id="'+id+'"]').click(),firstPost.id);
+ assert.ok(await b.$$eval('.audit-entry',nodes=>nodes.length)>=1);
+ await b.evaluate(id=>{
+   const row=document.querySelector('.audit-entry');
+   row.querySelector('.audit-actions button').click();
+ },reportLabel.id);
+ await eventually(()=>b.evaluate(id=>!document.querySelector('.post[data-id="'+id+'"]'),firstPost.id),
+   'locally ignored report no longer qualifies as hidden content in Trash');
+ await b.evaluate(()=>document.querySelector('[data-sort="new"]').click());
+ await eventually(()=>b.evaluate(id=>!!document.querySelector('.post[data-id="'+id+'"]'),firstPost.id),
+   'locally ignored allegation restores original post in normal view');
+ assert.equal(bridge.replica.list().some(e=>e.id===reportLabel.id),true,
+   'ignored signed moderation evidence must remain independently stored');
+ console.log('CLASSIC checkpoint 17: signed moderation allegation, cross-viewer isolation, audit override');
+
+ // The offer form publishes interoperable named fields with ordinary inputs.
+ // They are searchable individually without asking the publisher for JSON.
+ await b.evaluate(()=>{
+   document.getElementById('postNew').click();
+   const select=document.getElementById('composePresentation');
+   select.value='offer';select.dispatchEvent(new Event('change',{bubbles:true}));
+   document.getElementById('composeTitle').value='Actual interoperable field test';
+   document.getElementById('composeText').value='A real signed offer with custom attributes';
+   document.getElementById('composePrice').value='$25 / trade';
+   document.getElementById('composeAttributes').open=true;
+   document.getElementById('addComposeAttribute').click();
+   document.querySelector('.attribute-key').value='license';
+   document.querySelector('.attribute-value').value='CC0';
+   document.getElementById('postForm').requestSubmit();
+ });
+ await eventually(()=>bridge.replica.list().some(e=>e.payload.kind==='post'&&
+   e.payload.body.title==='Actual interoperable field test'&&
+   e.payload.body.fields.price==='$25 / trade'&&
+   e.payload.body.fields.license==='CC0'),'signed offer and custom attribute delivered');
+ await b.evaluate(()=>{
+   document.getElementById('searchCustomField').value='license';
+   document.getElementById('searchCustomField').dispatchEvent(new Event('input',{bubbles:true}));
+   document.getElementById('searchPosts').value='CC0';
+   document.getElementById('searchPosts').dispatchEvent(new Event('input',{bubbles:true}));
+ });
+ await eventually(()=>b.evaluate(()=>{
+   const titles=[...document.querySelectorAll('.post-headline')].map(x=>x.textContent);
+   return titles.length===1&&titles[0]==='Actual interoperable field test';
+ }),'specific-attribute search finds signed offer and not unrelated posts');
+ await b.evaluate(()=>document.querySelector('.post').click());
+ const attributes=await b.evaluate(()=>({
+   price:document.querySelector('.listing-price')?.textContent,
+   license:document.querySelector('.extra-attributes')?.textContent
+ }));
+ assert.match(attributes.price,/\$25/,'structured price displays as a human-readable field');
+ assert.match(attributes.license,/licenseCC0/i,'custom attribute displays in expanded post, not only in search');
+ console.log('CLASSIC checkpoint 18: structured marketplace form and arbitrary attribute search');
+
  console.log('PASS classic seven-column board navigation, post composition, schedule, poll, comments, reactions and two-origin signed replication');
 }finally{
  try{await browser?.close();}catch{}

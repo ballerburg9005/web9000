@@ -245,3 +245,82 @@ dialog::backdrop{background:#000b}
 .media-gallery .gallery-thumb.active{background:#deae68;color:#20161b}
 .media-gallery .gallery-placeholder{display:flex;flex-direction:column;gap:11px;align-items:center;justify-content:center;min-height:240px;width:100%;color:#aaa;font-size:11px}
 .media-gallery .gallery-load{border:0;background:#6c4c6b;color:#fff;padding:6px 11px}
+
+/* Genuine comment trees: the vertical rule is the comment's own border,
+   never an absolutely positioned rail that can cross through the text. */
+.comments-section{width:min(100%,800px);max-width:none}
+.comment{position:relative;border:0;border-left:2px solid #82658a;border-radius:0;
+ margin:5px 0 9px 0;padding:2px 0 4px 14px;min-height:0;background:transparent}
+.comment::before{content:none}
+.comment .comment-head{font-size:10px;color:#a9a1b0}
+.comment .comment-text{line-height:1.55;margin:3px 0 5px;overflow-wrap:anywhere}
+.comment .comment-actions{display:flex;align-items:center;gap:12px;margin:2px 0 0}
+.comment .comment-actions button{background:none;border:0;padding:2px 0;color:#c6a8ce;font-size:10px}
+.comment .comment-actions .comment-collapse{color:#9cbdb3}
+.comment .comment-children{margin:7px 0 0 0;padding-left:13px}
+.comment .comment-children > .comment{border-left-color:#608e9e}
+.comment .comment-children > .comment .comment-children > .comment{border-left-color:#7e859e}
+.comment .comment-form{margin:8px 0 10px 0}
+.comments-section > .comment-form{margin:13px 0 4px 16px}
+.comment-form textarea{width:100%;max-width:100%;box-sizing:border-box;min-height:57px}
+.comment-children[hidden]{display:none}
+.comment-limit{font-size:10px;color:#aa9a9f}
+@media(max-width:620px){
+ .comment{padding-left:10px}
+ .comment .comment-children{padding-left:9px}
+ .comments-section > .comment-form{margin-left:12px}
+}
+
+
+/* Reporting is an auditable signed allegation, never a universal ban. */
+.reactions .report-control{position:relative;z-index:4;align-self:center;margin-left:4px}
+.reactions .report-control > summary{cursor:pointer;list-style:none;border:0;border-radius:2px;
+ background:#4d303c;color:#ffccc8;padding:7px 10px;font-size:11px}
+.reactions .report-control > summary::-webkit-details-marker{display:none}
+.reactions .report-control[open] > summary{background:#674151}
+.reactions .report-form{position:absolute;right:0;top:calc(100% + 5px);width:min(310px,calc(100vw - 42px));z-index:22;
+ display:flex;flex-direction:column;gap:8px;background:#29222c;color:#eee;padding:12px;
+ box-shadow:0 8px 32px #000b;border:1px solid #564553;border-radius:3px}
+.reactions .report-form select,.reactions .report-form textarea{width:100%;min-width:0;box-sizing:border-box;
+ background:#17161a;color:#eee;padding:7px;font-size:11px;border:1px solid #67576a}
+.reactions .report-form textarea{resize:vertical;min-height:68px}
+.reactions .report-form .fine{color:#b9aab7;line-height:1.4;font-size:10px;margin:0}
+.reactions .report-form .report-submit{background:#ab7281;color:#fff;align-self:flex-start;padding:7px 12px}
+.reactions .audit-action{color:#c6d3e0;background:#353e49}
+.audit-summary{padding:11px 13px;max-width:800px;margin:12px 0 0;border-left:2px solid #8d7b92}
+.audit-summary > p{color:#b7a7b7;line-height:1.5;font-size:11px}
+.audit-entry{border-top:1px solid #514451;padding:8px 2px 9px;margin-top:7px}
+.audit-entry.ignored{opacity:.66}
+.audit-byline{font-size:11px;color:#e4c7d8}
+.audit-status{font-size:10px;color:#b4adad}
+.audit-reason{font-size:11px;color:#ede4eb;margin:4px 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.audit-actions{display:flex;gap:7px;flex-wrap:wrap}
+.audit-actions button{border:0;background:transparent;color:#d6b5d3;padding:2px 0;font-size:10px}
+.audit-footer{display:block;color:#a6989e;font-size:10px;margin-top:8px}
+@media(max-width:620px){.reactions .report-form{right:-4px}}
+
+
+/* Optional interoperable per-post attributes are authored with ordinary
+   inputs; no public user needs to edit JSON or know an IPFS URI. */
+.compose-extra-fields{margin:2px 0 4px;border-top:1px solid #433942;padding-top:7px}
+.compose-extra-fields > summary{font-size:11px;color:#dfbcce;cursor:pointer}
+.compose-extra-fields > p{margin:6px 0}
+.compose-extra-fields #addComposeAttribute{border:0;background:#49404c;color:#ecdbe8;
+ padding:5px 9px;margin:5px 0;font-size:11px}
+.compose-attribute-row{display:grid;grid-template-columns:minmax(95px,1fr) minmax(120px,2fr) 23px;gap:7px;
+ align-items:center;padding:4px 0}
+.compose-attribute-row .remove-attribute{border:0;color:#e5c4ce;background:none;font-size:17px}
+@media(max-width:620px){
+ .compose-attribute-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 23px;gap:4px}
+}
+
+.feed-status .refresh-board{border:0;background:none;color:#f2c887;text-decoration:underline;
+ padding:2px 6px;font-size:11px;cursor:pointer}
+
+
+/* Human-readable arbitrary attributes, not a raw JSON/debug box. */
+.extra-attributes{display:grid;grid-template-columns:max-content minmax(0,1fr);column-gap:13px;row-gap:4px;
+ padding:7px 1px 9px;margin:6px 0;color:#dbd0d7;font-size:11px;max-width:720px;
+ border-top:1px solid #3d353c;border-bottom:1px solid #3d353c}
+.extra-attributes dt{color:#b4a2b3;text-transform:capitalize}
+.extra-attributes dd{margin:0;color:#e7d7ce;overflow-wrap:anywhere}

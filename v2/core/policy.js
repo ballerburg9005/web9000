@@ -3,7 +3,7 @@
 export const DEFAULT_POLICY = Object.freeze({
   followedSpaces:['commons'], trustedAuthors:[], blockedAuthors:[], reviewerWeights:{},
   groups:{}, subscriptions:[], hideTags:['spam','scam','malware','sexual-abuse-material'],
-  quarantineTags:['sexual-abuse-material','malware'], minLabelWeight:1,
+  quarantineTags:['sexual-abuse-material','malware'], minLabelWeight:1, ignoredLabelIds:[],
   showUnknown:true, ownerPreference:{}
 });
 export function resolveReviewers(policy) {
@@ -28,7 +28,9 @@ export function decide(event, events, policy=DEFAULT_POLICY, viewer=null) {
   if (!policy.followedSpaces.includes(p.space)) return {visible:false,reason:'space not followed'};
   if (policy.blockedAuthors.includes(p.author)) return {visible:false,reason:'blocked author'};
   const reviewers=resolveReviewers(policy);
-  const labels=events.filter(e=>e.payload.kind==='label' && e.payload.body.target===event.id && e.payload.author!==p.author)
+  const ignored=new Set(policy.ignoredLabelIds||[]);
+  const labels=events.filter(e=>e.payload.kind==='label' && e.payload.body.target===event.id &&
+    e.payload.author!==p.author && !ignored.has(e.id))
     .filter(e=>e.payload.author===viewer || (reviewers.get(e.payload.author)||0)>0);
   // Duplicate signed labels from one reviewer never multiply their vote.
   const scoreFor=tag=>{

@@ -15,7 +15,7 @@ const state={
   db:null,identity:null,replica:new Replica({maxEvents:25000}),saved:[],outbox:[],
   peers:[],mesh:null,suggested:[],mediaBase:null,
   space:'commons',sort:'new',view:'grid',search:'',showUnverified:false,
-  ownerHint:null,respectOwner:true,selected:null,trust:[],audit:false,showMedia:false,
+  ownerHint:null,respectOwner:true,selected:null,trust:[],ignoredLabels:[],audit:false,showMedia:false,
   demo:[],demoVotes:new Map(),demoPollChoices:new Map(),demoReplies:new Map(),demoFlags:new Map(),demoTagVotes:new Map(),
   mockKarma:null,mockMode:false,demoAuthor:null,demoAutoConnect:false,autoDemoPeerDisabled:false,
   followedSpaces:['demo','commons'],groupSubscriptions:[],groupViews:[],
@@ -74,7 +74,7 @@ function choosePolicy(){
   return {...DEFAULT_POLICY,followedSpaces:[state.space],trustedAuthors:known,
     showUnknown:state.showUnverified,ownerPreference:owner,
     reviewerWeights:{[state.identity.author]:1},groups,
-    subscriptions:state.groupSubscriptions};
+    subscriptions:state.groupSubscriptions,ignoredLabelIds:state.ignoredLabels};
 }
 const allEvents=()=>state.replica.list();
 const currentPosts=()=>{
@@ -209,16 +209,49 @@ function render(){
   if(prev && feed.some(x=>x.event.id===prev))expand(prev,{focus:false});
   else state.selected=null;
 }
+function updateOpenDiscussion(){
+  // Incoming network batches can contain hundreds of unrelated records. Do
+  // not replace an expanded post's entire DOM for every post/ACK: doing so
+  // discards form focus before the browser delivers the next keystroke.
+  const panel=document.querySelector('.post-container.expanded');
+  if(!panel||!state.selected)return false;
+  const item=getSelected();
+  if(!item)return false;
+  const old=panel.querySelector('.comments-section');
+  if(old){
+    // Only replace a discussion when that *particular signed thread* changed.
+    // New posts, votes and labels from unrelated spaces cannot detach a
+    // comment editor while the reader is about to start typing.
+    const scratch=element('div');
+    renderReplies(scratch,item.event);
+    const next=scratch.querySelector('.comments-section');
+    if(next?.dataset.threadsKey!==old.dataset.threadsKey){
+      if(document.activeElement?.closest?.('.comment-form')){
+        state.deferredDuringComment=true;
+      }else old.replaceWith(next);
+    }
+  }
+  const score=panel.querySelector('.reactions .score');
+  if(score)score.textContent=String(reactionScore(item.event.id));
+  const currentIds=[...document.querySelectorAll('#imageGrid > .post')].map(x=>x.dataset.id);
+  const nextIds=effectiveFeed().map(x=>x.event.id);
+  const status=$('feedStatus');
+  if(currentIds.length!==nextIds.length||currentIds.some((id,i)=>id!==nextIds[i])){
+    status.replaceChildren(element('span','','Feed updated while this discussion is open. '),
+      button('Refresh board',()=>{state.selected=null;render();},'refresh-board'));
+  }
+  updateNetworkStatus();
+  return true;
+}
 function scheduleRender(){
   if(state.renderPending)return;
   state.renderPending=true;
-  // Browser tabs may throttle animation frames. But rebuilding a focused
-  // comment form while the user types drops text and detaches its submit
-  // button. Keep network events in the verified replica and render on blur.
   queueMicrotask(()=>{
     state.renderPending=false;
+    if(updateOpenDiscussion())return;
     if(document.activeElement?.closest?.('.comment-form')){
-      state.deferredDuringComment=true;updateNetworkStatus();return;
+      state.deferredDuringComment=true;
+      updateNetworkStatus();return;
     }
     render();
   });
@@ -232,6 +265,7 @@ async function store(){
     setItem(state.db,'peer-urls',state.peers),
     setItem(state.db,'classic-space',state.space),
     setItem(state.db,'classic-trust',state.trust),
+    setItem(state.db,'classic-ignored-labels',state.ignoredLabels),
     setItem(state.db,'classic-show-unknown',state.showUnverified),
     setItem(state.db,'classic-view',state.view),
     setItem(state.db,'classic-show-media',state.showMedia),
@@ -304,69 +338,149 @@ function formatDate(t){
   return Number.isNaN(time.getTime())?'Unknown date':time.toLocaleString();
 }
 function renderReplies(body,post){
-  if(post.id.startsWith('demo:')){
-    const section=element('section','comments-section');
-    const comments=state.demoReplies.get(post.id)||[];
-    section.append(element('h3','','Comments ('+comments.length+')'));
-    for(const item of comments){
-      const box=element('div','comment');
-      box.append(element('div','comment-head','You · local preview'));
-      box.append(element('div','comment-text',item));
-      section.append(box);
-    }
-    const form=element('div','comment-form');
-    const ta=document.createElement('textarea');
-    ta.placeholder='Write a preview comment...';
-    form.append(ta,button('Post preview comment',()=>{
-      if(!ta.value.trim())return;
-      const old=state.demoReplies.get(post.id)||[];
-      if(old.length>=25)return toast('Preview comment limit reached');
-      state.demoReplies.set(post.id,[...old,ta.value.trim().slice(0,1000)]);
-      expand(post.id,{focus:false});
-      toast('Comment shown locally. Demo preview only — not signed or broadcast.');
-    }));
-    section.append(form);body.append(section);return;
-  }
-  const replies=allEvents().filter(e=>e.payload.kind==='reply');
-  const byParent=new Map();
+  // A signed reply is anchored to its immediate parent, not just to the
+  // original post. Render actual nested subtrees with rails next to the text,
+  // so third-level replies remain visibly attached to the right discussion.
   const trustedAuthors=new Set(choosePolicy().trustedAuthors);
-  for(const e of replies){
-    if(!state.showUnverified&&!trustedAuthors.has(e.payload.author))continue;
-    if(!byParent.has(e.payload.body.parent))byParent.set(e.payload.body.parent,[]);
-    byParent.get(e.payload.body.parent).push(e);
+  const byParent=new Map();
+  for(const event of allEvents()){
+    if(event.payload.kind!=='reply')continue;
+    if(!state.showUnverified&&!trustedAuthors.has(event.payload.author))continue;
+    const parent=event.payload.body.parent;
+    if(!byParent.has(parent))byParent.set(parent,[]);
+    byParent.get(parent).push(event);
   }
-  for(const values of byParent.values())values.sort((a,b)=>a.payload.time-b.payload.time);
+  for(const replies of byParent.values())
+    replies.sort((a,b)=>a.payload.time-b.payload.time||a.id.localeCompare(b.id));
   const section=element('section','comments-section');
-  section.append(element('h3','','Comments ('+(byParent.get(post.id)?.length||0)+' direct)'));
-  let count=0;const visited=new Set();
-  const walk=(parent,depth)=>{
+  const heading=element('h3','','Discussion');
+  section.append(heading);
+  const visited=new Set();
+  let rendered=0;
+  function walk(parent,container,depth){
+    if(depth>=10||rendered>=300)return;
     for(const reply of byParent.get(parent)||[]){
-      if(visited.has(reply.id)||depth>7||++count>300)continue;
-      visited.add(reply.id);
-      const box=element('div','comment'+(depth?' reply':''));
+      if(visited.has(reply.id)||rendered>=300)continue;
+      visited.add(reply.id);rendered++;
+      const comment=element('article','comment');
+      comment.dataset.commentId=reply.id;
+      comment.dataset.parentId=parent;
       const head=element('div','comment-head');
-      head.append(element('b','',who(reply.payload.author)),document.createTextNode(' · '+formatDate(reply.payload.time)));
-      box.append(head,element('div','comment-text',reply.payload.body.text));
+      head.append(element('b','',who(reply.payload.author)),
+        document.createTextNode(' · '+formatDate(reply.payload.time)));
+      comment.append(head,element('div','comment-text',reply.payload.body.text));
       const actions=element('div','comment-actions');
-      const replier=button('Reply',()=>{replier.remove();addCommentForm(box,post,reply.id).querySelector('textarea').focus();});
-      actions.append(replier);box.append(actions);section.append(box);walk(reply.id,depth+1);
+      const replyButton=button('↳ Reply',()=>{
+        const existing=comment.querySelector(':scope > .comment-form');
+        if(existing){existing.remove();replyButton.setAttribute('aria-expanded','false');return;}
+        const form=addCommentForm(comment,post,reply.id);
+        if(children.isConnected)comment.insertBefore(form,children);
+        // Otherwise addCommentForm already appended it after the action row.
+        replyButton.setAttribute('aria-expanded','true');
+        form.querySelector('textarea')?.focus();
+      },'comment-reply');
+      replyButton.setAttribute('aria-expanded','false');
+      actions.append(replyButton);
+      const children=element('div','comment-children');
+      comment.append(actions,children);
+      container.append(comment);
+      walk(reply.id,children,depth+1);
+      const childCount=children.querySelectorAll(':scope > .comment').length;
+      if(childCount){
+        const total=children.querySelectorAll('.comment').length;
+        const collapse=button('− '+total+' '+(total===1?'reply':'replies'),()=>{
+          children.hidden=!children.hidden;
+          collapse.textContent=(children.hidden?'+ Show ':'− ')+total+' '+(total===1?'reply':'replies');
+          collapse.setAttribute('aria-expanded',String(!children.hidden));
+        },'comment-collapse');
+        collapse.setAttribute('aria-expanded','true');
+        actions.append(collapse);
+      }else children.remove();
     }
-  };
-  walk(post.id,0);addCommentForm(section,post);body.append(section);
+  }
+  walk(post.id,section,0);
+  heading.textContent='Comments ('+rendered+(rendered>=300?'+':'')+')';
+  section.dataset.threadsKey=[...visited].sort().join('|');
+  if(rendered>=300)section.append(element('p','comment-limit','Showing first 300 visible comments; records remain available in the signed index.'));
+  addCommentForm(section,post);
+  body.append(section);
+}
+function renderReportControl(post){
+  const report=element('details','report-control');
+  const toggle=element('summary','','⚑ Report');
+  toggle.title='Publish an independently signed allegation, not a global ban';
+  const form=element('div','report-form');
+  const select=document.createElement('select');
+  select.setAttribute('aria-label','Report category');
+  for(const [tag,label] of [
+    ['spam','Mass-produced commercial spam'],
+    ['scam','Fraud / scam'],
+    ['malware','Malicious executable or link'],
+    ['suspected-illegal-media','Potentially prohibited media (metadata only)'],
+    ['other','Other / request review']
+  ]){
+    const option=document.createElement('option');
+    option.value=tag;option.textContent=label;select.append(option);
+  }
+  const reason=document.createElement('textarea');
+  reason.placeholder='Describe what you observed, with evidence. Avoid personal information.';
+  reason.maxLength=500;reason.rows=2;
+  const explanation=element('p','fine',
+    'A report is a signed allegation, not a finding or deletion. Your own local rules may hide spam/scam/malware; others decide independently.');
+  const send=button('Sign report',async()=>{
+    const detail=reason.value.trim();
+    if(detail.length<4)return toast('Please describe the report (at least 4 characters).');
+    send.disabled=true;
+    try{
+      const record=await publish('label',{
+        target:post.id,tag:select.value,reason:detail
+      },{space:post.payload.space});
+      report.open=false;
+      toast('Signed allegation '+record.id.slice(0,18)+'… published. See Audit or Trash to inspect it.');
+      render();
+    }catch(error){toast('Report was not published: '+error.message);}
+    finally{send.disabled=false;}
+  },'report-submit');
+  form.append(select,reason,explanation,send);
+  report.append(toggle,form);
+  return report;
 }
 function markAudit(body,item){
   const post=item.event;
-  const labels=allEvents().filter(e=>e.payload.kind==='label'&&(e.payload.body.target===post.id));
+  const labels=allEvents().filter(e=>e.payload.kind==='label'&&e.payload.body.target===post.id)
+    .sort((a,b)=>a.payload.time-b.payload.time);
   if(!state.audit&&!labels.length)return;
-  const section=element('div','audit-summary');
-  section.append(element('b','',item.decision.visible?'Audit: this post remains visible under your rules':'Audit: this post is hidden by your currently selected rules'));
-  section.append(element('p','',item.decision.reason+' · Signed original record remains unchanged and may be mirrored elsewhere.'));
-  if(!labels.length)section.append(element('div','','No signed moderation labels for this record.'));
+  const section=element('section','audit-summary');
+  section.append(element('b','',
+    item.decision.visible?'Audit · visible under your current rules':'Audit · filtered by your currently selected rules'));
+  section.append(element('p','',
+    item.decision.reason+' · The original signed publication remains intact and may still be mirrored by willing independent peers.'));
+  const applied=new Set((item.decision.labels||[]).map(e=>e.id));
+  if(!labels.length)section.append(element('p','','No signed reports or steward labels exist for this record.'));
   for(const label of labels){
-    const el=element('div','audit-label',who(label.payload.author)+' applied '+label.payload.body.tag+' — '+label.payload.body.reason);
-    section.append(el);
+    const ignored=state.ignoredLabels.includes(label.id);
+    const row=element('div','audit-entry'+(ignored?' ignored':''));
+    const byline=element('div','audit-byline',
+      who(label.payload.author)+' · '+formatDate(label.payload.time)+' · '+label.payload.body.tag);
+    const status=element('small','audit-status',
+      ignored?'Ignored by your local view':applied.has(label.id)?'Considered by your current policy':'Not authoritative in your current view');
+    row.append(byline,status,element('p','audit-reason',label.payload.body.reason));
+    const controls=element('div','audit-actions');
+    controls.append(button(ignored?'Restore this label':'Ignore this label locally',async()=>{
+      if(state.ignoredLabels.includes(label.id))
+        state.ignoredLabels=state.ignoredLabels.filter(id=>id!==label.id);
+      else if(state.ignoredLabels.length<2000)state.ignoredLabels.push(label.id);
+      else return toast('Too many local ignored labels');
+      await store();
+      render();
+      toast('Your local interpretation changed. No signed records or other users were affected.');
+    }));
+    controls.append(button('Copy signed label ID',()=>navigator.clipboard?.writeText(label.id).then(()=>toast('Label ID copied'))));
+    row.append(controls);
+    section.append(row);
   }
-  section.append(element('small','','Rule decisions are local, and any steward’s action is a signed claim, not universal deletion.'));
+  section.append(element('small','audit-footer',
+    'A moderator or site steward cannot remove this post from anyone else’s index. Labels are visible evidence, not a universal verdict.'));
   body.append(section);
 }
 function showMultiImageGallery(body,post){
@@ -496,7 +610,27 @@ function expand(id,{focus=true}={}){
       if(value)date.append(element('p','',label+': '+(label==='Place'?value:formatDate(value))));
     }body.append(date);
   }
-  if(field.price)body.append(element('div','listing-price','Listed price: '+field.price));
+  if(field.price){
+    const value=typeof field.price==='object'&&field.price!==null?
+      [field.price.amount,field.price.currency].filter(x=>x!==undefined&&x!==null).join(' '):
+      String(field.price);
+    if(value)body.append(element('div','listing-price','Listed price: '+value));
+  }
+  const structured=new Set(['tags','presentation','schedule','poll','positions','price','demo',
+    'demoVersion','demoVideo','media']);
+  const other=element('dl','extra-attributes');
+  let attributes=0;
+  for(const [name,value] of Object.entries(field)){
+    if(structured.has(name)||attributes>=16||name.startsWith('_'))continue;
+    const display=(typeof value==='string'||typeof value==='number'||typeof value==='boolean')?
+      String(value):Array.isArray(value)&&value.length<=12&&value.every(x=>typeof x==='string'||
+      typeof x==='number')?value.join(', '):null;
+    if(display===null)continue;
+    other.append(element('dt','',name.replace(/[-_]/g,' ')),
+      element('dd','',display.slice(0,500)));
+    attributes++;
+  }
+  if(attributes)body.append(other);
   if(field.positions?.length){
     const block=element('div','positions');block.append(element('strong','','Open positions'));
     for(const position of field.positions)block.append(element('p','',position));
@@ -564,12 +698,10 @@ function expand(id,{focus=true}={}){
     votes.append(element('span','score',String(reactionScore(id))));
     for(const [label,v] of [['++',2],['+',1],['−',-1],['−−',-2]])
       votes.append(button(label,()=>react(id,v),v===2?'vote-max':v===1?'vote-up':v===-1?'vote-down':'vote-min'));
-    votes.append(button('Flag spam',async()=>{
-      const reason=window.prompt('Why is this post mass-produced commercial spam?');
-      if(!reason)return;
-      try{await publish('label',{target:id,tag:'spam',reason:reason.slice(0,500)});expand(id,{focus:false});}
-      catch(error){toast(error.message);}
-    },'flag-action'));
+    votes.append(renderReportControl(current.event));
+    votes.append(button(state.audit?'− Audit':'⚖ Audit',()=>{
+      state.audit=!state.audit;expand(id,{focus:false});
+    },'audit-action'));
     if(state.mockMode)votes.append(button('Test karma…',()=>openMockKarma(p.author)));
     votes.append(button('Trust author',async()=>{
       if(!state.trust.includes(p.author))state.trust.push(p.author);
@@ -793,6 +925,41 @@ function renderGroupList(){
     section.append(controls);box.append(section);
   }
 }
+function updateComposeType(){
+  $('composePriceWrap').hidden=$('composePresentation').value!=='offer';
+}
+function addComposeAttributeRow(){
+  const target=$('composeAttributeRows');
+  if(target.children.length>=12)return toast('Maximum 12 additional searchable fields');
+  const row=element('div','compose-attribute-row');
+  const name=document.createElement('input');
+  name.placeholder='Attribute name (e.g. license)';
+  name.maxLength=64;name.setAttribute('aria-label','Attribute name');
+  name.className='attribute-key';
+  name.pattern='[A-Za-z][A-Za-z0-9_-]{0,63}';
+  const value=document.createElement('input');
+  value.placeholder='Value (e.g. CC0)';
+  value.maxLength=300;value.setAttribute('aria-label','Attribute value');
+  value.className='attribute-value';
+  row.append(name,value,button('×',()=>row.remove(),'remove-attribute'));
+  target.append(row);
+  name.focus();
+}
+function customComposeFields(){
+  const fields={};
+  const reserved=new Set(['tags','presentation','price','poll','schedule','positions','media','demo','demoVersion','demoVideo']);
+  for(const row of $('composeAttributeRows').children){
+    const key=row.querySelector('.attribute-key').value.trim().toLowerCase();
+    const value=row.querySelector('.attribute-value').value.trim();
+    if(!key&&!value)continue;
+    if(!/^[a-z][a-z0-9_-]{0,63}$/.test(key))throw Error('Custom attribute name must start with a letter (letters, digits, _ or -).');
+    if(reserved.has(key))throw Error('That attribute name is already used by a structured field: '+key);
+    if(Object.hasOwn(fields,key))throw Error('Duplicate attribute: '+key);
+    if(!value)throw Error('Enter a value for attribute '+key);
+    fields[key]=value;
+  }
+  return fields;
+}
 function bind(){
   for(const btn of document.querySelectorAll('[data-sort]'))
     btn.onclick=()=>chooseSort(btn.dataset.sort);
@@ -866,7 +1033,9 @@ function bind(){
     selectSpace(name);
   };
   $('spaceName').onkeydown=e=>{if(e.key==='Enter')$('goSpace').click();};
-  $('postNew').onclick=()=>{$('composeSpace').value=state.space;modal('postDialog');};
+  $('postNew').onclick=()=>{$('composeSpace').value=state.space;updateComposeType();modal('postDialog');};
+  $('composePresentation').onchange=updateComposeType;
+  $('addComposeAttribute').onclick=addComposeAttributeRow;
   $('closeComposer').onclick=()=>close('postDialog');$('cancelPost').onclick=()=>close('postDialog');
   $('joinNetwork').onclick=()=>modal('networkDialog');$('closeNetwork').onclick=()=>close('networkDialog');
   $('suggestPeers').onclick=loadSuggestions;
@@ -878,7 +1047,7 @@ function bind(){
   document.addEventListener('focusout',event=>{
     if(state.deferredDuringComment && event.target.closest?.('.comment-form')){
       state.deferredDuringComment=false;
-      queueMicrotask(()=>render());
+      queueMicrotask(()=>{if(!updateOpenDiscussion())render();});
     }
   });
   document.addEventListener('keydown',onKey);
@@ -946,12 +1115,20 @@ async function compose(event){
     if(!title&&!text&&!files.length)throw Error('Provide a headline, text or image');
     const media=await uploadMedia(files);
     const fields={tags,presentation:$('composePresentation').value};
+    Object.assign(fields,customComposeFields());
+    if(fields.presentation==='offer'){
+      const price=$('composePrice').value.trim();
+      if(price)fields.price=price;
+    }
     if(schedule)fields.schedule=schedule;
     if(pollQuestion)fields.poll={question:pollQuestion,options};
     if(positions.length)fields.positions=positions;
     await publish('post',{title,text,fields,media},{space});
     state.space=space;$('spaceName').value=space;await store();
-    $('postForm').reset();close('postDialog');render();
+    $('postForm').reset();
+    $('composeAttributeRows').replaceChildren();
+    updateComposeType();
+    close('postDialog');render();
   }catch(err){
     error.textContent=err.message;error.hidden=false;
     toast('Posting failed: '+err.message);
@@ -969,6 +1146,8 @@ async function init(){
   state.outbox=await getItem(state.db,'outbox')||[];
   state.peers=await getItem(state.db,'peer-urls')||[];
   state.trust=await getItem(state.db,'classic-trust')||[];
+  state.ignoredLabels=(await getItem(state.db,'classic-ignored-labels')||[])
+    .filter(id=>typeof id==='string'&&/^sha256:[0-9a-f]{64}$/.test(id)).slice(0,2000);
   state.showUnverified=await getItem(state.db,'classic-show-unknown')===true;
   state.view=await getItem(state.db,'classic-view')||'grid';
   state.showMedia=await getItem(state.db,'classic-show-media')===true;

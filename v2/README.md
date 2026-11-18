@@ -146,3 +146,10 @@ The public test data was inserted by a **local operator** into the raw unrestric
 When `demo.json` sets `autoConnectSameOrigin: true`, a fresh reader who opens the `demo` namespace may connect to the *website operator's own host* WebSocket transport automatically, only when the advertised peer hostname matches the page hostname. The reader can click Disconnect and that opt-out is retained in IndexedDB. This is for a convenient hosted demonstration, not a fixed bootstrap requirement: self-hosted domains can leave the flag absent or false. Third-party peers are never dialed automatically by this special demo setting. The demo publisher is only preferentially trusted within `/demo` and holds no namespace monopoly.
 
 The classic reader now presents multiple IPFS CIDs as an explicit gallery with previous/next controls. Unless the signer is individually trusted, images still require manual fetching; merely subscribing to a signed text feed never downloads arbitrary media bytes. Browser CI verifies a real multi-attachment post, comment drafting during remote updates, and the publication of a new democratic group charter.
+### Signed threads, audit controls, and structured fields
+
+Discussions are actual signed nested comment trees, with independently collapsible branches. Incoming peer synchronization does not replace an open discussion for unrelated updates or discard the active reply editor. A compact Refresh board link refreshes the feed when the reader chooses.
+
+The Report menu publishes a signed allegation with category and reason, never a universal deletion. Audit shows reporter identity, time, reason, and the chosen local policy status; each signed report can be ignored or restored by one reader without removing its provenance or altering another reader's view. Trash can show locally filtered posts.
+
+The composer supports searchable custom key/value attributes and a normal offer-price entry. Ordinary users are not required to submit raw JSON; supported values display readably in expanded posts.

@@ -84,3 +84,16 @@ test('signed reactions, tags and poll choices are portable independent events',a
  await assert.rejects(signEvent(a,{kind:'reaction',body:{target:post.id,value:100}}),/reaction/);
  await assert.rejects(signEvent(a,{kind:'tag-vote',body:{target:post.id,tag:'spam!!!',value:1}}),/tag vote/);
 });
+
+
+test('one locally ignored signed spam flag cannot erase the post or other labels',async()=>{
+  const publisher=await generateIdentity(),reviewer=await generateIdentity(),replica=new Replica();
+  const post=await signEvent(publisher,{space:'cats',body:{title:'visible',text:'anyone may post'}});
+  const label=await signEvent(reviewer,{kind:'label',space:'cats',body:{target:post.id,tag:'spam',reason:'wrongful allegation'}});
+  await replica.ingest(post);await replica.ingest(label);
+  const policy={...DEFAULT_POLICY,followedSpaces:['cats'],reviewerWeights:{[reviewer.author]:1}};
+  assert.equal(decide(post,replica.list(),policy).visible,false);
+  assert.equal(decide(post,replica.list(),{...policy,ignoredLabelIds:[label.id]}).visible,true);
+  assert.equal(replica.get(label.id)?.id,label.id,'local override must preserve flag evidence');
+  assert.equal(replica.get(post.id)?.id,post.id,'local override does not alter publication');
+});
