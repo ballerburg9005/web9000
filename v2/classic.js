@@ -7,6 +7,8 @@ import {buildFeed,DEFAULT_POLICY} from './core/policy.js';
 import {BrowserPeerMesh,parsePeerUrls} from './network/browser-mesh.js';
 import {readSiteContext} from './network/site-context.js';
 import {MockKarmaProvider} from './core/mock-karma.js';
+import {searchPosts,tagCloud,availableSpaces,postKind} from './core/search.js';
+import {deriveGroup} from './core/governance.js';
 
 const $=id=>document.getElementById(id);
 const state={
@@ -15,7 +17,10 @@ const state={
   space:'commons',sort:'new',view:'grid',search:'',showUnverified:false,
   ownerHint:null,respectOwner:true,selected:null,trust:[],audit:false,showMedia:false,
   demo:[],demoVotes:new Map(),demoPollChoices:new Map(),demoReplies:new Map(),demoFlags:new Map(),demoTagVotes:new Map(),
-  mockKarma:null,mockMode:false,lastError:'',renderPending:false
+  mockKarma:null,mockMode:false,demoAuthor:null,
+  followedSpaces:['demo','commons'],groupSubscriptions:[],groupViews:[],
+  searchFilters:{attribute:'all',includeTags:[],excludeTags:[],excludeKinds:[],minScore:0,customField:''},
+  lastError:'',renderPending:false
 };
 const safeSpace=s=>typeof s==='string'&&s.length>0&&s.length<=180&&!/[\x00-\x1f]/.test(s);
 const validTag=s=>/^[a-z0-9][a-z0-9._:-]{0,47}$/.test(s);
@@ -32,37 +37,9 @@ function mediaURL(cid){
   return state.mediaBase?.replace(/\/$/,'')+'/ipfs/'+encodeURIComponent(cid.slice(7));
 }
 function trustedForMedia(author){
-  return author===state.identity?.author||state.trust.includes(author);
+  return author===state.identity?.author||state.trust.includes(author)||
+    (state.space==='demo'&&author===state.demoAuthor);
 }
-const demoImages=[1,2,3,5,6,7,8,9,11,12,14,15,16,18,19,20,22,23,24,25,26,27,28,31];
-// Distinct *illustrative* content types, using the original prototype media.
-// Never publish these fixtures to peers or represent them as signed content.
-const demoSpecs=[
-  {type:'image',title:'The cardboard-box expert',text:'Cats can turn almost any box into a favorite hiding place.',tags:['cats','photo','funny']},
-  {type:'event',title:'Neighborhood photo walk and meetup',text:'Come share pictures and compare lenses. The event format demonstrates native dates and locations.',tags:['meetup','photography'],schedule:{start:'2027-05-14T15:30',end:'2027-05-14T17:30',location:'Community park'}},
-  {type:'poll',title:'Which picture should we feature?',text:'An example of a poll attached to an ordinary image post.',tags:['poll','photography'],poll:{question:'Choose a picture',options:['First image','Second image','Third image']}},
-  {type:'video',title:'A tiny motion study',text:'An example media-rich post. The original prototype includes a short clip.',tags:['video','animation'],video:'../thumb/thumb04.mp4'},
-  {type:'job',title:'Illustrator wanted for an open project',text:'People can volunteer to help with designs and graphics.',tags:['help-wanted','art'],positions:['Illustrator','Layout designer']},
-  {type:'project',title:'Build a little community gallery',text:'A project can describe its goals and ask for collaborators without inventing a separate site database.',tags:['open-source','project'],positions:['Tester','Developer']},
-  {type:'offer',title:'Second-hand camera and accessories',text:'Example of a marketplace listing. Listings use the same portable record format.',tags:['marketplace','photography'],price:'$25, negotiable'},
-  {type:'discussion',title:'What makes a small internet community work?',text:'A longer written discussion can use a full-row preview in Mixed or Blog view. Members should choose their own moderation and presentation preferences while every signed publication remains independently portable.',tags:['discussion','community'],noThumb:true},
-  {type:'image',title:'A strange found object',text:'An interesting shape worth sharing.',tags:['image','found']},
-  {type:'event',title:'Weekend art swap',text:'Bring a piece you made and trade with someone.',tags:['art','event'],schedule:{start:'2027-06-02T11:00',location:'Open-air market'}},
-  {type:'poll',title:'Favorite color palette?',text:'A simple poll that can coexist with the image gallery.',tags:['design','poll'],poll:{question:'Which mood?',options:['Warm','Cold','Chaotic']}},
-  {type:'image',title:'Big sky, small city',text:'A media post with normal captions and tags.',tags:['landscape','photo']},
-  {type:'offer',title:'Swap a box of old computer parts',text:'Example of an informal trade listing.',tags:['electronics','marketplace'],price:'Swap'},
-  {type:'project',title:'Archive a tiny piece of internet history',text:'Document the history without claiming exclusive ownership of a shared namespace.',tags:['archive','community']},
-  {type:'job',title:'Looking for organizers',text:'Use structured positions for small voluntary groups.',tags:['organize','help-wanted'],positions:['Organizer','Writer','Moderator candidate']},
-  {type:'image',title:'Unexpected design detail',text:'An image-first example with a short explanation.',tags:['architecture','details']},
-  {type:'discussion',title:'How should open moderation be audited?',text:'Anyone can inspect the signed reasoning, refuse to follow a steward, and still independently retrieve the underlying post from willing mirrors.',tags:['discussion','transparency'],noThumb:true},
-  {type:'event',title:'Electronics workshop',text:'Share ideas and bring a prototype.',tags:['workshop','electronics'],schedule:{start:'2027-07-22T14:00',location:'Local makerspace'}},
-  {type:'poll',title:'What should we build next?',text:'Groups can suggest what to prioritize.',tags:['poll','planning'],poll:{question:'Pick a project',options:['Music player','Gallery','Board game','Documentation']}},
-  {type:'image',title:'An old illustration',text:'Post format supports illustrations and multiple images.',tags:['illustration','art']},
-  {type:'project',title:'Open music collaboration',text:'A community project can have open roles and supporting files.',tags:['music','collaboration'],positions:['Musician','Editor']},
-  {type:'discussion',title:'A long-form note, not another thumbnail',text:'The Mixed layout uses a wider text preview for discussion and blog-like posts, while the original compact picture grid remains the default.',tags:['blog','ideas'],noThumb:true},
-  {type:'offer',title:'Giving away unused art supplies',text:'A sample offer; no checkout, price feed or buyer verification is implied.',tags:['free','marketplace'],price:'Free'},
-  {type:'image',title:'One final photo for the gallery',text:'Illustrative example. Real contributions are cryptographically signed and propagated only by the peers users choose.',tags:['cats','gallery']}
-];
 const toast=(msg)=>{
   const el=$('toast');el.textContent=String(msg).slice(0,280);el.classList.add('visible');
   clearTimeout(toast.timeout);toast.timeout=setTimeout(()=>el.classList.remove('visible'),4200);
@@ -77,6 +54,10 @@ function button(label,handler,className=''){
 const who=author=>author===state.identity?.author?'You':author==='demo'?'Demo fixture':shortAuthor(author);
 function choosePolicy(){
   const known=[state.identity.author,...state.trust,...(state.ownerHint&&state.respectOwner?[state.ownerHint]:[])];
+  // The *website's own demo signer* is only a suggested trust exception
+  // in the explicit demo namespace. It owns neither "demo" nor any other
+  // community; arbitrary authors can still publish there.
+  if(state.space==='demo'&&state.demoAuthor)known.push(state.demoAuthor);
   if(state.mockMode&&state.mockKarma){
     for(const event of allEvents()){
       const author=event.payload.author;
@@ -84,46 +65,32 @@ function choosePolicy(){
     }
   }
   const owner=state.ownerHint&&state.respectOwner?{[state.space]:state.ownerHint}:{};
+  const groups={};
+  for(const entry of state.groupViews){
+    if(!state.groupSubscriptions.includes(entry.id))continue;
+    const rules=entry.result?.state;
+    if(rules)groups[entry.id]={reviewers:rules.reviewers||{},inherits:rules.delegates||[]};
+  }
   return {...DEFAULT_POLICY,followedSpaces:[state.space],trustedAuthors:known,
     showUnknown:state.showUnverified,ownerPreference:owner,
-    reviewerWeights:{[state.identity.author]:1}};
+    reviewerWeights:{[state.identity.author]:1},groups,
+    subscriptions:state.groupSubscriptions};
 }
 const allEvents=()=>state.replica.list();
 const currentPosts=()=>{
   const records=allEvents(),all=buildFeed(records,choosePolicy(),state.identity.author)
     .filter(x=>x.event.payload.kind==='post');
-  let feed=all.filter(x=>x.decision.visible||state.audit);
-  const q=state.search.toLowerCase().trim();
-  if(q)feed=feed.filter(x=>{
-    const p=x.event.payload;const f=p.body.fields||{};
-    return [p.body.title,p.body.text,p.space,JSON.stringify(f)].join(' ').toLowerCase().includes(q);
-  });
-  if(state.sort==='old')feed.reverse();
-  if(state.sort==='popular')feed.sort((a,b)=>reactionScore(b.event.id,records)-reactionScore(a.event.id,records));
-  return feed.map(x=>({event:x.event,decision:x.decision,demo:false}));
+  const f=state.searchFilters,custom=f.customField.trim();
+  const sort=state.sort==='trash'?'new':state.sort;
+  return searchPosts(all,{
+    query:state.search,attribute:custom?'field:'+custom:f.attribute,
+    includeTags:f.includeTags,excludeTags:f.excludeTags,excludeKinds:f.excludeKinds,
+    minScore:f.minScore,scoreFor:author=>state.mockMode?state.mockKarma.scoreFor(author):0,
+    onlyFlagged:state.sort==='trash',sort,
+    reactionScore:id=>reactionScore(id,records)
+  }).map(x=>({...x,demo:false}));
 };
-function makeDemo(){
-  state.demo=demoImages.map((n,i)=>{
-    const spec=demoSpecs[i];
-    const fields={tags:spec.tags,presentation:spec.type};
-    if(spec.schedule)fields.schedule=spec.schedule;
-    if(spec.poll)fields.poll=spec.poll;
-    if(spec.positions)fields.positions=spec.positions;
-    if(spec.price)fields.price=spec.price;
-    const payload={kind:'post',author:'demo',space:'commons',
-      time:Date.now()-i*7200000,
-      body:{title:spec.title,text:spec.text,fields}};
-    return {event:{id:'demo:'+i,payload},demo:true,
-      thumb:spec.noThumb?null:'../thumb/thumb'+String(n).padStart(2,'0')+'.jpg',
-      video:spec.video||null,decision:{visible:true,reason:'illustrative local-only preview'}};
-  });
-}
-function effectiveFeed(){
-  const actual=currentPosts();
-  // Never mix illustrative thumbnails with live network records.
-  return actual.length===0 && state.replica.list().filter(e=>e.payload.kind==='post').length===0 && state.space==='commons'
-    ?state.demo:actual;
-}
+function effectiveFeed(){return currentPosts();}
 const latestVotes=(kind,target,events=allEvents())=>{
   const votes=new Map();
   for(const e of events){
@@ -157,7 +124,7 @@ function columns(){
 function tile(item,i,replyCounts){
   const p=item.event.payload,b=p.body;
   const card=element('div','post'+(item.decision?.visible?'':' filtered')+(b.fields?.presentation==='text'||!item.thumb&&!b.media?.length?' text-only':''));
-  card.dataset.index=String(i);card.dataset.id=item.event.id;
+  card.dataset.index=String(i);card.dataset.id=item.event.id;card.dataset.kind=postKind(item);
   card.tabIndex=0;card.setAttribute('role','button');card.setAttribute('aria-label',b.title||'Post');
   if(item.thumb){
     const img=document.createElement('img');img.className='post-thumb';img.loading='lazy';img.src=item.thumb;img.alt=b.title||'Demo picture';
@@ -180,7 +147,8 @@ function tile(item,i,replyCounts){
   if(b.title)card.append(element('div','post-headline',b.title));
   const icons=[];
   const kind=b.fields?.presentation||'image';
-  if(item.video)icons.push('▶ Video');
+  if(item.video||(p.author===state.demoAuthor&&p.space==='demo'&&b.fields?.demoVideo))
+    icons.push('▶ Video');
   else if(b.media?.length>1)icons.push('▣ '+b.media.length+' images');
   else if(kind==='offer')icons.push('◇ Offer');
   else if(kind==='project')icons.push('◆ Project');
@@ -190,10 +158,11 @@ function tile(item,i,replyCounts){
   if(b.fields?.schedule)icons.push('▦ Meetup');
   if(b.fields?.poll)icons.push('◉ Poll');
   if(b.fields?.positions?.length&&kind!=='job')icons.push('◈ '+b.fields.positions.length+' roles');
-  const replyCount=item.demo?(state.demoReplies.get(item.event.id)?.length||0):(replyCounts.get(item.event.id)||0);
+  const replyCount=replyCounts.get(item.event.id)||0;
   if(replyCount)icons.push('☏ '+replyCount);
   if(icons.length)card.append(element('div','post-icons',icons.join(' · ')));
-  if(item.demo)card.append(element('div','post-small demo-label','PREVIEW'));
+  if(p.space==='demo'&&p.author===state.demoAuthor&&b.fields?.demo)
+    card.append(element('div','post-small demo-label','EXAMPLE · SIGNED'));
   else if(!item.decision?.visible)card.append(element('div','post-small','FILTERED · AUDIT'));
   card.addEventListener('click',()=>{ if(state.selected===item.event.id){state.selected=null;render();}else expand(item.event.id); });
   return card;
@@ -213,6 +182,8 @@ function render(){
   const feed=effectiveFeed(),grid=$('imageGrid');
   const prev=state.selected;
   grid.className='grid '+state.view;
+  renderSpaces();
+  renderTagCloud();
   // Index reply counts once per render, instead of scanning the entire
   // replica for each image tile (the old code was O(posts × events)).
   const replyCounts=new Map();
@@ -225,18 +196,25 @@ function render(){
   grid.replaceChildren(...nodes);
   updateNetworkStatus();
   $('feedStatus').textContent=feed.length+' '+(feed.length===1?'post':'posts')+
-    (feed.some(x=>x.demo)?' · demo images only, not network data':'')+
-    (state.audit?' · showing suppressed publications and moderation evidence':'');
+    ' in /'+state.space+' · '+(state.sort==='trash'?'suppressed by your current view':'public signed records')+
+    (state.mesh?.connected?' · synced peer':' · connect to a peer to synchronize');
+  $('searchCount').textContent=feed.length+' match'+(feed.length===1?'':'es');
   if(prev && feed.some(x=>x.event.id===prev))expand(prev,{focus:false});
   else state.selected=null;
 }
 function scheduleRender(){
   if(state.renderPending)return;
   state.renderPending=true;
-  // Browser tabs without focus may suspend requestAnimationFrame indefinitely.
-  // Network replies must still update their stored and displayed threads.
-  // A microtask coalesces same-turn updates without depending on paint frames.
-  queueMicrotask(()=>{state.renderPending=false;render();});
+  // Browser tabs may throttle animation frames. But rebuilding a focused
+  // comment form while the user types drops text and detaches its submit
+  // button. Keep network events in the verified replica and render on blur.
+  queueMicrotask(()=>{
+    state.renderPending=false;
+    if(document.activeElement?.closest?.('.comment-form')){
+      state.deferredDuringComment=true;updateNetworkStatus();return;
+    }
+    render();
+  });
 }
 function getSelected(){return effectiveFeed().find(x=>x.event.id===state.selected);}
 async function store(){
@@ -252,7 +230,9 @@ async function store(){
     setItem(state.db,'classic-show-media',state.showMedia),
     setItem(state.db,'classic-media-url',state.mediaBase),
     setItem(state.db,'classic-mock-mode',state.mockMode),
-    setItem(state.db,'classic-mock-scores',state.mockKarma?.snapshot()||{})
+    setItem(state.db,'classic-mock-scores',state.mockKarma?.snapshot()||{}),
+    setItem(state.db,'classic-followed-spaces',state.followedSpaces),
+    setItem(state.db,'classic-group-subscriptions',state.groupSubscriptions)
   ]);
 }
 async function ingest(e,{outgoing=false}={}){
@@ -384,7 +364,7 @@ function showMedia(body,post){
       const url=state.mediaBase;
       if(!url){toast('No independent IPFS media gateway configured. The signed CID can be copied to another gateway.');return;}
       const img=document.createElement('img');
-      img.loading='lazy';img.alt='Explicitly loaded IPFS attachment';
+      img.loading='eager';img.alt='Explicitly loaded IPFS attachment';
       img.src=mediaURL(cid);
       img.onerror=()=>{img.replaceWith(element('p','','Image unavailable at this peer. CID is still present.'));};
       wrap.replaceChildren(img);
@@ -422,7 +402,8 @@ function expand(id,{focus=true}={}){
   const metadata=element('div','details-line');
   metadata.append(element('span','','From '+who(p.author)),
     element('span','','Space: '+p.space),element('span','',formatDate(p.time)));
-  if(current.demo)metadata.append(element('span','demo-note','PREVIEW — examples are not on the network'));
+  if(p.space==='demo'&&p.author===state.demoAuthor&&b.fields?.demo)
+    metadata.append(element('span','demo-note','SIGNED DEMO RECORD · stored on independent peer'));
   else if(state.mockMode)metadata.append(element('span','mock-score-detail',
     'SIMULATED SCORE '+state.mockKarma.scoreFor(p.author)+'/100 — NOT ON-CHAIN'));
   if(b.fields?.presentation)metadata.append(element('span','',b.fields.presentation.toUpperCase()));
@@ -431,9 +412,11 @@ function expand(id,{focus=true}={}){
     const region=element('div','attachments'),img=document.createElement('img');
     img.src=current.thumb;img.alt=b.title||'Demo image';img.loading='eager';img.decoding='async';region.append(img);body.append(region);
   }else showMedia(body,current.event);
-  if(current.video){
+  const demoVideo=(p.space==='demo'&&p.author===state.demoAuthor&&
+    b.fields?.demoVideo==='../thumb/thumb04.mp4')?'../thumb/thumb04.mp4':null;
+  if(demoVideo){
     const video=document.createElement('video');
-    video.controls=true;video.preload='metadata';video.playsInline=true;video.src=current.video;
+    video.controls=true;video.preload='metadata';video.playsInline=true;video.src=demoVideo;
     video.className='post-preview-video';video.setAttribute('aria-label','Example video attachment');
     const region=element('div','attachments');region.append(video);body.append(region);
   }
@@ -513,19 +496,19 @@ function expand(id,{focus=true}={}){
   }else{
     votes.append(element('span','score',String(reactionScore(id))));
     for(const [label,v] of [['++',2],['+',1],['−',-1],['−−',-2]])
-      votes.append(button(label,()=>react(id,v)));
+      votes.append(button(label,()=>react(id,v),v===2?'vote-max':v===1?'vote-up':v===-1?'vote-down':'vote-min'));
     votes.append(button('Flag spam',async()=>{
       const reason=window.prompt('Why is this post mass-produced commercial spam?');
       if(!reason)return;
       try{await publish('label',{target:id,tag:'spam',reason:reason.slice(0,500)});expand(id,{focus:false});}
       catch(error){toast(error.message);}
-    }));
+    },'flag-action'));
     if(state.mockMode)votes.append(button('Test karma…',()=>openMockKarma(p.author)));
     votes.append(button('Trust author',async()=>{
       if(!state.trust.includes(p.author))state.trust.push(p.author);
       await store();scheduleRender();toast('You locally trust this author. No global rule changed.');
-    }));
-    votes.append(button('Copy signed record',()=>navigator.clipboard?.writeText(JSON.stringify(current.event,null,2)).then(()=>toast('Signed record copied'))));
+    },'trust-action'));
+    votes.append(button('Copy signed record',()=>navigator.clipboard?.writeText(JSON.stringify(current.event,null,2)).then(()=>toast('Signed record copied')),'source-action'));
     body.append(votes);
     markAudit(body,current);renderReplies(body,current.event);
   }
@@ -586,9 +569,213 @@ function openMockKarma(author=state.identity?.author){
   renderMockRoster();
   $('mockDialog').showModal();
 }
+function selectSpace(name){
+  if(!safeSpace(name))return toast('Invalid namespace');
+  state.space=name;
+  state.selected=null;
+  $('spaceName').value=name;
+  void store();
+  render();
+}
+function renderSpaces(){
+  const spaces=availableSpaces(allEvents(),[...state.followedSpaces,'demo','commons']);
+  const top=$('spaceLinks'),all=$('allSpaceLinks');top.replaceChildren();all.replaceChildren();
+  const listed=spaces.filter(s=>state.followedSpaces.includes(s.name));
+  if(!listed.some(s=>s.name===state.space))listed.unshift({name:state.space,count:0});
+  for(const entry of listed.slice(0,14)){
+    const label='/'+entry.name+(entry.count?' '+entry.count:'');
+    const b=button(label,()=>selectSpace(entry.name),'space-chip');
+    b.classList.toggle('active',state.space===entry.name);
+    b.title='Open public namespace '+entry.name;
+    top.append(b);
+  }
+  const visible=spaces.slice(0,100);
+  for(const entry of visible){
+    const row=element('div','space-option');
+    row.append(button('/'+entry.name+' · '+entry.count+' posts',()=>selectSpace(entry.name),'space-open'));
+    const following=state.followedSpaces.includes(entry.name);
+    row.append(button(following?'Following ✓':'+ Follow',async()=>{
+      state.followedSpaces=following?state.followedSpaces.filter(x=>x!==entry.name):
+        [...new Set([...state.followedSpaces,entry.name])].slice(0,80);
+      await store();render();
+    },'space-follow'));
+    all.append(row);
+  }
+}
+function renderTagCloud(){
+  const records=allEvents(),policy=choosePolicy();
+  const visible=buildFeed(records,policy,state.identity.author)
+    .filter(x=>x.event.payload.kind==='post'&&x.decision.visible);
+  const cloud=$('tagCloud');cloud.replaceChildren();
+  const f=state.searchFilters;
+  for(const {tag,count} of tagCloud(visible,{max:32})){
+    const b=button('#'+tag+' '+count,e=>{},'cloud-tag');
+    b.onclick=event=>{
+      const excluded=event.shiftKey;
+      const input=excluded?$('searchExcludeTags'):$('searchIncludeTags');
+      const opposite=excluded?$('searchIncludeTags'):$('searchExcludeTags');
+      const tags=new Set(input.value.split(',').map(x=>x.trim()).filter(Boolean));
+      if(tags.has(tag))tags.delete(tag);else tags.add(tag);
+      input.value=[...tags].join(', ');
+      opposite.value=opposite.value.split(',').map(x=>x.trim()).filter(x=>x!==tag).join(', ');
+      readSearchFilters();render();
+    };
+    b.title='Click to require; Shift+click to exclude';
+    b.classList.toggle('required',f.includeTags.includes(tag));
+    b.classList.toggle('excluded',f.excludeTags.includes(tag));
+    cloud.append(b);
+  }
+}
+function readSearchFilters(){
+  const f=state.searchFilters;
+  f.attribute=$('searchAttribute').value;
+  f.customField=$('searchCustomField').value.trim().toLowerCase();
+  f.includeTags=$('searchIncludeTags').value.toLowerCase().split(/[,;]+/).map(x=>x.trim()).filter(validTag).slice(0,30);
+  f.excludeTags=$('searchExcludeTags').value.toLowerCase().split(/[,;]+/).map(x=>x.trim()).filter(validTag).slice(0,30);
+  f.excludeKinds=[...document.querySelectorAll('[data-exclude-kind]:checked')].map(x=>x.dataset.excludeKind);
+  f.minScore=Math.max(0,Math.min(100,Number($('searchMinScore').value)||0));
+}
+function chooseSort(sort){
+  state.sort=sort;state.audit=sort==='trash';
+  document.querySelectorAll('[data-sort],[data-search-sort]').forEach(btn=>{
+    btn.classList.toggle('active',(btn.dataset.sort||btn.dataset.searchSort)===sort);
+  });
+  render();
+}
+function showSearch(open=true){
+  $('searchPanel').hidden=!open;
+  $('showSearchOptions').setAttribute('aria-expanded',String(open));
+}
+let groupRefreshPending=false;
+async function refreshGroups(){
+  if(groupRefreshPending)return;
+  groupRefreshPending=true;
+  try{
+    const events=allEvents();
+    const charters=events.filter(e=>e.payload.kind==='group').slice(0,50);
+    const next=[];
+    for(const event of charters){
+      try{
+        const result=await deriveGroup(events.filter(e=>['group','proposal','vote'].includes(e.payload.kind)),
+          event.id,{maxEvents:5000});
+        if(result.found)next.push({id:event.id,event,result});
+      }catch(error){console.warn('Invalid group charter',error);}
+    }
+    state.groupViews=next.sort((a,b)=>a.event.payload.body.name.localeCompare(b.event.payload.body.name));
+    renderGroupList();
+  }finally{groupRefreshPending=false;}
+}
+function renderGroupList(){
+  const box=$('groupList');if(!box)return;
+  box.replaceChildren();
+  if(!state.groupViews.length)box.append(element('p','groups-empty','No signed groups discovered at connected peers yet. Create one to start a voluntary group.'));
+  for(const {id,event,result} of state.groupViews){
+    const section=element('section','group-entry');
+    const head=element('div','group-heading');
+    head.append(element('strong','',event.payload.body.name),
+      element('small','',result.state.members.length+' voting members · '+(event.payload.body.governance||'member democracy')));
+    section.append(head);
+    if(event.payload.body.description)section.append(element('p','',event.payload.body.description));
+    section.append(element('small','group-key',id.slice(0,24)+'… · '+(result.heads.length>1?'multiple governance branches':'signed charter')));
+    const controls=element('div','group-actions');
+    const followed=state.groupSubscriptions.includes(id);
+    controls.append(button(followed?'Following ✓':'+ Follow policy',async()=>{
+      state.groupSubscriptions=followed?state.groupSubscriptions.filter(x=>x!==id):
+        [...new Set([...state.groupSubscriptions,id])];
+      await store();renderGroupList();
+    }));
+    const member=result.state.members.includes(state.identity?.author);
+    const requested=allEvents().some(e=>e.payload.kind==='membership'&&
+      e.payload.body.group===id&&e.payload.author===state.identity?.author&&
+      e.payload.body.action==='request');
+    controls.append(button(member?'Member ✓':requested?'Requested ✓':'Request membership',async()=>{
+      if(member||requested)return;
+      try{await publish('membership',{group:id,action:'request'},{space:'groups'});await refreshGroups();}
+      catch(error){toast('Could not request membership: '+error.message);}
+    }));
+    if(member){
+      for(const req of allEvents().filter(e=>e.payload.kind==='membership'&&
+        e.payload.body.group===id&&e.payload.body.action==='request'&&
+        !result.state.members.includes(e.payload.author)).slice(0,12)){
+        const row=element('div','group-request',shortAuthor(req.payload.author)+' requests membership');
+        row.append(button('Propose admission',async()=>{
+          try{
+            const proposal=await publish('proposal',{group:id,parent:result.selectedHead,
+              change:{type:'add-member',author:req.payload.author}},{space:'groups'});
+            await publish('vote',{proposal:proposal.id,choice:'approve'},{space:'groups'});
+            await refreshGroups();
+          }catch(error){toast(error.message);}
+        }));
+        section.append(row);
+      }
+      for(const pending of result.pending.slice(0,12)){
+        const proposal=allEvents().find(e=>e.id===pending.id);
+        if(!proposal||proposal.payload.body.change.type!=='add-member')continue;
+        const already=allEvents().some(e=>e.payload.kind==='vote'&&
+          e.payload.body.proposal===pending.id&&e.payload.author===state.identity.author);
+        if(!already){
+          const row=element('div','group-request','Admission ballot for '+shortAuthor(proposal.payload.body.change.author));
+          for(const choice of ['approve','reject'])row.append(button(choice,async()=>{
+            await publish('vote',{proposal:pending.id,choice},{space:'groups'});
+            await refreshGroups();
+          }));
+          section.append(row);
+        }
+      }
+    }
+    section.append(controls);box.append(section);
+  }
+}
 function bind(){
   for(const btn of document.querySelectorAll('[data-sort]'))
-    btn.onclick=()=>{state.sort=btn.dataset.sort;document.querySelectorAll('[data-sort]').forEach(b=>b.classList.toggle('active',b===btn));render();};
+    btn.onclick=()=>chooseSort(btn.dataset.sort);
+  for(const btn of document.querySelectorAll('[data-search-sort]'))
+    btn.onclick=()=>chooseSort(btn.dataset.searchSort);
+  $('searchPosts').onfocus=()=>showSearch(true);
+  $('showSearchOptions').onclick=()=>showSearch($('searchPanel').hidden);
+  $('closeSearch').onclick=()=>showSearch(false);
+  $('searchPosts').oninput=e=>{state.search=e.target.value;render();};
+  for(const id of ['searchAttribute','searchMinScore','searchIncludeTags','searchExcludeTags','searchCustomField']){
+    $(id).addEventListener('input',()=>{readSearchFilters();render();});
+    $(id).addEventListener('change',()=>{readSearchFilters();render();});
+  }
+  for(const checkbox of document.querySelectorAll('[data-exclude-kind]'))
+    checkbox.onchange=()=>{readSearchFilters();render();};
+  $('resetSearch').onclick=()=>{
+    state.search='';$('searchPosts').value='';
+    for(const id of ['searchIncludeTags','searchExcludeTags','searchCustomField'])$(id).value='';
+    $('searchAttribute').value='all';$('searchMinScore').value='0';
+    for(const c of document.querySelectorAll('[data-exclude-kind]'))c.checked=false;
+    readSearchFilters();chooseSort('new');
+  };
+  document.addEventListener('pointerdown',e=>{
+    if(!$('searchPanel').hidden&&!e.target.closest('.search-wrap'))showSearch(false);
+  });
+  $('allSpaces').onclick=()=>{$('spaceExplorer').hidden=!$('spaceExplorer').hidden;};
+  $('closeSpaces').onclick=()=>{$('spaceExplorer').hidden=true;};
+  $('openDemoSpace').onclick=()=>selectSpace('demo');
+  $('loadTestPeer').onclick=async()=>{
+    if(!$('peerURLs').value.trim())await loadSuggestions({silent:true});
+    await connectPeers();
+  };
+  $('clansButton').onclick=()=>{renderGroupList();$('clansDialog').showModal();};
+  $('closeClans').onclick=()=>$('clansDialog').close();
+  $('createGroupForm').onsubmit=async e=>{
+    e.preventDefault();
+    try{
+      const governance=$('groupGovernance').value;
+      const name=$('groupName').value.trim();
+      const q=Number($('groupQuorum').value);
+      const charter=await publish('group',{
+        name,description:$('groupDescription').value.trim(),governance,
+        quorum:{numerator:q,denominator:100}
+      },{space:'groups'});
+      if(!state.groupSubscriptions.includes(charter.id))state.groupSubscriptions.push(charter.id);
+      await store();await refreshGroups();renderGroupList();
+      $('createGroupForm').reset();$('createGroupDetails').open=false;
+      toast('Signed group charter published. Members vote on admissions. Names do not reserve spaces.');
+    }catch(error){toast('Could not create group: '+error.message);}
+  };
   $('mockKarmaButton').onclick=()=>openMockKarma();
   $('closeMockDialog').onclick=()=>$('mockDialog').close();
   $('mockEnabled').onchange=async e=>{
@@ -605,13 +792,11 @@ function bind(){
       toast('Simulated local key score saved. No coins checked or locked.');
     }catch(error){toast(error.message);}
   };
-  $('viewAudited').onclick=()=>{state.audit=!state.audit;$('viewAudited').classList.toggle('active',state.audit);render();};
-  $('searchPosts').oninput=e=>{state.search=e.target.value;render();};
   $('showUnverified').onchange=async e=>{state.showUnverified=e.target.checked;await store();render();};
   $('viewStyle').onchange=async e=>{state.view=e.target.value;await store();render();};
   $('goSpace').onclick=async()=>{
     const name=$('spaceName').value.trim();if(!safeSpace(name))return toast('Invalid namespace');
-    state.space=name;state.selected=null;await store();render();
+    selectSpace(name);
   };
   $('spaceName').onkeydown=e=>{if(e.key==='Enter')$('goSpace').click();};
   $('postNew').onclick=()=>{$('composeSpace').value=state.space;modal('postDialog');};
@@ -623,6 +808,12 @@ function bind(){
     state.mesh.disconnect();state.peers=[];await store();$('peerURLs').value='';render();toast('Disconnected; local posts and backups remain.');
   };
   $('postForm').onsubmit=compose;
+  document.addEventListener('focusout',event=>{
+    if(state.deferredDuringComment && event.target.closest?.('.comment-form')){
+      state.deferredDuringComment=false;
+      queueMicrotask(()=>render());
+    }
+  });
   document.addEventListener('keydown',onKey);
   window.addEventListener('resize',()=>state.selected&&scheduleRender());
 }
@@ -716,8 +907,15 @@ async function init(){
   state.mediaBase=await getItem(state.db,'classic-media-url')||null;
   state.mockKarma=new MockKarmaProvider(await getItem(state.db,'classic-mock-scores')||{});
   state.mockMode=await getItem(state.db,'classic-mock-mode')===true;
+  state.followedSpaces=await getItem(state.db,'classic-followed-spaces')||['demo','commons'];
+  state.groupSubscriptions=await getItem(state.db,'classic-group-subscriptions')||[];
+  try{
+    const demo=await (await fetch('./demo.json',{cache:'no-store'})).json();
+    if(demo.space==='demo'&&/^ed25519:[A-Za-z0-9_-]{43}$/.test(demo.author))
+      state.demoAuthor=demo.author;
+  }catch{}
   const hint=readSiteContext(location.href);
-  state.space=hint.space||await getItem(state.db,'classic-space')||'commons';
+  state.space=hint.space||await getItem(state.db,'classic-space')||'demo';
   state.ownerHint=hint.preferredAuthor;
   // Owner-preferred views are a host suggestion, not a namespace write lock.
   // The visitor can inspect suppressed records via Audit, and uncheck the
@@ -732,11 +930,11 @@ async function init(){
   }
   $('spaceName').value=state.space;
   $('showUnverified').checked=state.showUnverified;
+  $('viewAudited').classList.toggle('active',state.sort==='trash');
   $('mockEnabled').checked=state.mockMode;
   $('viewStyle').value=state.view;
   $('peerURLs').value=state.peers.join('\n');
   $('mediaPeerUrl').value=state.mediaBase||'';
-  makeDemo();
   bind();
   // Pre-fill independently replaceable peer suggestions, without connecting.
   // Consent is still required to open any WebSocket or upload images.
@@ -749,7 +947,9 @@ async function init(){
     // causing lost keyboard focus and detached click targets.
     onStatus:()=>updateNetworkStatus(),
     onEvent:async e=>{
-      await ingest(e); // new signed records schedule one redraw per frame
+      const result=await ingest(e);
+      if(result.accepted&&['group','proposal','vote','membership'].includes(e.payload.kind))
+        void refreshGroups();
       updateNetworkStatus();
     },
     onAck:(id,url)=>{
@@ -765,6 +965,7 @@ async function init(){
     onError:(url,message)=>{state.lastError=String(message);toast('Peer rejected/failed: '+message);}
   });
   render();
+  await refreshGroups();
   if(state.peers.length){
     try{state.mesh.connect(state.peers,{spaces:['*']});}
     catch(error){toast(error.message);}

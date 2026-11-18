@@ -63,7 +63,7 @@ New browser keys can be exported **only in encrypted form** using `core/identity
 
 ## Practical scope
 
-CI currently tests both the dependency-installed Node P2P sync and core cryptographic/policy unit tests. This is not a production security audit. The v2 browser UI remains an offline-only static demonstration; it can import/export fully signed event JSON but does not connect to the working Node peers yet. No static site must be appointed a network leader. Any operator may eventually host discovery/relay/pinning nodes, subject to locally chosen replication and applicable law.
+CI currently tests both the dependency-installed Node P2P sync and core cryptographic/policy unit tests. This is not a production security audit. The v2 browser UI now exchanges signed records through replaceable WebSocket-accessible OrbitDB peers. This is not browser-native direct P2P yet; a browser needs a reachable willing peer. No static site must be appointed a network leader. Any operator may eventually host discovery/relay/pinning nodes, subject to locally chosen replication and applicable law.
 
 ## Browser-to-peer transport (development)
 
@@ -122,8 +122,22 @@ The default `/v2/` is now the original WEB9000-style **classic image grid**: com
 
 ## Classic UI test features and mock score provider
 
-The default board now uses original-style seven-column tiles, meaningful content badges, responsive full-width detail expansion and real-size preview media. Demo previews represent images, meetups, polls, videos, open positions, projects, marketplace offers and discussions; their preview votes, flags, tags and comments are **local-only** and do not count as signed network posts. Clicking the selected tile again collapses its detail; arrow keys and WASD navigate.
+The default board now uses original-style seven-column tiles, meaningful content badges, responsive full-width detail expansion and real-size preview media. The public **demo namespace** now holds 24 ordinary signed sample posts in the raw OrbitDB index, with real content-addressed IPFS raster images, two separate signed group charters and signed comments/votes. They are real signed events, not DOM-only demo tiles, but are **not** stake-qualified and the publisher has no ownership over the namespace. Clicking the selected tile again collapses its detail; arrow keys and WASD navigate.
 
 To test a numeric karma provider without waiting for on-chain development, open **Test karma** from the classic toolbar, enable simulated scoring and assign a score to an ed25519 public identity. Scores of at least 10 affect this browser's local feed only. Nothing is broadcast, staked, checked on-chain or admitted into the separately curated qualified database. Disable mock mode to restore regular default trust behavior.
 
 The current main user-facing URL is https://syburg.my.to/web9000/v2/ and the alternate dashboard remains at /v2/dashboard.html. See the normative requirements and dated chat ledger linked above. UI regression tests now assert media dimensions and same-tile collapse rather than relying only on static element presence.
+
+## Discovering and navigating spaces, groups and search (2026-11-18)
+
+The original-imageboard-first site now includes a horizontal strip of followed spaces, Browse for every space observed in signed posts, and user-local follow choices; namespace names are non-exclusive. First-visit sessions start in **/demo**, which only shows the site's suggested demo signer by default. Connect via **Load test peer** or **Join Network** to sync signed content. Public demo-signature trust never extends to other spaces. Nothing about the demo publisher's first arrival implies space ownership.
+
+The classic **Clans / groups** panel lists discovered signed charters, lets anybody form an independently signed founder charter, follow a voluntary group's reviewer rules locally, submit a signed membership request and (if a voting member) propose admissions and cast ratification votes. The founder alone initially has one charter vote; the group can ratify members according to its quorum. Advanced elected councils, DAO governance, reviewer appeals, etc. remain future work; do not treat local following or membership requests as voting membership.
+
+Clicking the search box opens a compact dropdown: New / Popular / Old / Trash, dynamic tag cloud from currently visible signed posts, search within title/body/tags/author/space/type/location/positions/price, required and excluded tags, type exclusions and an arbitrary custom-field search. Minimum karma is **mock-score only** until independent stake verification is live. Trash means locally suppressed content; it does not erase or invalidate other peers' copies.
+
+### One-time demo seeding (operator only)
+
+The public test data was inserted by a **local operator** into the raw unrestricted index, without disabling external WebSocket rate limits. Scripts live in network/seed-demo.mjs and network/seed-demo-extras.mjs. **Never commit** the server's private demo identity or the signed records manifest from its persistent data directory. The public key is in demo.json, used only as a suggested reader trust root in /demo. A demo file's presence is not an authorization system.
+
+**Important:** the static frontend never needs a blockchain account to create a signed post. The optional test score provider is local mock data and must never enter the qualified index.

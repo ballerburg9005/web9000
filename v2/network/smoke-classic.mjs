@@ -21,14 +21,35 @@ import {createOrbitDB} from '@orbitdb/core';
 import {openPublicIndex} from './orbit-index.js';
 import {createBrowserBridge} from './browser-bridge.mjs';
 import {Replica} from '../core/replica.js';
+import {generateIdentity,signEvent} from '../core/events.js';
+import {DEMO_CATALOG} from '../demo-catalog.js';
+import {CID} from 'multiformats/cid';
+import * as raw from 'multiformats/codecs/raw';
+import {sha256} from 'multiformats/hashes/sha2';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const base=await mkdtemp(path.join(os.tmpdir(),'w9-classic-'));
-const servers=[];let browser,libp2p,helia,orbitdb,index,bridge;
+const servers=[];let browser,libp2p,helia,orbitdb,index,bridge,demoIdentity,demoCid,demoBytes;
 function serve(){
  const mime={'.html':'text/html','.css':'text/css','.js':'text/javascript','.jpg':'image/jpeg'};
  const server=createServer(async(req,res)=>{
    const url=new URL(req.url,'http://local.invalid');
+   if(url.pathname==='/v2/demo.json'){
+     res.writeHead(200,{'content-type':'application/json'});
+     res.end(JSON.stringify({version:1,space:'demo',author:demoIdentity.author}));
+     return;
+   }
+   if(url.pathname==='/v2/peers.json'){
+     res.writeHead(200,{'content-type':'application/json'});
+     res.end(JSON.stringify({format:'web9000-peer-suggestions-v1',
+       peers:[{name:'ephemeral independent test peer',url:bridge.url,
+         mediaUrl:'http://'+req.headers.host+'/v2/media'}]}));
+     return;
+   }
+   if(url.pathname==='/v2/media/ipfs/'+demoCid){
+     res.writeHead(200,{'content-type':'image/jpeg','content-length':demoBytes.length});
+     res.end(demoBytes);return;
+   }
    const filename=path.resolve(root,'.'+decodeURIComponent(url.pathname));
    if(!filename.startsWith(root+path.sep)){res.writeHead(403).end();return;}
    try{const bytes=await readFile(filename);res.writeHead(200,{'content-type':mime[path.extname(filename)]||'application/octet-stream'});res.end(bytes);}
@@ -69,6 +90,27 @@ try{
  helia=await createHelia({libp2p,blockstore:new LevelBlockstore(path.join(base,'blocks'))});
  orbitdb=await createOrbitDB({ipfs:helia,directory:path.join(base,'orbitdb')});
  index=await openPublicIndex(orbitdb,'web9000-classic-live-test');
+ demoIdentity=await generateIdentity();
+ demoBytes=await readFile(path.join(root,'thumb','thumb01.jpg'));
+ demoCid=CID.createV1(raw.code,await sha256.digest(demoBytes)).toString();
+ for(const [i,spec] of DEMO_CATALOG.entries()){
+   const fields={presentation:spec.type,tags:spec.tags,demo:true,
+     ...(spec.poll?{poll:spec.poll}:{}),
+     ...(spec.schedule?{schedule:spec.schedule}:{}),
+     ...(spec.positions?{positions:spec.positions}:{}),
+     ...(spec.price?{price:spec.price}:{}),
+     ...(spec.video?{demoVideo:spec.video}:{})};
+   const record=await signEvent(demoIdentity,{kind:'post',space:'demo',
+     body:{title:spec.title,text:spec.text,fields,media:spec.noThumb?[]:['ipfs://'+demoCid]},
+     time:Date.UTC(2026,10,17,12)-i*600000});
+   await index.publish(record);
+ }
+ for(const name of ['Photography Circle','Commons Documentation Guild']){
+   await index.publish(await signEvent(demoIdentity,{kind:'group',space:'groups',body:{
+     name,description:'Experimental signed group for local community decisions',
+     governance:'democracy',quorum:{numerator:50,denominator:100}
+   }}));
+ }
  bridge=await createBrowserBridge({index,replica:new Replica(),port:0});
  const originA=await serve(),originB=await serve();
  const chromium=[process.env.CHROME_BIN,process.env.PUPPETEER_EXECUTABLE_PATH,'/usr/bin/google-chrome','/usr/bin/google-chrome-stable','/usr/bin/chromium'].find(x=>x&&existsSync(x));
@@ -78,7 +120,12 @@ try{
  const a=await browser.newPage(),b=await browser.newPage();
  for(const [name,page] of [['a',a],['b',b]])page.on('pageerror',e=>errors.push(name+': '+e.message));
  await a.goto(originA,{waitUntil:'domcontentloaded'});await ready(a);
- console.log('CLASSIC checkpoint 1: initial page ready');
+ assert.equal(await a.$eval('#spaceName',e=>e.value),'demo','new sessions open the dedicated signed demo namespace');
+ assert.equal(await a.$$eval('.post',e=>e.length),0,'no local fake fixture posts before a peer connects');
+ await connect(a,bridge.url);
+ await eventually(()=>a.evaluate(()=>document.querySelectorAll('.post').length===24),
+   '24 signed seed posts replicated from independent OrbitDB peer');
+ console.log('CLASSIC checkpoint 1: initial page ready and real database synced');
  assert.ok((await a.$$('.post')).length>=20,'original visual demo board');
  console.log('CLASSIC checkpoint 2: demo tile grid rendered');
  const kinds=await a.$$eval('.post-icons',els=>els.map(e=>e.textContent));
@@ -91,8 +138,9 @@ try{
  assert.ok((await a.$$eval('.comment-form textarea',els=>els.length))===1,'sample has comment form');
  const beforeScore=await a.$eval('.reactions .score',e=>Number(e.textContent));
  await a.evaluate(()=>document.querySelector('.reactions button').click());
+ await eventually(()=>a.evaluate(before=>Number(document.querySelector('.reactions .score')?.textContent)===before+2,beforeScore), 'signed demo reaction applied');
  const afterScore=await a.$eval('.reactions .score',e=>Number(e.textContent));
- assert.equal(afterScore,beforeScore+2,'demo voting works within local preview');
+ assert.equal(afterScore,beforeScore+2,'signed demonstration post can be voted on like real content');
  assert.equal(await a.evaluate(()=>document.querySelector('.post-container.expanded')!==null),true);
  await a.evaluate(()=>document.querySelector('.post.selected').click());
  assert.equal(await a.evaluate(()=>document.querySelectorAll('.post-container.expanded').length),0);
@@ -134,8 +182,22 @@ try{
  assert.equal(await a.evaluate(()=>document.querySelectorAll('.post-container.expanded').length),1);
 
  await a.keyboard.press('Escape');
- assert.equal(await a.$$('.post-container.expanded').then(x=>x.length),0);
+ assert.equal(await a.$$eval('.post-container.expanded',x=>x.length),0);
  console.log('CLASSIC checkpoint 4: row collapsed');
+ await a.evaluate(()=>document.getElementById('clansButton').click());
+ await eventually(()=>a.evaluate(()=>document.querySelectorAll('.group-entry').length>=2),
+   'signed group charters listed in clans panel');
+ await a.evaluate(()=>document.getElementById('closeClans').click());
+ await a.focus('#searchPosts');
+ assert.equal(await a.$eval('#searchPanel',e=>e.hidden),false,'search filters open on focus');
+ assert.ok(await a.$$eval('.cloud-tag',x=>x.length)>=5,'tag cloud is derived from signed posts');
+ await a.type('#searchPosts','cats');
+ assert.ok((await a.$$eval('.post',x=>x.length))<24,'full-text search filters signed posts');
+ await a.evaluate(()=>document.getElementById('resetSearch').click());
+ await a.evaluate(()=>document.getElementById('closeSearch').click());
+ await a.evaluate(()=>document.getElementById('disconnectPeers').click());
+ await eventually(()=>a.evaluate(()=>document.getElementById('peerStatus').textContent.includes('0 peer(s)')),
+   'disconnected for offline posting');
  // Explicitly opt into the raw/unverified lane, including comments from
  // another independent identity. The public default remains filtered.
  await a.evaluate(()=>document.getElementById('showUnverified').click());
@@ -192,7 +254,9 @@ try{
  assert.ok((await b.$$eval('.poll button',x=>x.length))>=2,'native poll UI');
  assert.ok((await b.$$eval('.schedule',x=>x.length))>=1,'native date UI');
  console.log('CLASSIC checkpoint 11: post details, poll and schedule visible');
- await b.type('.comment-form textarea','A separate, real signed comment');
+ await b.type('.comment-form textarea','A separate, real signed comment',{delay:4});
+ assert.equal(await b.$eval('.comment-form textarea',el=>el.value),'A separate, real signed comment',
+   'incoming peer data must not destroy the focused comment draft');
  await b.evaluate(()=>document.querySelector('.comment-form button').click());
  await eventually(()=>bridge.replica.list().some(e=>e.payload.kind==='reply' &&
    e.payload.body.text==='A separate, real signed comment'),'remote comment accepted by peer');

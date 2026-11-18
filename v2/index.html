@@ -1,16 +1,64 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>WEB9000 — Commons image board</title>
-<link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="./classic.css"></head>
+<link rel="stylesheet" href="./classic.css"></head>
 <body>
 <header class="header" id="topHeader"><a class="logo" href="./">WEB9000</a>
 <nav class="menu" aria-label="Board navigation">
 <button type="button" data-sort="new" class="active">New</button><button type="button" data-sort="popular">Popular</button>
-<button type="button" data-sort="old">Old</button><button type="button" id="viewAudited">Audit</button>
-<input id="searchPosts" type="search" placeholder="Search posts, tags..." aria-label="Search posts">
+<button type="button" data-sort="old">Old</button><button type="button" data-sort="trash" id="viewAudited" title="Review suppressed posts">Trash</button>
+<div class="search-wrap">
+  <input id="searchPosts" type="search" autocomplete="off" placeholder="Search / tags / filters" aria-label="Search posts">
+  <button id="showSearchOptions" title="Search filters" aria-controls="searchPanel" aria-expanded="false" type="button">⌄</button>
+  <section id="searchPanel" class="search-panel" hidden aria-label="Search filters">
+    <div class="search-panel-head"><strong>Search & filters</strong><button type="button" id="closeSearch">×</button></div>
+    <div class="search-segment" role="group" aria-label="Search sort">
+      <button type="button" data-search-sort="new">New</button><button type="button" data-search-sort="popular">Popular</button>
+      <button type="button" data-search-sort="old">Old</button><button type="button" data-search-sort="trash">Trash / hidden</button>
+    </div>
+    <label class="search-label">Search in
+      <select id="searchAttribute">
+        <option value="all">Everything</option><option value="title">Titles only</option>
+        <option value="body">Full text only</option><option value="tags">Tags only</option>
+        <option value="author">Author identities</option><option value="space">Spaces</option>
+        <option value="type">Post types</option><option value="location">Meetup locations</option>
+        <option value="positions">Open positions</option><option value="price">Prices / offers</option>
+      </select>
+    </label>
+    <div class="search-type-label">Exclude types</div>
+    <div class="search-excludes">
+      <label><input type="checkbox" data-exclude-kind="audio"> Sound</label>
+      <label><input type="checkbox" data-exclude-kind="video"> Video</label>
+      <label><input type="checkbox" data-exclude-kind="text"> Text-only</label>
+      <label><input type="checkbox" data-exclude-kind="event"> Meetups</label>
+      <label><input type="checkbox" data-exclude-kind="poll"> Polls</label>
+      <label><input type="checkbox" data-exclude-kind="offer"> Offers</label>
+      <label><input type="checkbox" data-exclude-kind="job"> Jobs</label>
+      <label><input type="checkbox" data-exclude-kind="image"> Images</label>
+    </div>
+    <details id="advancedSearch"><summary>Advanced search</summary>
+      <div class="advanced-search-fields">
+        <label>Minimum karma (simulation only unless verified)
+          <input id="searchMinScore" type="number" min="0" max="100" value="0">
+        </label>
+        <label>Require tags (comma-separated)<input id="searchIncludeTags" placeholder="cats, art"></label>
+        <label>Exclude tags (comma-separated)<input id="searchExcludeTags" placeholder="nsfw, adverts"></label>
+        <label>Only attribute name (optional)<input id="searchCustomField" placeholder="e.g. price, license, role"></label>
+      </div>
+    </details>
+    <div class="search-type-label">Popular tags in this space <small>click = include · Shift+click = exclude</small></div>
+    <div id="tagCloud" class="tag-cloud"></div>
+    <div class="search-foot"><button type="button" id="resetSearch">Reset filters</button><span id="searchCount"></span></div>
+  </section>
+</div>
 <button type="button" id="postNew" title="Create post">✎ Post</button>
 </nav>
 <button class="join-network" id="joinNetwork" type="button">Join Network</button>
 </header>
+<nav id="spaceNav" class="space-nav" aria-label="Public namespaces">
+  <span class="space-nav-title">Spaces</span><div id="spaceLinks" class="space-links"></div>
+  <button id="allSpaces" type="button" title="Browse all observed namespaces">Browse</button>
+  <button id="clansButton" type="button" title="Independent voluntary governance groups">Clans / groups</button>
+</nav>
 <div class="classic-toolbar">
 <label>Space <input id="spaceName" type="text" value="commons" maxlength="180" placeholder="commons"></label>
 <button type="button" id="goSpace">Open</button>
@@ -19,14 +67,39 @@
 <button id="mockKarmaButton" type="button">Test karma</button>
 <span id="mockModeLabel" class="mock-active" hidden></span>
 <span class="peer-state" id="peerStatus">Local, disconnected</span>
-<a href="./dashboard.html" class="subtle-link">Alternate dashboard</a>
+<a href="./dashboard.html" class="subtle-link">Developer dashboard (experimental)</a>
+</div>
+<div id="spaceExplorer" class="space-explorer" hidden>
+  <div class="space-explorer-header"><strong>Observed spaces</strong><button id="closeSpaces" type="button">×</button></div>
+  <p>All names are public commons. They cannot be reserved, claimed or owned by whoever posted first.</p>
+  <div id="allSpaceLinks" class="space-explorer-list"></div>
 </div>
 <div class="board-notice" id="boardNotice">
-<strong>WEB9000 experimental board.</strong> The default view excludes unverified authors. There is no live Stake4Karma qualification service yet: to inspect actual test posts from other identities, deliberately enable <b>Show unstaked / unverified</b>. No website or namespace owner can invalidate the original signed records.
+<strong>Experimental commons.</strong> Demo posts are genuine signed records in <button type="button" class="text-link" id="openDemoSpace">/demo</button> on an independently operated test peer. Other namespaces are open to everyone. <button type="button" class="text-link" id="loadTestPeer">Load test peer</button> · Default feeds hide unknown unstaked authors until a real karma verifier is available.
 </div>
 <div id="imageGrid" class="grid" aria-label="Posts"></div>
 <div id="feedStatus" class="feed-status"></div>
 
+<dialog id="clansDialog" class="clans-dialog"><div class="dialog-inner">
+  <div class="dialog-title"><strong>Clans & groups</strong><button id="closeClans" type="button" aria-label="Close">×</button></div>
+  <p>Independent signed groups with their own democracies, moderators and local trust preferences. Following a group does not grant its members control over public spaces. Joining as a voting member requires the group's charter process.</p>
+  <div id="groupList" class="group-list"></div>
+  <details id="createGroupDetails"><summary>Create a group</summary>
+    <form id="createGroupForm" class="group-creator">
+      <label>Group name <input id="groupName" required maxlength="80" placeholder="e.g. Free cats cooperative"></label>
+      <label>Description <input id="groupDescription" maxlength="250" placeholder="Purpose and guiding rules"></label>
+      <label>Governance <select id="groupGovernance">
+        <option value="democracy">Member democracy</option><option value="representative" disabled>Elected / delegated council (future)</option>
+        <option value="dao" disabled>DAO / stake governance (future)</option><option value="steward" disabled>Founding steward with democratic succession (future)</option>
+      </select></label>
+      <label>Approval threshold <select id="groupQuorum">
+        <option value="50">Simple majority</option><option value="67">Two-thirds</option><option value="100">Unanimous</option>
+      </select></label>
+      <button type="submit" class="primary-mini">Publish signed founding charter</button>
+    </form>
+  </details>
+  <div id="groupStatus" aria-live="polite"></div>
+</div></dialog>
 <dialog id="networkDialog"><div class="dialog-inner">
 <div class="dialog-title"><strong>Choose independent peers</strong><button id="closeNetwork" type="button" aria-label="Close">×</button></div>
 <p>Peer listings are suggestions, never a mandatory registry or authority. Each peer may refuse to replicate content; anybody can run a different one. Browser WebSocket connections expose your IP to the chosen operator.</p>

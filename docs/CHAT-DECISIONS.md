@@ -100,3 +100,37 @@ Following the owner's complaint that the demo cards lacked content badges and po
 **Latest tested source at this entry:** commit 8a57196a39ea29f37ea53598873b2d87e5dd50e7. [GitHub Actions run #139](https://github.com/ballerburg9005/web9000/actions/runs/44340506143) passed all jobs. This is still an experimental public demo and not a secure staking-enabled social network.
 
 **Next UX priorities requested or still unmet:** multiple real image attachments and proper swipe/gallery UI; inline media/video preview and safety controls; fully functional real-world tag editing, threaded comments/notifications, mixed/blog views and authored presentation preferences; signed, interactive audit of moderator actions and policy forks; responsive accessibility and persistence of local demo test interactions; real volunteer media pinning policy. The mock provider is temporary test scaffolding, not a replacement for a future independently verifiable stake/karma proof.
+
+
+## 2026-11-18: third UI and discovery correction — direct owner feedback
+
+> "This still looks massively more crude than the UI I already had made, like there are these borders around things for no reason with margins and ugly buttons just listed next to each other with no clear visual distinction."
+
+> "The first comment it is not indented the same as the vertical bar so the bar overflows into it and it just looks ugly."
+
+> "There is also this black gradiant obstructing the image in the grid."
+
+> "Can you put the demo content into some demo space and I can't see navigation for spaces, it doesn't list them, I see no clans to join and no groups to form and the alternative dashboard shows different content presumbably example."
+
+> "Pls load the demo content into the db."
+
+> "The tags also tag clouds dynamic search options that drop down if you click search field like search in new popular trash min karma exclude sound video text-only meetups etc [other flags] exclude additional tags, then advanced search and one can search for only attributes."
+
+**Requirements and corrective plan:**
+- The old root stylesheet and v2 classic stylesheet previously leaked selectors into each other. Use a self-contained compact stylesheet that copies useful original design choices rather than layering generic rectangles, excessive margins and dull buttons.
+- Remove the large dark gradient covering pictures. Put captions below the media itself; use small bright multitype information ribbons. Differentiate vote strength, downvotes, reporting, tags, comments and tool controls visually.
+- Align the threaded-comment vertical guide entirely within its comment padding; it must never slice through the comment text, especially at depth zero.
+- Move demonstration content from local DOM-only fixture generation into the actual signed raw OrbitDB database under the separate **demo** namespace. This is a normal public namespace, not claimed by the first signer or by a privileged owner.
+- Browse spaces discovered from signed publications, and let visitors follow individual spaces for convenience. No globally registrable namespace names.
+- Browse signed clans/guild/group charters; support forming signed groups and submitting actual membership requests. Membership is not granted by mere following or requesting; charter-voter ratification is required. Do not present unimplemented DAO elections as finished governance.
+- Search dropdown on focus: New, Popular, Old, Trash (locally suppressed), dynamic tag cloud, include/exclude tags, exclusion filters for sound/video/text-only/meetups/polls/jobs/offers/images, optional minimum mock karma and advanced specific-attribute/custom-field search. No search filtering is universal database deletion.
+- Polish **default** classic UI before extending alternate developer dashboard; label dashboard fixture content as a non-canonical experimental view.
+
+**Actual seed and tests:**
+- Public demo author key: ed25519:pqstGobWYkSpJhAeYDlPF2CZRFRZh3FOZ2uOvFhgrxg, advertised in v2/demo.json as a voluntary suggestion **only in demo**.
+- Private signing key stored under operator data path, not in GitHub or frontend.
+- 24 real signed posts published into the independent OrbitDB raw index, confirmed via WebSocket readback; ten original raster files uploaded to IPFS raw blockstore and referenced by CID.
+- Separate signed operator seeding added two sample group charters, four signed threaded comments, one reaction, one tag vote and one poll vote; daemon restarted with 33 stored signed events.
+- The default viewer does not automatically trust this demo publisher in any other namespace, and the demo publisher has no global write veto.
+
+**Remaining:** Multiple-attachment gallery, proper rich video/audio upload, reviewer election procedures, transparent governance/appeals and independently verified Stake4Karma. The current peer remains unaudited experimental infrastructure.

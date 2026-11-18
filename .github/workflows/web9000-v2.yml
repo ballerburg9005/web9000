@@ -85,7 +85,7 @@ jobs:
         run: npm run test:media
       - name: Real classic board UI across two website origins
         working-directory: v2/network
-        timeout-minutes: 2
+        timeout-minutes: 4
         run: npm run test:classic-ui
       - name: Upload real browser screenshots for design review
         if: always()

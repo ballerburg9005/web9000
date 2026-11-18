@@ -50,6 +50,8 @@ export function validatePayload(p) {
   // Governance identifiers reference immutable signed events, not claimable names.
   const digest = x => typeof x === 'string' && /^sha256:[0-9a-f]{64}$/.test(x);
   const identity = x => typeof x === 'string' && /^ed25519:[a-zA-Z0-9_-]{43}$/.test(x);
+  if (p.kind === 'membership' && (!digest(p.body.group) || !['request','withdraw'].includes(p.body.action)))
+    throw Error('Invalid signed group membership request');
   if (p.kind === 'group') {
     const q=p.body.quorum;
     if (typeof p.body.name !== 'string' || !p.body.name.trim() || p.body.name.length > 80 ||
