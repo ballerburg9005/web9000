@@ -45,3 +45,12 @@ test('custom fields, no built-in post types',async()=>{
   const e=await signEvent(a,{body:{title:'Offer',text:'Looking for participants',fields:{price:{currency:'USD',amount:12},event:{start:'2030-01-01'}}}});
   assert.equal(await verifyEvent(e),true);
 });
+
+test('repeat reports by the same reviewer do not inflate moderation weight',async()=>{
+  const author=await generateIdentity(),reviewer=await generateIdentity();
+  const post=await signEvent(author,{body:{title:'test',text:'text'}});
+  const labels=[];
+  for(let n=0;n<6;n++)labels.push(await signEvent(reviewer,{kind:'label',body:{target:post.id,tag:'spam',reason:'repeat'}}));
+  const p={...DEFAULT_POLICY,reviewerWeights:{[reviewer.author]:1},minLabelWeight:2};
+  assert.equal(decide(post,[post,...labels],p).visible,true);
+});

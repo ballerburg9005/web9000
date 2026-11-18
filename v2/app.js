@@ -1,18 +1,15 @@
 import {generateIdentity,signEvent,verifyEvent,shortAuthor} from './core/events.js';
 import {Replica} from './core/replica.js';
 import {buildFeed,DEFAULT_POLICY} from './core/policy.js';
+import {deriveGroup} from './core/governance.js';
 import {openLocal,getItem,setItem} from './core/persist.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const spaces={commons:'Commons',art:'Creative works',organize:'Organize',exchange:'Exchange',projects:'Projects'};
 const types=['All','Discussion','Art','Event','Offer','Project','Job'];
-const state={replica:new Replica(),identity:null,db:null,space:'all',type:'All',layout:'grid',sort:'new',search:'',showFiltered:false,showUnknown:true,subscribed:[],policy:null,selected:null,fixtureKeys:{},localIds:[]};
-const community={
-  guild:{inherits:['alliance'],reviewers:{}},
-  alliance:{inherits:[],reviewers:{}},
-  safety:{inherits:[],reviewers:{}}
-};
+const state={replica:new Replica(),identity:null,db:null,space:'all',type:'All',layout:'grid',sort:'new',search:'',showFiltered:false,showUnknown:true,subscribed:[],policy:null,selected:null,fixtureKeys:{},localIds:[],groupIds:{},compiledGroups:{},groupViews:[],userTrusted:[]};
+// Moderation authority derives from signed group checkpoints, not hard-coded group objects.
 const previewContent=[
  {space:'art',type:'Art',title:'Some interesting visual experiments',text:'A small collection of sketches and procedural compositions. What should be explored next?',image:'../thumb/thumb11.jpg',fields:{media:'Image gallery',count:4},author:'maker'},
  {space:'organize',type:'Event',title:'A neighborhood tool-sharing meetup',text:'Bring something you can repair or lend. A loosely organized public gathering with no central organizer.',fields:{start:'2027-04-14',location:'Local community center'},author:'organizer'},
@@ -33,7 +30,7 @@ const nickname=author=>Object.entries(state.fixtureKeys).find(([,v])=>v.author==
 function policy() {
   return {...DEFAULT_POLICY,followedSpaces:Object.keys(spaces),showUnknown:state.showUnknown,
     trustedAuthors:[...new Set([state.identity.author,...Object.values(state.fixtureKeys).filter(x=>x.name!=='outsider').map(x=>x.author),...(state.userTrusted || [])])],
-    groups:community,subscriptions:state.subscribed,
+    groups:state.compiledGroups,subscriptions:state.subscribed,
     reviewerWeights:{[state.identity.author]:1}
   };
 }
@@ -56,8 +53,17 @@ async function init() {
     state.fixtureKeys[name]=await generateIdentity();
     state.fixtureKeys[name].name=name;
   }
-  community.guild.reviewers[state.fixtureKeys.guildReviewer.author]=1;
-  community.safety.reviewers[state.fixtureKeys.safetyReviewer.author]=1;
+  // Signed demonstration groups with member-ratified reviewer appointments.
+  for(const [key,name] of [['guild','Open Commons Guild'],['safety','Safety Cooperative']]){
+    const issuer=state.fixtureKeys[key==='guild'?'guildReviewer':'safetyReviewer'];
+    const charter=await signEvent(issuer,{kind:'group',body:{name,quorum:{numerator:2,denominator:3}}});
+    const proposal=await signEvent(issuer,{kind:'proposal',body:{
+      group:charter.id,parent:charter.id,change:{type:'appoint-reviewer',author:issuer.author,weight:1}
+    }});
+    const ballot=await signEvent(issuer,{kind:'vote',body:{proposal:proposal.id,choice:'approve'}});
+    state.groupIds[key]=charter.id;
+    for(const event of [charter,proposal,ballot])await state.replica.ingest(event);
+  }
   let k=0;
   for(const item of previewContent) {
     const identity=state.fixtureKeys[item.author],fields={...item.fields,uiType:item.type};
@@ -72,7 +78,33 @@ async function init() {
   for(const event of local) {
     if((await state.replica.ingest(event)).accepted) state.localIds.push(event.id);
   }
+  await refreshGroups();
   state.policy=policy(); bindEvents();render();
+}
+async function refreshGroups() {
+  const events=state.replica.list(), compiled={},views=[];
+  for(const record of events.filter(e=>e.payload.kind==='group')){
+    const view=await deriveGroup(events,record.id);
+    if(!view.found)continue;
+    compiled[record.id]={reviewers:view.state.reviewers,inherits:view.state.delegates};
+    views.push({id:record.id,name:view.state.name,heads:view.heads,ambiguous:view.ambiguous});
+  }
+  state.compiledGroups=compiled;state.groupViews=views;
+  const known=new Set(views.map(x=>x.id));
+  state.subscribed=state.subscribed.filter(id=>known.has(id));
+  renderGroupChoices();
+}
+function renderGroupChoices() {
+  const target=$('#customGroups');
+  target.replaceChildren();
+  for(const info of state.groupViews.filter(v=>!Object.values(state.groupIds).includes(v.id))){
+    const label=textEl('label','federation',''),input=document.createElement('input');
+    input.type='checkbox';input.checked=state.subscribed.includes(info.id);
+    input.onchange=()=>{state.subscribed=input.checked?[...new Set([...state.subscribed,info.id])]:state.subscribed.filter(x=>x!==info.id);render();};
+    const mark=textEl('span','federation-mark mark-blue','C'),copy=textEl('span','','');
+    copy.append(textEl('strong','',info.name),textEl('small','',info.ambiguous?'Conflicting histories: founder rules':'Signed group · '+info.id.slice(0,16)+'…'));
+    label.append(input,mark,copy);target.append(label);
+  }
 }
 function howLong(ts){
   const hours=Math.max(0,Math.floor((Date.now()-ts)/3600000));
@@ -157,8 +189,8 @@ function bindEvents(){
   $('#showUnknown').onchange=e=>{state.showUnknown=e.target.checked;render();};
   $('#showFiltered').onchange=e=>{state.showFiltered=e.target.checked;render();};
   $('#hiddenToggle').onclick=()=>{state.showFiltered=!state.showFiltered;$('#showFiltered').checked=state.showFiltered;render();};
-  $('#subscribeGuild').onchange=e=>{state.subscribed=e.target.checked?[...new Set([...state.subscribed,'guild'])]:state.subscribed.filter(x=>x!=='guild');render();};
-  $('#subscribeSafety').onchange=e=>{state.subscribed=e.target.checked?[...new Set([...state.subscribed,'safety'])]:state.subscribed.filter(x=>x!=='safety');render();};
+  $('#subscribeGuild').onchange=e=>{state.subscribed=e.target.checked?[...new Set([...state.subscribed,state.groupIds.guild])]:state.subscribed.filter(x=>x!==state.groupIds.guild);render();};
+  $('#subscribeSafety').onchange=e=>{state.subscribed=e.target.checked?[...new Set([...state.subscribed,state.groupIds.safety])]:state.subscribed.filter(x=>x!==state.groupIds.safety);render();};
   $('#composeButton').onclick=()=>$('#composer').showModal();
   $('#closeCompose').onclick=()=>$('#composer').close();
   $('#closeDetail').onclick=()=>$('#detail').close();
@@ -203,7 +235,7 @@ function bindEvents(){
       if(parsed.format!=='web9000-events-v1'||!Array.isArray(parsed.events)||parsed.events.length>3000)throw Error('Invalid signed export');
       let count=0;
       for(const event of parsed.events){if(!await verifyEvent(event))continue;const result=await addLocal(event);if(result.accepted&&!result.duplicate)count++;}
-      render();newToast('Imported '+count+' valid new events. No moderator approval.');
+      await refreshGroups();render();newToast('Imported '+count+' valid new events. No moderator approval.');
     }catch(err){newToast('Import rejected: '+err.message);}finally{e.target.value='';}
   };
   // Stored user trust is independent of the embedded site, group or namespace.

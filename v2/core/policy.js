@@ -30,8 +30,11 @@ export function decide(event, events, policy=DEFAULT_POLICY, viewer=null) {
   const reviewers=resolveReviewers(policy);
   const labels=events.filter(e=>e.payload.kind==='label' && e.payload.body.target===event.id && e.payload.author!==p.author)
     .filter(e=>e.payload.author===viewer || (reviewers.get(e.payload.author)||0)>0);
-  const scoreFor=tag=>labels.filter(e=>e.payload.body.tag===tag)
-    .reduce((sum,e)=>sum+(e.payload.author===viewer ? 1 : reviewers.get(e.payload.author)||0),0);
+  // Duplicate signed labels from one reviewer never multiply their vote.
+  const scoreFor=tag=>{
+    const distinct=new Set(labels.filter(e=>e.payload.body.tag===tag).map(e=>e.payload.author));
+    return [...distinct].reduce((sum,author)=>sum+(author===viewer ? 1 : reviewers.get(author)||0),0);
+  };
   const tags=[...new Set(labels.map(e=>e.payload.body.tag))];
   // A label applies to *this view*. It cannot erase the original record.
   const hit=tags.find(t=>(policy.hideTags||[]).includes(t) && scoreFor(t)>=(policy.minLabelWeight||1));
