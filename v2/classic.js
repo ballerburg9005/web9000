@@ -128,6 +128,14 @@ function tile(item,i){
   card.addEventListener('click',()=>expand(item.event.id));
   return card;
 }
+function updateNetworkStatus(){
+  if(!state.identity)return;
+  $('peerStatus').textContent=(state.mesh?.connected||0)+' peer(s) · '+
+    allEvents().filter(e=>e.payload.kind==='post').length+
+    ' signed posts · '+state.outbox.length+' queued';
+  $('joinNetwork').textContent=state.mesh?.connected?'◉ Network':'Join Network';
+  $('joinNetwork').classList.toggle('connected',!!state.mesh?.connected);
+}
 function render(){
   if(!state.identity)return;
   const feed=effectiveFeed(),grid=$('imageGrid');
@@ -135,9 +143,7 @@ function render(){
   grid.className='grid '+state.view;
   const nodes=feed.map(tile);
   grid.replaceChildren(...nodes);
-  $('peerStatus').textContent=(state.mesh?.connected||0)+' peer(s) · '+allEvents().filter(e=>e.payload.kind==='post').length+' signed posts · '+state.outbox.length+' queued';
-  $('joinNetwork').textContent=state.mesh?.connected?'◉ Network':'Join Network';
-  $('joinNetwork').classList.toggle('connected',!!state.mesh?.connected);
+  updateNetworkStatus();
   $('feedStatus').textContent=feed.length+' '+(feed.length===1?'post':'posts')+
     (feed.some(x=>x.demo)?' · demo images only, not network data':'')+
     (state.audit?' · showing suppressed publications and moderation evidence':'');
@@ -523,9 +529,13 @@ async function init(){
   state.mesh=new BrowserPeerMesh({
     securePage:location.protocol==='https:',
     getPending:()=>state.outbox.map(x=>x.event),
-    onStatus:()=>render(),
+    // Network progress updates must never destroy the grid or the focused
+    // element. Previously each batch and ACK replaced every post node,
+    // causing lost keyboard focus and detached click targets.
+    onStatus:()=>updateNetworkStatus(),
     onEvent:async e=>{
-      if((await ingest(e)).accepted)render();
+      await ingest(e); // new signed records schedule one redraw per frame
+      updateNetworkStatus();
     },
     onAck:(id,url)=>{
       void(async()=>{
@@ -534,7 +544,7 @@ async function init(){
         item.ackedBy=[...new Set([...item.ackedBy,url])];
         if(state.peers.length&&state.peers.every(peer=>item.ackedBy.includes(peer)))
           state.outbox=state.outbox.filter(x=>x.event.id!==id);
-        await store();render();
+        await store();updateNetworkStatus();
       })().catch(console.error);
     },
     onError:(url,message)=>{state.lastError=String(message);toast('Peer rejected/failed: '+message);}

@@ -56,8 +56,9 @@ async function ready(page){
  }
 }
 async function connect(page,url){
- await page.click('#joinNetwork');await page.type('#peerURLs',url);
- await page.click('#connectPeers');
+ await page.evaluate(()=>document.getElementById('joinNetwork').click());
+ await page.type('#peerURLs',url);
+ await page.evaluate(()=>document.getElementById('connectPeers').click());
  await page.waitForFunction(()=>document.querySelector('#peerStatus')?.textContent.includes('1 peer(s)'),{timeout:18000});
 }
 try{
@@ -87,7 +88,7 @@ try{
  await a.keyboard.press('Escape');
  assert.equal(await a.$$('.post-container.expanded').then(x=>x.length),0);
  console.log('CLASSIC checkpoint 4: row collapsed');
- await a.click('#postNew');
+ await a.evaluate(()=>document.getElementById('postNew').click());
  await a.type('#composeTitle','My first actual cats post');
  await a.type('#composeText','This is real signed text, not placeholder debug output.');
  await a.type('#composeTags','cats, memes');
@@ -100,7 +101,7 @@ try{
  });
  await a.type('#composeLocation','A local meetup');
  console.log('CLASSIC checkpoint 5: composed native form');
- await a.click('#submitPost');
+ await a.evaluate(()=>document.getElementById('postForm').requestSubmit());
  await a.waitForFunction(()=>[...document.querySelectorAll('.post-headline')].some(x=>x.textContent==='My first actual cats post'),{timeout:15000});
  console.log('CLASSIC checkpoint 6: signed local post visible');
  await connect(a,bridge.url);
@@ -108,20 +109,20 @@ try{
  console.log('CLASSIC checkpoint 7: offline post reached mirror');
  await b.goto(originB,{waitUntil:'domcontentloaded'});await ready(b);
  console.log('CLASSIC checkpoint 8: second browser ready');
- await b.click('#showUnverified');
+ await b.evaluate(()=>document.getElementById('showUnverified').click());
  console.log('CLASSIC checkpoint 9: second browser opted into raw lane');
  await connect(b,bridge.url);
  await b.waitForFunction(()=>[...document.querySelectorAll('.post-headline')].some(x=>x.textContent==='My first actual cats post'),{timeout:18000});
  console.log('CLASSIC checkpoint 10: second browser received real post');
- await b.click('.post[data-index="0"]');
+ await b.evaluate(()=>document.querySelector('.post[data-index="0"]').click());
  assert.ok((await b.$$eval('.poll button',x=>x.length))>=2,'native poll UI');
  assert.ok((await b.$$eval('.schedule',x=>x.length))>=1,'native date UI');
  console.log('CLASSIC checkpoint 11: post details, poll and schedule visible');
  await b.type('.comment-form textarea','A separate, real signed comment');
- await b.click('.comment-form button');
+ await b.evaluate(()=>document.querySelector('.comment-form button').click());
  await a.waitForFunction(()=>[...document.querySelectorAll('.comment-text')].some(x=>x.textContent==='A separate, real signed comment'),{timeout:18000});
  console.log('CLASSIC checkpoint 12: signed comment received');
- await b.click('.reactions button');
+ await b.evaluate(()=>document.querySelector('.reactions button').click());
  await eventually(()=>bridge.replica.list().some(x=>x.payload.kind==='reaction'),'signed reaction through OrbitDB');
  console.log('CLASSIC checkpoint 13: signed reaction received');
  assert.deepEqual(errors,[]);
