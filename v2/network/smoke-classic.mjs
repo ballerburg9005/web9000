@@ -59,7 +59,7 @@ async function connect(page,url){
  await page.evaluate(()=>document.getElementById('joinNetwork').click());
  await page.type('#peerURLs',url);
  await page.evaluate(()=>document.getElementById('connectPeers').click());
- await page.waitForFunction(()=>document.querySelector('#peerStatus')?.textContent.includes('1 peer(s)'),{timeout:18000});
+ await eventually(()=>page.evaluate(()=>document.querySelector('#peerStatus')?.textContent.includes('1 peer(s)')),'connected browser peer',20000);
 }
 try{
  libp2p=await createLibp2p({addresses:{listen:['/ip4/127.0.0.1/tcp/0']},
@@ -102,7 +102,7 @@ try{
  await a.type('#composeLocation','A local meetup');
  console.log('CLASSIC checkpoint 5: composed native form');
  await a.evaluate(()=>document.getElementById('postForm').requestSubmit());
- await a.waitForFunction(()=>[...document.querySelectorAll('.post-headline')].some(x=>x.textContent==='My first actual cats post'),{timeout:15000});
+ await eventually(()=>a.evaluate(()=>[...document.querySelectorAll('.post-headline')].some(x=>x.textContent==='My first actual cats post')),'signed classic post rendered');
  console.log('CLASSIC checkpoint 6: signed local post visible');
  await connect(a,bridge.url);
  await eventually(()=>bridge.replica.list().some(x=>x.payload.body.title==='My first actual cats post'),'offline classic post delivery');
@@ -112,7 +112,7 @@ try{
  await b.evaluate(()=>document.getElementById('showUnverified').click());
  console.log('CLASSIC checkpoint 9: second browser opted into raw lane');
  await connect(b,bridge.url);
- await b.waitForFunction(()=>[...document.querySelectorAll('.post-headline')].some(x=>x.textContent==='My first actual cats post'),{timeout:18000});
+ await eventually(()=>b.evaluate(()=>[...document.querySelectorAll('.post-headline')].some(x=>x.textContent==='My first actual cats post')),'remote signed classic post rendered');
  console.log('CLASSIC checkpoint 10: second browser received real post');
  await b.evaluate(()=>document.querySelector('.post[data-index="0"]').click());
  assert.ok((await b.$$eval('.poll button',x=>x.length))>=2,'native poll UI');
@@ -120,7 +120,7 @@ try{
  console.log('CLASSIC checkpoint 11: post details, poll and schedule visible');
  await b.type('.comment-form textarea','A separate, real signed comment');
  await b.evaluate(()=>document.querySelector('.comment-form button').click());
- await a.waitForFunction(()=>[...document.querySelectorAll('.comment-text')].some(x=>x.textContent==='A separate, real signed comment'),{timeout:18000});
+ await eventually(()=>a.evaluate(()=>[...document.querySelectorAll('.comment-text')].some(x=>x.textContent==='A separate, real signed comment')),'remote signed comment rendered');
  console.log('CLASSIC checkpoint 12: signed comment received');
  await b.evaluate(()=>document.querySelector('.reactions button').click());
  await eventually(()=>bridge.replica.list().some(x=>x.payload.kind==='reaction'),'signed reaction through OrbitDB');
