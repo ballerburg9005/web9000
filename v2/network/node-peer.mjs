@@ -19,6 +19,7 @@ import {createHelia} from 'helia';
 import {createOrbitDB} from '@orbitdb/core';
 import {openPublicIndex} from './orbit-index.js';
 import {Replica} from '../core/replica.js';
+import {createBrowserBridge} from './browser-bridge.mjs';
 
 const dir=path.resolve(process.argv[2] || './.web9000-peer');
 const indexName=process.argv[3] || 'web9000-public-test';
@@ -33,17 +34,25 @@ const libp2p=await createLibp2p({
 });
 const ipfs=await createHelia({libp2p,blockstore:new LevelBlockstore(path.join(dir,'blocks'))});
 const orbitdb=await createOrbitDB({ipfs,directory:path.join(dir,'orbitdb')});
-let index;
+let index,bridge;
 try {
   if(remote) await libp2p.dial(multiaddr(remote));
   index=await openPublicIndex(orbitdb,indexName);
   const replica=new Replica({maxEvents:200000});
   const initial=await index.loadInto(replica);
+  const origins=process.env.WEB9000_WS_ORIGINS?.split(',').map(x=>x.trim()).filter(Boolean)||null;
+  bridge=await createBrowserBridge({index,replica,
+    host:process.env.WEB9000_WS_HOST||'127.0.0.1',
+    port:process.env.WEB9000_WS_PORT===undefined?8787:Number(process.env.WEB9000_WS_PORT),
+    allowedOrigins:origins
+  });
   index.onUpdate(async ev=>{
     const result=await replica.ingest(ev);
     if(result.accepted&&!result.duplicate)console.log('RECEIVED',ev.id,'space',ev.payload.space,'local records',replica.size);
   });
   console.log('INDEX',index.address);
+  console.log('BROWSER',bridge.url,'(WebSocket, optional; expose through WSS reverse proxy for HTTPS sites)');
+  console.log('WEB9000 bridge is not an authoritative registry or relay and does not serve media.');
   for(const addr of libp2p.getMultiaddrs())console.log('PEER',addr.toString());
   console.log('Initially ingested',initial.filter(x=>x.accepted).length,'signed events.');
   console.log('Paste one signed event JSON per line to append to this public index.');
@@ -59,6 +68,7 @@ try {
   }
 }catch(e){console.error('Peer error:',e);process.exitCode=1;}
 finally{
+  if(bridge)await bridge.close();
   if(index)await index.close();
   await orbitdb.stop();
   await ipfs.stop();
