@@ -112,7 +112,7 @@ try{
  await a.focus('.post[data-index="0"]');await a.keyboard.press('ArrowRight');
  assert.equal(await a.evaluate(()=>document.activeElement.dataset.index),'1','arrow navigates image tiles');
  await a.keyboard.press('Enter');
- assert.equal(await a.$('.post-container.expanded').then(x=>x.length),1,'expanded row under thumbnail');
+ assert.equal(await a.evaluate(()=>document.querySelectorAll('.post-container.expanded').length),1,'expanded row under thumbnail');
  await eventually(()=>a.evaluate(()=>{
    const image=document.querySelector('.expanded-body .attachments img');
    return !!image && image.complete && image.naturalWidth>0 && image.getBoundingClientRect().width>=300;
