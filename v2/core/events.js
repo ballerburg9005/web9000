@@ -66,8 +66,8 @@ export function validatePayload(p) {
   if (p.kind === 'endorse' && (typeof p.body.subject !== 'string' || !/^ed25519:[a-zA-Z0-9_-]{43}$/.test(p.body.subject) || !['trust','distrust'].includes(p.body.action))) throw Error('Invalid endorsement');
   return p;
 }
-export async function generateIdentity() {
-  const keys = await crypto.subtle.generateKey('Ed25519', false, ['sign','verify']);
+export async function generateIdentity({extractable=false}={}) {
+  const keys = await crypto.subtle.generateKey('Ed25519', extractable, ['sign','verify']);
   const raw = await crypto.subtle.exportKey('raw', keys.publicKey);
   return {author: 'ed25519:' + toB64(new Uint8Array(raw)), privateKey: keys.privateKey, publicKey: keys.publicKey};
 }
