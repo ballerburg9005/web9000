@@ -1,68 +1,44 @@
-# Project specification
-I want to create a serverless federated board system with federated DAOs for oversight, spam control and to establish inter-board legitimacy (content, users, interactions) plus content pinning, based on GunDB and IPFS for images, projects, blogs, websites, news, and a variety of other contents. User identity is build around signing messages with unique private keys and established credibility within guilds of boards. 
+# WEB9000 — development specification (v2)
 
-The project is FOSS with just me as a dev. I am somewhat good at backend and frontend development, but my understanding of GunDB, IPFS, OrdbitDB and decentralized systems is rather poor. I am discarding the idea of blockchain integration (e.g. for payments or DAO management), because it overcomplicates an already complex project, albeit would be nice if you could somehow keep things open for extending the system this way in the future.
+**Status:** Actively rebuilding. The root `index.html`, `stubloader.js`, `styles.css` and legacy tests are historical prototypes. The new application lives in `v2/`. The original historical instructions are archived at `legacy/AGENTS-2025.md`.
 
-I want the board system to be minimal maintenance and if possible only use pure Javascript in a function over form kind of manner, but obviously many library dependences are still needed to make it work and palatable and avoid coding too much by hand.
+## Non-negotiable protocol constraints
 
-## WEB9000: A Serverless Federated Board System
-WEB9000 is a fully decentralized, serverless board system designed to replace traditional image boards, blogs, forums, marketplaces, and more. It operates on GunDB and IPFS, leveraging federated DAOs for governance, spam control, and content legitimacy. Users and communities organize into clans (small groups) and guilds (federations), which establish moderation rules, spam filtering, and governance frameworks without a central authority.
+1. **Permissionless publishing to all spaces.** Any signer can publish a content event addressed to any arbitrary namespace. There is no global namespace owner, moderator, registry, admin key, DAO veto, enforced group membership, or stake requirement for cryptographically valid records. Even a website claiming dictator-like ownership over a space cannot stop competing signed publications from being carried by independent peers.
+2. **No universal deletion or revocation.** Records are immutable, signed and independently retrievable from any willing holder. Retractions, spam flags, illegal-content hash labels, copyright claims and owner preferences affect only adopted *views* and *local replication*. Never add an API that deletes third-party copies or a consensus that makes signed content retrospectively invalid.
+3. **Voluntary replication and moderation.** Peers choose which records/IPFS blocks to mirror. People can form self-governing hierarchical groups, inherit or override rules, and choose independent moderation specialists. Group charters, membership decisions and votes are **signed claims**, not universal network permissions. Conflicting ratified group histories stay selectable.
+4. **No compulsory anti-bot credential.** Stake4Karma is optional reputation evidence and its current testnet contract is unaudited. Invitations require consent; weighted reputation influences a viewer's feed, never a post's ability to exist.
+5. **No surprise media.** Text metadata and IPFS CID references may propagate without fetching file bytes. Do not automatically download or pin unknown media. Node operators individually choose refusal, quarantine, and unpin policies based on reviewed evidence. Respect applicable law; no global takedown command.
+6. **No authoritative infrastructure.** Neither OrbitDB indexes, libp2p bootstrap/relay nodes, WebSocket bridges, static website hosts, nor IPFS pinning peers may become mandatory for protocol validity. Advertise portable signed records independently of indexes; users may operate alternative indexes, bridge them, and host their own transport peers.
 
-## Core Features
+**Physical limitation:** A record absent from all online mirrors cannot be made magically available. Permissionless publishing and immunity from universal remote deletion do not guarantee eternal reachability.
 
-* Serverless & Decentralized – Built on GunDB for distributed storage and IPFS for hosting images and other media.
-* No Predefined Post Types – Every post is a flexible Markdown (MD) file containing lists of content (e.g., images, links, schedules, polls). The frontend dynamically determines post type based on populated data.
-Federated Governance – Users self-organize into clans and guilds and coalitions, subscribing to optional governance rules, moderation tools, and spam filtering.
-* Multimodal Content Grid – Posts can contain images, audio, 3D files, documents, polls, events, projects, and discussions, intelligently rendered inside a content grid.
-* Autonomous Spaces – Some boards are democratic (vote-based moderation), while others are autocratic (single-user controlled, e.g., blogs or stores).
-* No Website Styling – The board exists as a pure content grid, where presentation is determined by post metadata and content population rather than fixed UI themes.
-* No Servers - Web9000 can be served locally (all content is pulled via GunDB and IPFS) and hosting it on a live website doesn't pull content from that website (other than Web9000 code) the same way
+## Current implementation
 
-### Intelligent Content Rendering in grid view (initial idea):
-* If a post has multiple images, the first image is displayed with micro-thumbnails on the right.
-* If a post has audio, a play button is overlayed.
-* If a post has no media, its Markdown text is previewed in the grid.
-* Icons for polls, events, documents, or funding appear dynamically with hover info
+- `v2/core/events.js`: domain-separated Ed25519 canonical signed events, arbitrary post fields, IPFS metadata references, signatures and schema. Preserve event-v1 compatibility or explicitly version migrations.
+- `v2/core/replica.js`: local signature-validating independent mirror, deliberately no space ownership ACL.
+- `v2/core/policy.js`: local reviewer delegation, space preferences, independent deduplicated labels, feed visibility.
+- `v2/core/governance.js`: signed founder charters, proposals, votes, quorum, competing ratified forks; no globally selected head.
+- `v2/core/reputation.js`: mutually signed invitations, bounded multi-hop trust and local sponsor sanctions. Not a staking verifier.
+- `v2/core/media-policy.js`: individually adopted CID-level and record-level quarantine and optional **local** unpin.
+- `v2/core/identity-backup.js`: password-encrypted portable key backups; no administrator recovery.
+- `v2/app.js`, `v2/index.html`, `v2/styles.css`: redesigned static browser UI. The code host is not a database.
+- `v2/network/node-peer.mjs`: a persistent libp2p/Helia/OrbitDB Node mirror with optional local WebSocket-accessible browser bridge, configurable P2P port.
+- `v2/network/browser-mesh.js`, `browser-bridge.mjs`, `mirror-policy.js`: browser-to-independent-peer transport, signature validation, manual replication scopes, optional conservative trusted-record mirroring across unrelated indexes.
+- `v2/network/site-context.js`: a website can suggest a space and an owner-preferred *view*; this is never exclusive write permission.
 
-### Classic list-based content rendering:
-A list with single rows and a smaller 30px or so media content preview on left is displayed to prioritize text (similar to reddit old layout, but with direct text preview)
+The browser currently uses WebSocket to arbitrary independent Node mirrors, **not** direct browser-native libp2p or a public bootstrap network. IPFS upload/pinning and abuse screening are not complete. Do not claim a production-ready or anonymous network.
 
-Minimal Maintenance – Designed to function with no central servers or manual intervention.
-Extendable for Future Features – While blockchain integration is currently avoided for simplicity, the system remains open for decentralized payments, staking, or DAO-driven governance in the future.
+## Operational instructions
 
-## Use Cases
-WEB9000 is designed to be infinitely flexible, supporting:
+From the repository root, `python3 -m http.server 4173` serves the static v2 interface at `/v2/`. In another terminal run `cd v2/network && npm install && node node-peer.mjs ./peer-a`. The peer exposes a loopback `ws://127.0.0.1:8787/` bridge by default; select it in the browser under **Manage peers**. A real HTTPS deployment requires an independently controlled WSS reverse proxy. `WEB9000_P2P_PORT=9000` sets a stable incoming TCP port, while a per-directory peer key persists libp2p identity. See `v2/README.md`.
 
-* Classic Image Boards – Meme culture, artwork, anonymous discussions.
-* Decentralized Marketplaces – Merchant guild-run commerce, bartering, NFT-style assets.
-* Forums & Community Hubs – Special interest groups, discussions, voting-based moderation.
-* Crowdfunding & Project Backing – Users can pledge cryptocurrency, man-hours or compute time to ideas that grow into projects.
-* Job Listings & Classifieds – Decentralized hiring and local exchange networks.
-* Meetups & Event Organizing – Public and private scheduling, RSVP, location-based events.
-* Decentralized News & Blogs – Self-hosted, federated blogging without censorship.
-* Science & Research Collaboration – Open-source academic publishing and funding.
-* Crisis Response & Mutual Aid – Disaster relief coordination, peer-to-peer financial help.
-* P2P Governance & Lawmaking – DAO-based rule-making and arbitration courts.
-* facilitates direct bitcoin lightning payments
+## Tests / engineering rules
 
-## Current Development
-
-I have fleshed out roughly the grid view UI with Grok-3 and example content. It still has lots of quirks and is incomplete.
-
-## Challenges 
-
-The absence of any sort of central authority poses two main issues:
-
-1. Massive amounts of spam. This ought to be solved by punishing user clans and guilds for their own misbehaving users. Conversely clans and guilds can cherry-pick which other clans and guilds to trust. Because this would result in a joungle of authorities, clans and guilds are urged to become part of even bigger federations, so that in the end only a hand full of coalitions exist which primarily determine what to display and not to display. However clans and guilds can override whatever those coalitions have determined to be proper. It is also conceivable that clans and guilds can create specialized police forces, which would enjoy higher power to flag and disqualify content. However on the other hand their clans would also receive as much higher punishment if police force misbehaves in the eyes of the coalition. 
-2. No means to validate database entries. Primarily this would be solved with multi-signature mechanisms like Distributed Key Generation. However then again we need to simplify this by resorting to clan/guild/coalition trust.
-
-Since no JS exists for DKG the idea was to load for example ZenGo-X's Multi-Party ECDSA and BLS Libraries or Kyber via webassembly, in lack of better options.
-
-## Vision
-WEB9000 is a self-organizing alternative to the centralized web, providing a truly open space for community-driven content, governance, and economy. By eliminating platform gatekeeping, it ensures free expression, censorship resistance, and user-driven moderation.
-
-## Development guidelines
-
-* Prefer vanilla JavaScript when possible.
-* A Puppeteer-based test suite exists under `npm test`.
-* Run `npm install` once to set up dependencies, then `npm test` before submitting any PR.
+- Node.js >=22; pure ESM; prefer browser-native Web APIs, no mandatory hosted APIs.
+- Run `cd v2 && npm test` for cryptography, governance, reputation, media and policy tests.
+- Run `cd v2/network && npm install && npm run test:peer-identity && npm run test:peers && npm run test:browser-bridge && npm run test:independent-indexes`.
+- GitHub Actions `.github/workflows/web9000-v2.yml` performs these checks. Fix failing tests and verify the latest head commit before claiming success.
+- Preserve signed event interoperability; validate every untrusted ingress by schema and signature; bound memory, message size and rate. Render external text with `textContent`, never as untrusted HTML.
+- Media pinning, legal compliance, CSAM prevention, private/political-group confidentiality, identity privacy, and hostile hosted-app scripting remain security-critical tasks requiring review.
+- Use a development branch/draft PR; do not merge over the historical interface without explicit approval.
