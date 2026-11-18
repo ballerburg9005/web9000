@@ -19,7 +19,7 @@
     "libp2p": "^3.5.1",
     "ws": "^8.18.3",
     "@libp2p/crypto": "^5.2.0",
-    "@helia/unixfs": "^8.0.9"
+    "multiformats": "^13.4.1"
   },
   "scripts": {
     "test:peers": "node smoke.mjs",

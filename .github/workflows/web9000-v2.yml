@@ -79,7 +79,7 @@ jobs:
         working-directory: v2/network
         timeout-minutes: 3
         run: npm run test:browser-ui
-      - name: Real Helia IPFS media upload, retrieve and refusals
+      - name: Real Helia IPFS raw-block image upload, retrieve and refusals
         working-directory: v2/network
         timeout-minutes: 3
         run: npm run test:media

@@ -8,7 +8,8 @@ import {createServer} from 'node:http';
 import {readFile,writeFile,rename,mkdir} from 'node:fs/promises';
 import path from 'node:path';
 import {CID} from 'multiformats/cid';
-import {unixfs as createUnixfs} from '@helia/unixfs';
+import * as raw from 'multiformats/codecs/raw';
+import {sha256} from 'multiformats/hashes/sha2';
 
 const MAX_UPLOAD=256*1024;
 const DAILY_PER_IP=12;
@@ -39,7 +40,8 @@ export async function createImageGateway({
   uploadEnabled=false,maxTotal=MAX_TOTAL
 }={}){
   if(!ipfs||typeof manifestFile!=='string')throw Error('Helia and manifest file required');
-  const files=createUnixfs(ipfs);
+  // Small images use standard IPFS raw-codec blocks: CIDv1 + SHA-256.
+  // This avoids a large UnixFS dependency for a <=256 KiB single-block demo.
   let manifest={};
   try{
     const parsed=JSON.parse(await readFile(manifestFile,'utf8'));
@@ -86,7 +88,9 @@ export async function createImageGateway({
         const bytes=await readLimited(req,MAX_UPLOAD);
         if(bytes.length!==len||!allowed[type](bytes))
           return send(res,415,{error:'Image content does not match its declared format'});
-        const cid=(await files.addBytes(bytes)).toString();
+        const digest=await sha256.digest(bytes);
+        const cid=CID.createV1(raw.code,digest).toString();
+        await ipfs.blockstore.put(CID.parse(cid),bytes);
         if(!manifest[cid]){
           manifest[cid]={type,bytes:bytes.length,time:Date.now()};
           totalBytes+=bytes.length;
@@ -103,12 +107,11 @@ export async function createImageGateway({
       // Human-initiated client image fetch; do not cache into intermediate CDNs.
       try{
         const cid=CID.parse(match[1]);
-        const chunks=[],max=Math.min(record.bytes+1,MAX_UPLOAD+1);let size=0;
-        for await(const chunk of files.cat(cid)){
-          size+=chunk.length;if(size>max)throw Error('Unexpected image length');
-          chunks.push(chunk);
-        }
-        const bytes=Buffer.concat(chunks,size);
+        if(cid.code!==raw.code)throw Error('Unsupported image block codec');
+        const bytes=Buffer.from(await ipfs.blockstore.get(cid));
+        const digest=await sha256.digest(bytes);
+        if(Buffer.compare(Buffer.from(digest.bytes),Buffer.from(cid.multihash.bytes))!==0)
+          throw Error('Stored image failed CID checksum');
         if(bytes.length!==record.bytes||!allowed[record.type]?.(bytes))
           throw Error('Local image corrupted');
         res.writeHead(200,{'content-type':record.type,'content-length':bytes.length,
