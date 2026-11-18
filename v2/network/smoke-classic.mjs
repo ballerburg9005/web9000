@@ -81,6 +81,34 @@ try{
  console.log('CLASSIC checkpoint 1: initial page ready');
  assert.ok((await a.$$('.post')).length>=20,'original visual demo board');
  console.log('CLASSIC checkpoint 2: demo tile grid rendered');
+ const kinds=await a.$$eval('.post-icons',els=>els.map(e=>e.textContent));
+ for(const expected of ['Meetup','Poll','Jobs','Offer','Project','Text','Video'])
+   assert.ok(kinds.some(value=>value.includes(expected)), 'missing sample content icon: '+expected);
+ assert.equal(await a.evaluate(()=>document.querySelectorAll('.post-small.demo-label').length),24);
+ await a.evaluate(()=>document.querySelector('.post[data-index="2"]').click());
+ assert.ok((await a.$$eval('.poll button',els=>els.length))>=3,'sample poll has choices');
+ assert.ok((await a.$$eval('.reactions button',els=>els.length))>=5,'sample preview has voting and flagging bar');
+ assert.ok((await a.$$eval('.comment-form textarea',els=>els.length))===1,'sample has comment form');
+ const beforeScore=await a.$eval('.reactions .score',e=>Number(e.textContent));
+ await a.evaluate(()=>document.querySelector('.reactions button').click());
+ const afterScore=await a.$eval('.reactions .score',e=>Number(e.textContent));
+ assert.equal(afterScore,beforeScore+2,'demo voting works within local preview');
+ assert.equal(await a.evaluate(()=>document.querySelector('.post-container.expanded')!==null),true);
+ await a.evaluate(()=>document.querySelector('.post.selected').click());
+ assert.equal(await a.evaluate(()=>document.querySelectorAll('.post-container.expanded').length),0);
+ await a.evaluate(()=>document.getElementById('mockKarmaButton').click());
+ assert.equal(await a.evaluate(()=>document.getElementById('mockDialog').open),true);
+ await a.evaluate(()=>{
+   document.getElementById('mockEnabled').click();
+   document.getElementById('mockScore').value='42';
+   document.getElementById('saveMockKarma').click();
+ });
+ await eventually(()=>a.evaluate(()=>document.querySelector('#mockRoster')?.textContent.includes('42/100')),
+   'mock numerical key score stored');
+ assert.equal(await a.evaluate(()=>document.querySelector('#mockModeLabel')?.hidden),false,
+   'simulated reputation must always show a conspicuous test-mode label');
+ await a.evaluate(()=>document.getElementById('closeMockDialog').click());
+
  await a.focus('.post[data-index="0"]');await a.keyboard.press('ArrowRight');
  assert.equal(await a.evaluate(()=>document.activeElement.dataset.index),'1','arrow navigates image tiles');
  await a.keyboard.press('Enter');
