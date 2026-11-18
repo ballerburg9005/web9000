@@ -40,3 +40,11 @@ test('local mixed file limits and signed metadata are constrained',async()=>{
  assert.throws(()=>validateLocalUploads(Array.from({length:7},()=>({
    name:'x.png',type:'image/png',size:100}))));
 });
+test('binary MiB caps apply equally to every audio/video format',()=>{
+ for(const type of ['audio/mpeg','audio/ogg','audio/wav','video/mp4','video/webm']){
+  const exact={name:'exact',type,size:10*1024*1024};
+  const tooLarge={name:'too-large',type,size:10*1024*1024+1};
+  assert.doesNotThrow(()=>validateLocalUploads([exact]),type+' accepts exactly 10 MiB');
+  assert.throws(()=>validateLocalUploads([tooLarge]),/size limit/,type+' rejects a single byte over 10 MiB');
+ }
+});

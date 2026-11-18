@@ -4,13 +4,15 @@
 import {createServer} from 'node:http';
 import {readFile,writeFile,rename,mkdir} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
+import {isIP} from 'node:net';
 import path from 'node:path';
 import {CID} from 'multiformats/cid';
 import * as raw from 'multiformats/codecs/raw';
 import {sha256} from 'multiformats/hashes/sha2';
 import {unixfs} from '@helia/unixfs';
 
-const IMAGE_MAX=256*1024,AUDIO_MAX=8*1024*1024,VIDEO_MAX=12*1024*1024;
+const IMAGE_MAX=256*1024,RICH_MAX=10*1024*1024;
+const AUDIO_MAX=RICH_MAX,VIDEO_MAX=RICH_MAX;
 const MAX_TOTAL=64*1024*1024,DAILY_IMAGES=12,DAILY_RICH=2;
 export const MEDIA_LIMITS=Object.freeze({
  'image/jpeg':IMAGE_MAX,'image/png':IMAGE_MAX,'image/webp':IMAGE_MAX,
@@ -61,9 +63,11 @@ function parseRange(value,length){
 }
 export async function createImageGateway({
  ipfs,host='127.0.0.1',port=8788,manifestFile,uploadEnabled=false,
- richMediaEnabled=false,maxTotal=MAX_TOTAL
+ richMediaEnabled=false,maxTotal=MAX_TOTAL,trustedProxyAddress=null
 }={}){
  if(!ipfs||typeof manifestFile!=='string')throw Error('Helia and manifest required');
+ if(trustedProxyAddress!==null&&!isIP(trustedProxyAddress))
+  throw Error('trustedProxyAddress must be a literal IPv4/IPv6 address');
  // Keep old entrypoint name for operator scripts and existing image CIDs.
  const fs=unixfs(ipfs);
  let manifest={};
@@ -73,8 +77,41 @@ export async function createImageGateway({
   manifest=parsed;
  }catch(err){if(err.code!=='ENOENT')throw err;}
  let totalBytes=Object.values(manifest).reduce((n,e)=>n+(e?.bytes||0),0),reserved=0;
- let writing=Promise.resolve();
- const daily=new Map();
+ let writing=Promise.resolve(),quotaWriting=Promise.resolve();
+ // Quotas survive restarts. A daily SHA-256 keyed counter avoids saving
+ // client IPs in plain text. This only provides operator-local throttling,
+ // not stake-based Sybil resistance.
+ const quotaFile=manifestFile+'.quotas.json';
+ let quotaDay=Math.floor(Date.now()/86400000);
+ let daily=new Map();
+ try{
+  const persisted=JSON.parse(await readFile(quotaFile,'utf8'));
+  if(persisted?.day===quotaDay&&Array.isArray(persisted.counts)){
+   for(const pair of persisted.counts){
+    if(Array.isArray(pair)&&typeof pair[0]==='string'&&
+       Number.isSafeInteger(pair[1])&&pair[1]>=0)
+      daily.set(pair[0],pair[1]);
+   }
+  }
+ }catch(error){if(error.code!=='ENOENT')throw error;}
+ async function persistQuotas(){
+  const snapshot={day:quotaDay,counts:[...daily]};
+  const tmp=quotaFile+'.tmp';
+  quotaWriting=quotaWriting.then(async()=>{
+   await writeFile(tmp,JSON.stringify(snapshot),{mode:0o600});
+   await rename(tmp,quotaFile);
+  });
+  await quotaWriting;
+ }
+ function rateClient(req){
+  const fromSocket=String(req.socket.remoteAddress||'unknown');
+  if(trustedProxyAddress&&fromSocket===trustedProxyAddress){
+   // Nginx must unconditionally overwrite this header with $remote_addr.
+   const supplied=String(req.headers['x-real-ip']||'');
+   if(isIP(supplied))return supplied;
+  }
+  return fromSocket;
+ }
  async function save(){
   const tmp=manifestFile+'.tmp';
   await mkdir(path.dirname(manifestFile),{recursive:true});
@@ -91,7 +128,8 @@ export async function createImageGateway({
   }
   if(req.method==='GET'&&url.pathname==='/health'){
    send(res,200,{service:'web9000-independent-media-peer',enabled:uploadEnabled,
-    richMediaEnabled,images:Object.values(manifest).filter(e=>imageTypes.has(e.type)).length,
+    richMediaEnabled,storageLimit:maxTotal,remainingBytes:Math.max(0,maxTotal-totalBytes-reserved),
+    richUploadsPerClientPerDay:DAILY_RICH,images:Object.values(manifest).filter(e=>imageTypes.has(e.type)).length,
     files:Object.keys(manifest).length,totalBytes,limit:IMAGE_MAX,
     imageLimit:IMAGE_MAX,audioLimit:AUDIO_MAX,videoLimit:VIDEO_MAX});
    return;
@@ -104,16 +142,21 @@ export async function createImageGateway({
    if(rich&&!richMediaEnabled)return send(res,403,{error:'Operator disabled audio/video ingestion'});
    const cap=MEDIA_LIMITS[type],size=Number(req.headers['content-length']);
    if(!Number.isSafeInteger(size)||size<1||size>cap)
-    return send(res,413,{error:'Media must be 1..'+cap+' bytes'});
+    return send(res,413,{error:'Media exceeds '+(rich?'10 MiB':'256 KiB')+' per-file limit'});
    // Remote address, not an attacker-provided X-Forwarded-For header.
-   const key=Math.floor(Date.now()/86400000)+'|'+
-    String(req.socket.remoteAddress||'unknown')+'|'+(rich?'rich':'image');
+   const day=Math.floor(Date.now()/86400000);
+   if(day!==quotaDay){quotaDay=day;daily=new Map();}
+   const key=createHash('sha256').update('WEB9000/upload/'+quotaDay+'/'+
+    rateClient(req)+'/'+(rich?'rich':'image')).digest('hex');
    if((daily.get(key)||0)>=(rich?DAILY_RICH:DAILY_IMAGES))
     return send(res,429,{error:'Operator daily upload quota reached'});
    if(totalBytes+reserved+size>maxTotal)return send(res,507,{error:'Operator storage quota exceeded'});
+   // Reserve atomically, before awaiting body bytes. Never trust raw
+   // X-Forwarded-For headers supplied by clients.
    daily.set(key,(daily.get(key)||0)+1);
    reserved+=size;
    try{
+    await persistQuotas();
     const bytes=await readLimited(req,cap);
     if(bytes.length!==size||!checks[type](bytes))
      return send(res,415,{error:'Bytes do not match declared media type'});

@@ -7,8 +7,8 @@ export const SUPPORTED_MEDIA_TYPES=Object.freeze([
 ]);
 export const MEDIA_FILE_LIMITS=Object.freeze({
   'image/jpeg':262144,'image/png':262144,'image/webp':262144,
-  'audio/mpeg':8388608,'audio/ogg':8388608,'audio/wav':8388608,
-  'video/mp4':12582912,'video/webm':12582912
+  'audio/mpeg':10485760,'audio/ogg':10485760,'audio/wav':10485760,
+  'video/mp4':10485760,'video/webm':10485760
 });
 export const categoryForType=type=>
   type?.startsWith('audio/')?'audio':type?.startsWith('video/')?'video':'image';
@@ -43,6 +43,6 @@ export function validateLocalUploads(files,{existingCount=0}={}){
     if(!Object.hasOwn(MEDIA_FILE_LIMITS,file.type))
       throw Error('Only JPEG/PNG/WebP, MP3/Ogg/WAV, MP4/WebM are accepted');
     if(!Number.isFinite(file.size)||file.size<1||file.size>MEDIA_FILE_LIMITS[file.type])
-      throw Error(file.name+' exceeds the selected media-type size limit');
+      throw Error(file.name+' exceeds the '+(file.type.startsWith('image/')?'256 KiB':'10 MiB')+' size limit');
   }
 }

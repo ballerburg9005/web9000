@@ -11,7 +11,7 @@ import {identify} from '@libp2p/identify';
 import {gossipsub} from '@libp2p/gossipsub';
 import {createHelia} from 'helia';
 import {LevelBlockstore} from 'blockstore-level';
-import {createImageGateway} from './media-node.mjs';
+import {createImageGateway,MEDIA_LIMITS} from './media-node.mjs';
 test('opt-in image peer stores genuine content-addressed raw IPFS blocks and refuses unsafe files',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'web9000-media-'));
  let peer,ipfs,gateway;
@@ -43,7 +43,9 @@ test('opt-in image peer stores genuine content-addressed raw IPFS blocks and ref
  }
 });
 
-test('explicit opt-in UnixFS media accepts real audio/video bytes and supports HTTP seek ranges',async()=>{
+test('explicit opt-in UnixFS media accepts 10 MiB bounded audio/video and supports HTTP seek ranges',async()=>{
+ assert.equal(MEDIA_LIMITS['audio/mpeg'],10*1024*1024);
+ assert.equal(MEDIA_LIMITS['video/mp4'],10*1024*1024);
  const dir=await mkdtemp(join(tmpdir(),'web9000-unixfs-'));
  let peer,ipfs,gateway;
  try{
@@ -62,10 +64,11 @@ test('explicit opt-in UnixFS media accepts real audio/video bytes and supports H
    'image-only peer never implicitly admits video');
   await gateway.close();
   gateway=await createImageGateway({ipfs,port:0,host:'127.0.0.1',manifestFile,
-   uploadEnabled:true,richMediaEnabled:true,maxTotal:20*1024*1024});
+   uploadEnabled:true,richMediaEnabled:true,maxTotal:20*1024*1024,
+   trustedProxyAddress:'127.0.0.1'});
   const origin='http://127.0.0.1:'+gateway.port;
   const soundResponse=await fetch(origin+'/upload',{method:'POST',
-   headers:{'content-type':'audio/mpeg'},body:audio});
+   headers:{'content-type':'audio/mpeg','x-real-ip':'203.0.113.5'},body:audio});
   assert.equal(soundResponse.status,201);
   const sound=await soundResponse.json();
   assert.equal(sound.type,'audio/mpeg');
@@ -78,7 +81,7 @@ test('explicit opt-in UnixFS media accepts real audio/video bytes and supports H
   // format header intact, and verify byte-addressable seeking.
   const large=Buffer.concat([video,Buffer.alloc(2*1024*1024,3)]);
   const vr=await fetch(origin+'/upload',{method:'POST',
-   headers:{'content-type':'video/mp4'},body:large});
+   headers:{'content-type':'video/mp4','x-real-ip':'203.0.113.5'},body:large});
   assert.equal(vr.status,201);
   const vm=await vr.json();
   assert.equal(vm.type,'video/mp4');
@@ -98,13 +101,29 @@ test('explicit opt-in UnixFS media accepts real audio/video bytes and supports H
   assert.equal((await fetch(origin+'/ipfs/'+vm.cid.slice(7),{
    headers:{range:'bytes=999999999-999999999'}})).status,416);
   const invalid=await fetch(origin+'/upload',{method:'POST',
-   headers:{'content-type':'video/mp4'},body:Buffer.from('not an mp4')});
+   headers:{'content-type':'video/mp4','x-real-ip':'203.0.113.5'},body:Buffer.from('not an mp4')});
   assert.equal(invalid.status,429,
    'a third rich-media upload is refused by the operator daily rate limit');
   const info=await(await fetch(origin+'/health')).json();
   assert.equal(info.files,2);
   assert.equal(info.images,0);
   assert.equal(info.richMediaEnabled,true);
+  assert.equal(info.audioLimit,10*1024*1024);
+  assert.equal(info.videoLimit,10*1024*1024);
+  assert.equal(info.richUploadsPerClientPerDay,2);
+  const quotaText=await readFile(manifestFile+'.quotas.json','utf8');
+  assert.equal(quotaText.includes('203.0.113.5'),false,'stored quota keys do not expose literal client IPs');
+  await gateway.close();
+  gateway=await createImageGateway({ipfs,port:0,host:'127.0.0.1',
+   manifestFile,uploadEnabled:true,richMediaEnabled:true,
+   trustedProxyAddress:'127.0.0.1',maxTotal:20*1024*1024});
+  const restarted='http://127.0.0.1:'+gateway.port;
+  assert.equal((await fetch(restarted+'/upload',{method:'POST',
+   headers:{'content-type':'audio/mpeg','x-real-ip':'203.0.113.5'},body:audio})).status,429,
+   'per-client daily quota survives a media peer restart');
+  assert.equal((await fetch(restarted+'/upload',{method:'POST',
+   headers:{'content-type':'audio/mpeg','x-real-ip':'203.0.113.6'},body:audio})).status,201,
+   'trusted reverse-proxy addresses produce independent client quotas');
   await gateway.close();
   gateway=await createImageGateway({ipfs,port:0,host:'127.0.0.1',
    manifestFile,uploadEnabled:false});

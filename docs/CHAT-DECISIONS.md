@@ -318,3 +318,19 @@ This milestone implements the user's earlier explicit request that mixed media (
 
 - Proper media screening and legal operator processes, media policy appeals, opt-in pin management/quarantine, robust multi-peer media retrieval/failover, efficient streaming without full-file pre-verification on each request, thumbnails for arbitrary video files, transcoding, resumable uploads, independently staked spam barriers and true decentralized browser P2P (rather than an operator-selected bridge). Do not imply these are implemented.
 - Binary media is not synchronously copied by OrbitDB text replication; the signed CID remains portable, but availability is not promised. New media formats are opt-in under the operator's risk assessment.
+
+## 2026-11-18: explicit public media enablement and binary MiB limits
+
+User's latest instructions:
+
+> "enable audio/video but no more than 10MB and please continue"
+
+Then corrected units:
+
+> "pls use mibibibbies not decimal MB"
+
+This later correction supersedes prior 8 MiB audio / 12 MiB video limits: both audio and video MUST be capped at **10 MiB = 10,485,760 bytes per individual file**. Images retain the 256 KiB limit. Server and browser limits, any Nginx proxy request-size cap, user-facing validation, health fields and documentation must use the same units. Do not silently switch back to decimal MB.
+
+The user explicitly authorized enabling public audio/video uploads on the existing self-operated peer. The operator-side gate WEB9000_MEDIA_RICH_UPLOAD=1 must be set on the runtime container, not just written in source. Any operational claim must be verified against the HTTPS media peer's /health endpoint after deployment. The independently hosted browser's existing media selection, preview, permissionless signed events and IPFS CID semantics remain unchanged. Do not enable global binary replication or grant hosting operators ownership of public namespaces.
+
+Operational hardening added in the same pass: upload counts are saved in a peer-local per-day quota file rather than reset on each restart; the persisted keys are SHA-256 digests of day/client/type instead of plaintext visitor IPs. The media peer trusts a reverse-proxy X-Real-IP only when the direct TCP peer is its explicitly configured trusted Nginx/Docker bridge address. Nginx sanitizes and overwrites that header, independently meters only POST uploads, and retains normal GET/HEAD/HTTP 206 playback without applying upload rate limits. The media pool is set to 256 MiB for the public trial; storage policy, remote pins and access policies remain strictly local to each operator. Note IP quotas are a temporary abuse brake, not real Stake4Karma proof, user authentication, a guarantee of lawful binary storage or a deletion power. Legal-media handling and responsive abuse reports remain outstanding.
