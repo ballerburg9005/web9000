@@ -85,7 +85,22 @@ try{
  assert.equal(await a.evaluate(()=>document.activeElement.dataset.index),'1','arrow navigates image tiles');
  await a.keyboard.press('Enter');
  assert.equal(await a.$$('.post-container.expanded').then(x=>x.length),1,'expanded row under thumbnail');
+ const layout=await a.evaluate(()=>{
+   const grid=document.querySelector('#imageGrid').getBoundingClientRect();
+   const panel=document.querySelector('.expanded-body').getBoundingClientRect();
+   const image=document.querySelector('.expanded-body .attachments img').getBoundingClientRect();
+   return {gridWidth:grid.width,bodyWidth:panel.width,imgWidth:image.width};
+ });
+ assert.ok(layout.bodyWidth>=layout.gridWidth*.7,
+   'expanded post must have a usable full-row content area: '+JSON.stringify(layout));
+ assert.ok(layout.imgWidth>=100,'demo image must render at a readable size');
  console.log('CLASSIC checkpoint 3: expanded row and keyboard passed');
+ await a.evaluate(()=>document.querySelector('.post.selected').click());
+ assert.equal(await a.evaluate(()=>document.querySelectorAll('.post-container.expanded').length),0,
+   'clicking the selected tile must collapse it');
+ await a.evaluate(()=>document.querySelector('.post[data-index="1"]').click());
+ assert.equal(await a.evaluate(()=>document.querySelectorAll('.post-container.expanded').length),1);
+
  await a.keyboard.press('Escape');
  assert.equal(await a.$$('.post-container.expanded').then(x=>x.length),0);
  console.log('CLASSIC checkpoint 4: row collapsed');

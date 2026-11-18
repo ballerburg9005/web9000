@@ -149,7 +149,7 @@ function tile(item,i,replyCounts){
   if(replyCount)icons.push('☰ '+replyCount);
   if(icons.length)card.append(element('div','post-icons',icons.join(' ')));
   if(!item.decision?.visible)card.append(element('div','post-small','FILTERED · AUDIT'));
-  card.addEventListener('click',()=>expand(item.event.id));
+  card.addEventListener('click',()=>{ if(state.selected===item.event.id){state.selected=null;render();}else expand(item.event.id); });
   return card;
 }
 function updateNetworkStatus(){

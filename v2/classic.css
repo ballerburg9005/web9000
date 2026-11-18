@@ -61,3 +61,11 @@ dialog::backdrop{background:#000b}.dialog-inner{display:flex;flex-direction:colu
 @media(max-width:800px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}.header{flex-wrap:wrap}.menu{order:3;flex-basis:100%;justify-content:center}}
 @media(max-width:620px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}.logo{font-size:19px}.classic-toolbar{justify-content:flex-start}.menu{gap:2px}.menu button{padding:6px}.board-notice{margin:6px;padding:8px}.expanded-row{grid-template-columns:22px minmax(0,1fr) 22px}.expanded-body{padding:9px}}
 @media(max-width:410px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.two-cols{grid-template-columns:1fr}}
+
+/* The original 2025 stylesheet positions .nav-arrow absolutely, which
+   detached it from the 2026 CSS grid. That made the entire expanded post
+   render in the 35px arrow column. Keep grid-row positions explicit. */
+.expanded-row > .nav-arrow {position:static;top:auto;left:auto;right:auto;transform:none;padding:0;min-width:0;grid-row:1}
+.expanded-row > .nav-arrow:first-child {grid-column:1}
+.expanded-row > .expanded-body {grid-column:2;grid-row:1;width:100%;box-sizing:border-box}
+.expanded-row > .nav-arrow:last-child {grid-column:3}
