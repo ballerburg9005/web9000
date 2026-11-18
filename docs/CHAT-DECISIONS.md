@@ -165,4 +165,45 @@ The user explicitly wants anyone to run the client from arbitrary static domains
 - **Verified browser-level portability**, not just cryptographic unit tests: a real second website exported an encrypted key through the classic dialog, a third independent website origin restored it through the file input, and that third origin used the restored key to sign and replicate a real publication accepted by the independent OrbitDB/Helia peer. The same identity author was preserved without central account registration.
 - This preserves the critical user invariant that namespace stewards cannot confiscate accounts or identities. Data availability still depends on voluntary replication, and identity recovery depends on securely keeping the encrypted file and its password.
 
-This is experimental client-side cryptography. There has not been an independent security audit of the website, browser storage or the on-chain Stake4Karma mechanism.
+This is experimental client-side cryptography. There has not been an independent security audit of the website, browser storage or the on-chain Stake4Karma mechanism.## 2026-11-18: fifth UI correction — exact user feedback and implementation
+
+User quotes and normative product intent:
+
+> "the scrolling seems to be off in places, for example I open a post then close it or navigate with arrows, it should use the current grid row as the row that is aligned to the top and also when open the post initially."
+
+> "Use CSS to hide that posts are images/text/video/sound like what is obvious. Also in my UI demo data I had like sound and videos and there was a decent mini-player for them not the default player and it would play thumbnails if hovering them."
+
+> "improve the tag display like the - is outside of the tag that is not right it doesn't have the + green and - red and add tag is not a tag and ... hide more than 20 tags but ... is a tag that disappears when clicked and unhides the rest of tags all loaded."
+
+> "Copy CID hide that with CSS"
+
+> "in blog view a very generous portion of the description/text is shown like to max out the space that it uses and like align vertically top the headline etc. and the info overlay bubbles they are shown not over the image but top-right of the card"
+
+> "mixed view is good with 3 cells used"
+
+> "also good with the spaces shown on top, like they could be personal selections and add a second row user can disable this of group-recommended spaces."
+
+> "Move some stuff in user control center like identity. And also users have personal pages where their karma is shown like a grid view browser like the main page just with their stats on top and personal description or whatever."
+
+> "when commenting the comment that is commented to is scrolled as top of page if post is commented to dirtectly then the ratings bar."
+
+> "this bar it needs highlighting that it was selected and the colors are all over the place too many colors perhaps use CSS box shadows in board theme yellow"
+
+User also rejected the EXAMPLE · SIGNED badge overlapping other metadata, the huge Search/Exclude type checkboxes, and text preview collisions.
+
+Engineering decisions:
+1. Opening, arrow navigation, clicking to close, and Escape anchor the selected grid ROW directly beneath the sticky header. Do not scroll to the expanded panel or jump to the top on close. Provide trailing scroll space so the final row can be anchored after collapse.
+2. Tags display as single pills with label, weighted count, distinct GREEN + and RED minus inside the pill; display 20, then an ellipsis pill that disappears when clicked while expanding the remaining tags. Add tag is an independent subtle text control, NOT a tag chip.
+3. Ordinary media categories are hidden where visually obvious; preserve badges that add information (meetups/polls/roles/offers). EXAMPLE · SIGNED does not obstruct the image; signed provenance remains available in details. Copy CID controls are CSS-hidden in ordinary reading view, with signed-record inspection still available.
+4. Original demo video clips use muted on-hover thumbnail playback, progress indicator and a custom player with seek/mute/fullscreen in detail; original sound samples use a compact waveform player with play/seek/time. ONLY the trusted demo signer can reference allowlisted static demo media. The original static MP3/MP4 examples are hosted on the DEMO WEBSITE, NOT claimed as pinned by the IPFS image node. Images in the earlier demo remain CID-addressed. Arbitrary stranger media is not auto-fetched.
+5. Blog cards present as much meaningful text as feasible, below a headline aligned to the top. Info badges sit at the top-right of the CARD, not over the picture. The useful three-cell Mixed layout is retained unchanged.
+6. Search type exclusions use tiny actual native checkboxes in a responsive compact grid, not giant input fields overlapping labels.
+7. Direct comments scroll the selected POST'S REACTION BAR to just below the sticky header; nested replies scroll their parent comment there, both on composer focus and after posting. Preserve drafts across remote peer updates.
+8. Selected ++/+/-/-- reactions show a persistent gold/yellow inset glow and correct aria-pressed state, not several clashing colored backgrounds.
+9. The first namespace strip is the user's personal followed spaces. The independently hideable second strip displays names recommended by group charters of FOLLOWED groups. Neither recommendations nor a charter claim exclusive ownership of a public space. Group charter composer can suggest names in a signed recommendedSpaces list.
+10. My account combines portable encrypted signing identity controls with a signed profile editor. Author links open an author's page rendered with the SAME imageboard grid across their public spaces, with self-signed name, description, website, post/reply count, received vote score and a visibly LOCAL MOCK karma score when enabled. These are signed metadata events, not real-world identity verification.
+11. The developer/dashboard interface remains secondary, and the original main branch is still preserved. No one may globally deny publication in any namespace; moderation remains a viewer/peer-chosen, auditable filter.
+
+Testing: Browser suite checks row scrolling, compact search checkboxes, blog text, 20-tag expansion, embedded tag votes, custom media controls, signed group-recommended spaces and optional hide/show, signed profile and author-specific grid. Existing peer integration, cryptographic controls, reports, comments, encrypted identity migration and IPFS image handling remain regression-tested. New signed demo sound and video examples were published into the test index; group and profile example metadata will be published after the running test daemon recognizes the new profile event kind.
+
+Remaining important work: real Stake4Karma proof and adversarial anti-spam economics; genuine non-demo audio/video IPFS uploads and independent pinning; democratic elections, group-presentation ballots and appeals; user/privacy accessibility and broader peer discovery. Mock numbers are NOT independently verified stake. Production deployment is not claimed.

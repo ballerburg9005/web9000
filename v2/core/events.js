@@ -1,7 +1,7 @@
 // WEB9000/2 portable signed events. No transport, server, namespace owner or gatekeeper.
 export const DOMAIN = 'WEB9000/event/v1';
 const utf8 = new TextEncoder();
-const kinds = new Set(['post','reply','label','endorse','group','policy','membership','invitation','retraction','proposal','vote','accept','reaction','tag-vote','poll-choice']);
+const kinds = new Set(['post','reply','label','endorse','group','policy','membership','invitation','retraction','proposal','vote','accept','reaction','tag-vote','poll-choice','profile']);
 const toB64 = a => typeof Buffer !== 'undefined' ? Buffer.from(a).toString('base64url') : btoa(String.fromCharCode(...a)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 const fromB64 = s => {
   if (typeof s !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(s)) throw Error('Invalid encoding');
@@ -35,6 +35,13 @@ export function validatePayload(p) {
     // body.fields is an arbitrary JSON object: market listings, event dates, job positions etc.
     if (p.body.fields !== undefined && (!p.body.fields || typeof p.body.fields !== 'object' || Array.isArray(p.body.fields))) throw Error('Invalid custom fields');
   }
+  if(p.kind==='profile'){
+    const b=p.body;
+    if(typeof b.name!=='string'||b.name.length>80 ||
+       typeof b.description!=='string'||b.description.length>2000 ||
+       (b.website!==undefined&&(typeof b.website!=='string'||b.website.length>400)))
+      throw Error('Invalid signed profile metadata');
+  }
   if (p.kind === 'reaction' && (!/^sha256:[0-9a-f]{64}$/.test(p.body.target||'') ||
       ![-2,-1,1,2].includes(p.body.value))) throw Error('Invalid reaction');
   if (p.kind === 'tag-vote' && (!/^sha256:[0-9a-f]{64}$/.test(p.body.target||'') ||
@@ -54,6 +61,11 @@ export function validatePayload(p) {
     throw Error('Invalid signed group membership request');
   if (p.kind === 'group') {
     const q=p.body.quorum;
+    if(p.body.recommendedSpaces!==undefined &&
+      (!Array.isArray(p.body.recommendedSpaces)||p.body.recommendedSpaces.length>20||
+        p.body.recommendedSpaces.some(space=>typeof space!=='string'||space.length<1||
+          space.length>180||/[\x00-\x1f]/.test(space))))
+      throw Error('Invalid group space recommendations');
     if (typeof p.body.name !== 'string' || !p.body.name.trim() || p.body.name.length > 80 ||
         !q || !Number.isInteger(q.numerator) || !Number.isInteger(q.denominator) ||
         q.denominator < 1 || q.denominator > 100 || q.numerator < 1 || q.numerator > q.denominator) throw Error('Invalid group charter');

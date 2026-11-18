@@ -15,13 +15,13 @@ const $=id=>document.getElementById(id);
 const state={
   db:null,identity:null,replica:new Replica({maxEvents:25000}),saved:[],outbox:[],
   peers:[],mesh:null,suggested:[],mediaBase:null,
-  space:'commons',sort:'new',view:'grid',search:'',showUnverified:false,
+  space:'commons',profileAuthor:null,sort:'new',view:'grid',search:'',showUnverified:false,
   ownerHint:null,respectOwner:true,selected:null,trust:[],ignoredLabels:[],audit:false,showMedia:false,
   demo:[],demoVotes:new Map(),demoPollChoices:new Map(),demoReplies:new Map(),demoFlags:new Map(),demoTagVotes:new Map(),
   mockKarma:null,mockMode:false,demoAuthor:null,demoAutoConnect:false,autoDemoPeerDisabled:false,
-  followedSpaces:['demo','commons'],groupSubscriptions:[],groupViews:[],
+  followedSpaces:['demo','commons'],showGroupSpaces:true,groupSubscriptions:[],groupViews:[],
   searchFilters:{attribute:'all',includeTags:[],excludeTags:[],excludeKinds:[],minScore:0,customField:''},
-  replyDrafts:new Map(),lastError:'',renderPending:false
+  replyDrafts:new Map(),expandedTags:new Set(),lastError:'',renderPending:false
 };
 const safeSpace=s=>typeof s==='string'&&s.length>0&&s.length<=180&&!/[\x00-\x1f]/.test(s);
 const validTag=s=>/^[a-z0-9][a-z0-9._:-]{0,47}$/.test(s);
@@ -52,7 +52,12 @@ function element(tag,className='',text=''){
 function button(label,handler,className=''){
   const b=element('button',className,label);b.type='button';b.addEventListener('click',handler);return b;
 }
-const who=author=>author===state.identity?.author?'You':author==='demo'?'Demo fixture':shortAuthor(author);
+function latestProfile(author){
+  return allEvents().filter(event=>event.payload.kind==='profile'&&event.payload.author===author)
+    .sort((a,b)=>b.payload.time-a.payload.time||b.id.localeCompare(a.id))[0]?.payload.body||null;
+}
+const who=author=>author===state.identity?.author?'You':
+  (latestProfile(author)?.name?.trim()||shortAuthor(author));
 function choosePolicy(){
   const known=[state.identity.author,...state.trust,...(state.ownerHint&&state.respectOwner?[state.ownerHint]:[])];
   // The *website's own demo signer* is only a suggested trust exception
@@ -79,8 +84,16 @@ function choosePolicy(){
 }
 const allEvents=()=>state.replica.list();
 const currentPosts=()=>{
-  const records=allEvents(),all=buildFeed(records,choosePolicy(),state.identity.author)
-    .filter(x=>x.event.payload.kind==='post');
+  const records=allEvents(),policy=choosePolicy();
+  if(state.profileAuthor){
+    policy.followedSpaces=[...new Set(records.map(event=>event.payload.space))];
+    // Deliberately visiting one specific signing identity is an explicit
+    // reader-selected raw-profile view, not global default-feed admission.
+    policy.trustedAuthors=[...new Set([...policy.trustedAuthors,state.profileAuthor])];
+  }
+  const all=buildFeed(records,policy,state.identity.author)
+    .filter(x=>x.event.payload.kind==='post'&&
+      (!state.profileAuthor||x.event.payload.author===state.profileAuthor));
   const f=state.searchFilters,custom=f.customField.trim();
   const sort=state.sort==='trash'?'new':state.sort;
   return searchPosts(all,{
@@ -118,16 +131,163 @@ function recognizedTags(post,records=allEvents()){
     total.set(tag,(total.get(tag)||0)+value);
   return [...total.entries()].filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
 }
+function alignUnderHeader(el,margin=5){
+  if(!el||!el.isConnected)return;
+  const header=$('topHeader');
+  const offset=(header?.getBoundingClientRect().height||0)+margin;
+  const y=window.scrollY+el.getBoundingClientRect().top-offset;
+  window.scrollTo({top:Math.max(0,y),behavior:'instant'});
+}
+function alignGridRow(card){
+  if(!card)return;
+  const top=card.offsetTop;
+  const row=[...document.querySelectorAll('#imageGrid > .post')]
+    .find(el=>Math.abs(el.offsetTop-top)<2);
+  alignUnderHeader(row||card);
+}
+function closeSelected(){
+  const id=state.selected;
+  const card=[...document.querySelectorAll('#imageGrid > .post')].find(el=>el.dataset.id===id);
+  const index=card?Number(card.dataset.index):-1;
+  state.selected=null;
+  render();
+  const target=id?[...document.querySelectorAll('#imageGrid > .post')].find(el=>el.dataset.id===id):null;
+  const fallback=index>=0?document.querySelector('#imageGrid > .post[data-index="'+index+'"]'):null;
+  alignGridRow(target||fallback);
+}
 function columns(){
   const w=window.innerWidth;
   return state.view==='blog'?1:w<=410?2:w<=620?3:w<=800?4:w<=1130?5:7;
+}
+function signedDemoMedia(payload){
+  if(payload.space!=='demo'||payload.author!==state.demoAuthor||
+      payload.body?.fields?.demo!==true)return null;
+  const video=payload.body.fields.demoVideo;
+  if(['../thumb/thumb04.mp4','../thumb/thumb10.mp4'].includes(video))
+    return {type:'video',src:video};
+  const audio=payload.body.fields.demoAudio;
+  if(audio==='../content/festival_theme.mp3')return {type:'audio',src:audio};
+  return null;
+}
+function miniAudio(source,{compact=false}={}){
+  // Custom browser controls, not <audio controls>. The audio URL comes only
+  // from our allowlisted demo source. Sound begins on explicit user gesture.
+  const wrap=element('div','mini-audio'+(compact?' compact':''));
+  const audio=document.createElement('audio');audio.preload='none';audio.src=source;
+  const play=button('▶',event=>{
+    event.stopPropagation();
+    for(const other of document.querySelectorAll('.mini-audio audio')){
+      if(other!==audio&&!other.paused)other.pause();
+    }
+    if(audio.paused)audio.play().catch(()=>{play.textContent='▶';toast('Audio could not be played.');});
+    else audio.pause();
+  },'mini-audio-toggle');
+  play.setAttribute('aria-label','Play or pause example audio');
+  const waveform=element('div','mini-wave');
+  for(let i=0;i<33;i++){
+    const bar=element('i');
+    bar.style.height=(14+Math.round(75*Math.abs(Math.sin(i*.74)*Math.cos(i*.29))))+'%';
+    waveform.append(bar);
+  }
+  const progress=element('input','mini-audio-progress');
+  progress.type='range';progress.min='0';progress.max='1000';progress.step='1';progress.value='0';
+  progress.setAttribute('aria-label','Seek through audio');
+  progress.addEventListener('input',event=>{
+    event.stopPropagation();
+    if(Number.isFinite(audio.duration)&&audio.duration>0)
+      audio.currentTime=audio.duration*Number(progress.value)/1000;
+  });
+  for(const type of ['pointerdown','click','keydown'])progress.addEventListener(type,e=>e.stopPropagation());
+  const clock=element('span','mini-audio-clock','0:00');
+  const format=t=>{
+    const sec=Math.max(0,Math.floor(t||0));return Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0');
+  };
+  audio.addEventListener('timeupdate',()=>{
+    progress.value=String(audio.duration>0?Math.round(1000*audio.currentTime/audio.duration):0);
+    clock.textContent=format(audio.currentTime)+(compact?'':' / '+format(audio.duration));
+  });
+  audio.addEventListener('play',()=>{play.textContent='Ⅱ';wrap.classList.add('playing');});
+  audio.addEventListener('pause',()=>{play.textContent='▶';wrap.classList.remove('playing');});
+  audio.addEventListener('ended',()=>{play.textContent='▶';wrap.classList.remove('playing');progress.value='0';});
+  wrap.append(audio,play,waveform,progress,clock);
+  return wrap;
+}
+function miniVideo(source){
+  const wrap=element('div','mini-video-player');
+  const video=document.createElement('video');
+  video.src=source;video.preload='metadata';video.muted=true;video.playsInline=true;
+  video.className='mini-video-frame';
+  const controls=element('div','mini-video-controls');
+  const play=button('▶',()=>video.paused?
+    video.play().catch(()=>toast('Video playback failed')):video.pause(),'mini-video-play');
+  play.setAttribute('aria-label','Play or pause video');
+  const timeline=element('input','mini-video-timeline');
+  timeline.type='range';timeline.min='0';timeline.max='1000';timeline.value='0';
+  timeline.setAttribute('aria-label','Seek in video');
+  timeline.oninput=()=>{if(Number.isFinite(video.duration)&&video.duration>0)
+    video.currentTime=video.duration*Number(timeline.value)/1000;};
+  const clock=element('span','mini-video-clock','0:00');
+  const mute=button('Muted',()=>{
+    video.muted=!video.muted;mute.textContent=video.muted?'Muted':'Sound on';
+    mute.setAttribute('aria-pressed',String(!video.muted));
+  },'mini-video-mute');
+  mute.setAttribute('aria-pressed','false');
+  const fullscreen=button('⛶',()=>video.requestFullscreen?.().catch(()=>{}),'mini-video-fullscreen');
+  fullscreen.title='Fullscreen';
+  const time=t=>{const n=Math.max(0,Math.floor(t||0));
+    return Math.floor(n/60)+':'+String(n%60).padStart(2,'0');};
+  video.addEventListener('timeupdate',()=>{
+    timeline.value=String(video.duration>0?Math.round(video.currentTime/video.duration*1000):0);
+    clock.textContent=time(video.currentTime)+' / '+time(video.duration);
+  });
+  video.addEventListener('play',()=>play.textContent='Ⅱ');
+  video.addEventListener('pause',()=>play.textContent='▶');
+  video.addEventListener('ended',()=>play.textContent='▶');
+  video.addEventListener('click',()=>play.click());
+  controls.append(play,timeline,clock,mute,fullscreen);
+  wrap.append(video,controls);
+  return wrap;
+}
+function addDemoVideoHover(card,payload){
+  const demo=signedDemoMedia(payload);
+  if(demo?.type!=='video')return;
+  const target=card.querySelector('.post-thumb,.post-text-preview,.post-reveal');
+  if(!target)return;
+  const video=document.createElement('video');
+  video.className='hover-video';video.muted=true;video.loop=true;video.playsInline=true;
+  video.preload='none';video.setAttribute('aria-label','Hovering plays demo video preview');
+  const progress=element('div','hover-video-progress');
+  let loaded=false;
+  card.addEventListener('mouseenter',()=>{
+    if(!loaded){video.src=demo.src;loaded=true;}
+    video.play().catch(()=>{});
+  });
+  card.addEventListener('mouseleave',()=>{
+    video.pause();if(video.readyState>=1)video.currentTime=0;
+    progress.style.width='0%';
+  });
+  video.addEventListener('timeupdate',()=>{
+    progress.style.width=(Number.isFinite(video.duration)&&video.duration>0?
+      Math.min(100,100*video.currentTime/video.duration):0)+'%';
+  });
+  target.insertAdjacentElement('afterend',video);
+  card.append(progress);
 }
 function tile(item,i,replyCounts){
   const p=item.event.payload,b=p.body;
   const card=element('div','post'+(item.decision?.visible?'':' filtered')+(b.fields?.presentation==='text'||!item.thumb&&!b.media?.length?' text-only':''));
   card.dataset.index=String(i);card.dataset.id=item.event.id;card.dataset.kind=postKind(item);
   card.tabIndex=0;card.setAttribute('role','button');card.setAttribute('aria-label',b.title||'Post');
-  if(item.thumb){
+  const demoMedia=signedDemoMedia(p);
+  if(demoMedia?.type==='audio'){
+    card.append(miniAudio(demoMedia.src,{compact:true}));
+    card.classList.add('sound-tile');
+  }else if(demoMedia?.type==='video'&&b.fields.demoThumb==='../thumb/thumb11.jpg'){
+    const image=document.createElement('img');
+    image.className='post-thumb';image.loading='lazy';
+    image.src=b.fields.demoThumb;image.alt=b.title||'Example video preview';
+    card.append(image);
+  }else if(item.thumb){
     const img=document.createElement('img');img.className='post-thumb';img.loading='lazy';img.src=item.thumb;img.alt=b.title||'Demo picture';
     card.append(img);
   } else if(b.media?.length){
@@ -145,7 +305,10 @@ function tile(item,i,replyCounts){
   }else{
     card.append(element('div','post-text-preview',b.text||b.title||'Text post'));
   }
-  if(b.title)card.append(element('div','post-headline',b.title));
+  const copy=element('div','post-copy');
+  if(b.title)copy.append(element('div','post-headline',b.title));
+  if(b.text)copy.append(element('div','post-description',b.text));
+  card.append(copy);
   const icons=[];
   const kind=b.fields?.presentation||'image';
   if(item.video||(p.author===state.demoAuthor&&p.space==='demo'&&b.fields?.demoVideo))
@@ -161,11 +324,16 @@ function tile(item,i,replyCounts){
   if(b.fields?.positions?.length&&kind!=='job')icons.push('◈ '+b.fields.positions.length+' roles');
   const replyCount=replyCounts.get(item.event.id)||0;
   if(replyCount)icons.push('☏ '+replyCount);
-  if(icons.length)card.append(element('div','post-icons',icons.join(' · ')));
+  const visibleIcons=icons.filter(x=>!['▣ Image','☰ Text','▶ Video','♪ Sound'].includes(x));
+  if(visibleIcons.length){
+    card.classList.add('has-icons');
+    card.append(element('div','post-icons',visibleIcons.join(' · ')));
+  }
   if(p.space==='demo'&&p.author===state.demoAuthor&&b.fields?.demo)
     card.append(element('div','post-small demo-label','EXAMPLE · SIGNED'));
   else if(!item.decision?.visible)card.append(element('div','post-small','FILTERED · AUDIT'));
-  card.addEventListener('click',()=>{ if(state.selected===item.event.id){state.selected=null;render();}else expand(item.event.id); });
+  addDemoVideoHover(card,p);
+  card.addEventListener('click',()=>{ if(state.selected===item.event.id)closeSelected();else expand(item.event.id); });
   return card;
 }
 function updateNetworkStatus(){
@@ -177,6 +345,56 @@ function updateNetworkStatus(){
   $('joinNetwork').classList.toggle('connected',!!state.mesh?.connected);
   $('mockModeLabel').hidden=!state.mockMode;
   $('mockModeLabel').textContent=state.mockMode?'SIMULATED KARMA — NOT STAKE':'';
+}
+function renderProfileHeader(){
+  const header=$('profileHeader');
+  if(!state.profileAuthor){header.hidden=true;header.replaceChildren();return;}
+  header.hidden=false;header.replaceChildren();
+  const author=state.profileAuthor,info=latestProfile(author)||{};
+  const authored=allEvents().filter(event=>event.payload.author===author);
+  const posts=authored.filter(event=>event.payload.kind==='post');
+  const replies=authored.filter(event=>event.payload.kind==='reply');
+  const score=posts.reduce((sum,event)=>sum+reactionScore(event.id),0);
+  const name=element('h2','profile-title',info.name?.trim()||shortAuthor(author));
+  const key=element('div','profile-key',author);
+  const heading=element('div','profile-heading');
+  heading.append(name,key);
+  const stats=element('div','profile-stats');
+  for(const [title,val] of [
+    ['Posts',posts.length],['Replies',replies.length],['Received vote score',score],
+    ['Local test karma',state.mockMode?state.mockKarma.scoreFor(author)+'/100':'Not verified']]){
+    const entry=element('div','profile-stat');
+    entry.append(element('b','',String(val)),element('span','',title));stats.append(entry);
+  }
+  const description=element('p','profile-description',
+    info.description||'No signed profile description published yet.');
+  header.append(heading,stats,description);
+  if(info.website){
+    try{
+      const url=new URL(info.website);
+      if(['https:','http:'].includes(url.protocol)&&!url.username&&!url.password){
+        const link=document.createElement('a');link.href=url.href;link.target='_blank';
+        link.rel='noopener noreferrer nofollow';link.textContent=url.hostname;
+        link.className='profile-website';header.append(link);
+      }
+    }catch{}
+  }
+  const actions=element('div','profile-actions');
+  actions.append(button('← Back to board',()=>selectSpace(state.space)));
+  if(author===state.identity.author)
+    actions.append(button('Edit my profile / identity',()=>{openIdentitySettings();$('profileEditor').open=true;}));
+  if(!state.mockMode)actions.append(element('span','profile-status',
+    'Karma/stake not independently verified on this experimental network.'));
+  header.append(actions);
+}
+function showProfile(author){
+  if(!/^ed25519:[A-Za-z0-9_-]{43}$/.test(author))return toast('Invalid signing identity');
+  state.profileAuthor=author;
+  state.selected=null;
+  const u=new URL(location.href);u.searchParams.set('profile',author);
+  history.pushState({},'',u.pathname+u.search+u.hash);
+  render();
+  alignUnderHeader($('profileHeader'));
 }
 function render(){
   if(!state.identity)return;
@@ -191,6 +409,8 @@ function render(){
   const prev=state.selected;
   grid.className='grid '+state.view;
   renderSpaces();
+  renderRecommendedSpaces();
+  renderProfileHeader();
   renderTagCloud();
   // Index reply counts once per render, instead of scanning the entire
   // replica for each image tile (the old code was O(posts × events)).
@@ -204,7 +424,7 @@ function render(){
   grid.replaceChildren(...nodes);
   updateNetworkStatus();
   $('feedStatus').textContent=feed.length+' '+(feed.length===1?'post':'posts')+
-    ' in /'+state.space+' · '+(state.sort==='trash'?'suppressed by your current view':'public signed records')+
+    (state.profileAuthor?' on this author’s profile':' in /'+state.space)+' · '+(state.sort==='trash'?'suppressed by your current view':'public signed records')+
     (state.mesh?.connected?' · synced peer':' · connect to a peer to synchronize');
   $('searchCount').textContent=feed.length+' match'+(feed.length===1?'':'es');
   if(prev && feed.some(x=>x.event.id===prev))expand(prev,{focus:false});
@@ -234,6 +454,13 @@ function updateOpenDiscussion(){
   }
   const score=panel.querySelector('.reactions .score');
   if(score)score.textContent=String(reactionScore(item.event.id));
+  const mine=latestVotes('reaction',item.event.id).find(event=>
+    event.payload.author===state.identity.author)?.payload.body.value;
+  for(const btn of panel.querySelectorAll('.reactions [data-reaction-value]')){
+    const selected=Number(btn.dataset.reactionValue)===mine;
+    btn.classList.toggle('selected',selected);
+    btn.setAttribute('aria-pressed',String(selected));
+  }
   const currentIds=[...document.querySelectorAll('#imageGrid > .post')].map(x=>x.dataset.id);
   const nextIds=effectiveFeed().map(x=>x.event.id);
   const status=$('feedStatus');
@@ -275,6 +502,7 @@ async function store(){
     setItem(state.db,'classic-mock-scores',state.mockKarma?.snapshot()||{}),
     setItem(state.db,'classic-followed-spaces',state.followedSpaces),
     setItem(state.db,'classic-group-subscriptions',state.groupSubscriptions),
+    setItem(state.db,'classic-show-group-spaces',state.showGroupSpaces),
     setItem(state.db,'classic-auto-demo-peer-disabled',state.autoDemoPeerDisabled)
   ]);
 }
@@ -301,8 +529,10 @@ function otherRecords(target,kind){
   return allEvents().filter(e=>e.payload.kind===kind&&e.payload.body.target===target);
 }
 async function react(id,value){
-  try{await publish('reaction',{target:id,value});}
-  catch(e){toast('Reaction not accepted: '+e.message);}
+  try{
+    await publish('reaction',{target:id,value});
+    if(state.selected===id)expand(id,{focus:false});
+  }catch(e){toast('Reaction not accepted: '+e.message);}
 }
 async function tagVote(id,tag,value){
   try{await publish('tag-vote',{target:id,tag,value});}
@@ -319,6 +549,9 @@ async function appendReply(post,textarea,parent=post.id){
     state.replyDrafts.delete(post.id+'|'+parent);
     textarea.value='';
     expand(post.id,{focus:false});
+    const anchor=parent===post.id?document.querySelector('.reactions'):
+      document.querySelector('[data-comment-id="'+parent+'"]');
+    alignUnderHeader(anchor);
     toast('Signed reply '+message.id.slice(0,18)+'…');
   }catch(error){toast('Could not publish reply: '+error.message);}
 }
@@ -327,6 +560,11 @@ function addCommentForm(area,post,parent=post.id){
   const ta=document.createElement('textarea');ta.placeholder=parent===post.id?'Write a comment...':'Reply to comment...';
   const draftKey=post.id+'|'+parent;
   ta.value=state.replyDrafts.get(draftKey)||'';
+  ta.addEventListener('focus',()=>{
+    const target=parent===post.id?document.querySelector('.reactions'):
+      document.querySelector('[data-comment-id="'+parent+'"]');
+    alignUnderHeader(target||box);
+  });
   ta.addEventListener('input',()=>{
     if(ta.value)state.replyDrafts.set(draftKey,ta.value);
     else state.replyDrafts.delete(draftKey);
@@ -528,7 +766,7 @@ function showMultiImageGallery(body,post){
   area.append(stage,navigation,thumbs);
   area.append(button('Copy current CID',()=>{
     navigator.clipboard?.writeText(cids[index]).then(()=>toast('CID copied'));
-  },'gallery-copy'));
+  },'gallery-copy cid-copy'));
   draw();body.append(area);
 }
 function showMedia(body,post){
@@ -558,7 +796,7 @@ function showMedia(body,post){
     }else{
       wrap.append(load);
     }
-    wrap.append(button('Copy CID',()=>navigator.clipboard?.writeText(cid).then(()=>toast('CID copied'))));
+    wrap.append(button('Copy CID',()=>navigator.clipboard?.writeText(cid).then(()=>toast('CID copied')),'cid-copy'));
     area.append(wrap);
   }
   body.append(area);
@@ -579,10 +817,13 @@ function expand(id,{focus=true}={}){
   const body=element('div','expanded-body');
   const heading=element('div','post-detail-heading');
   heading.append(element('h2','',b.title||'Untitled post'));
-  heading.append(button('× Close',()=>{state.selected=null;render();},'detail-close'));
+  heading.append(button('× Close',closeSelected,'detail-close'));
   body.append(heading);
   const metadata=element('div','details-line');
-  metadata.append(element('span','','From '+who(p.author)),
+  const authorControl=button('From '+who(p.author),()=>showProfile(p.author),'author-profile-link');
+  authorControl.title='Open public profile for this signing key';
+  const authorWrap=element('span');authorWrap.append(authorControl);
+  metadata.append(authorWrap,
     element('span','','Space: '+p.space),element('span','',formatDate(p.time)));
   if(p.space==='demo'&&p.author===state.demoAuthor&&b.fields?.demo)
     metadata.append(element('span','demo-note','SIGNED DEMO RECORD · stored on independent peer'));
@@ -590,17 +831,18 @@ function expand(id,{focus=true}={}){
     'SIMULATED SCORE '+state.mockKarma.scoreFor(p.author)+'/100 — NOT ON-CHAIN'));
   if(b.fields?.presentation)metadata.append(element('span','',b.fields.presentation.toUpperCase()));
   body.append(metadata);
+  if(signedDemoMedia(p)?.type==='audio'){
+    const player=miniAudio(signedDemoMedia(p).src);
+    body.append(player);
+  }
   if(current.thumb){
     const region=element('div','attachments'),img=document.createElement('img');
     img.src=current.thumb;img.alt=b.title||'Demo image';img.loading='eager';img.decoding='async';region.append(img);body.append(region);
   }else showMedia(body,current.event);
-  const demoVideo=(p.space==='demo'&&p.author===state.demoAuthor&&
-    b.fields?.demoVideo==='../thumb/thumb04.mp4')?'../thumb/thumb04.mp4':null;
+  const demoVideo=signedDemoMedia(p)?.type==='video'?signedDemoMedia(p).src:null;
   if(demoVideo){
-    const video=document.createElement('video');
-    video.controls=true;video.preload='metadata';video.playsInline=true;video.src=demoVideo;
-    video.className='post-preview-video';video.setAttribute('aria-label','Example video attachment');
-    const region=element('div','attachments');region.append(video);body.append(region);
+    const region=element('div','attachments');
+    region.append(miniVideo(demoVideo));body.append(region);
   }
   if(b.text)body.append(element('p','',b.text));
   const field=b.fields||{};
@@ -653,25 +895,45 @@ function expand(id,{focus=true}={}){
     }body.append(poll);
   }
   const tags=element('div','label-row');
-  for(const [name,count] of recognizedTags(current.event)){
-    tags.append(button('#'+name+' '+count+' +',()=>{
-      if(current.demo){
-        const votes=state.demoTagVotes.get(id)||new Map();
-        votes.set(name,(votes.get(name)||0)+1);state.demoTagVotes.set(id,votes);
-        expand(id,{focus:false});
-        toast('Tag vote simulated locally (not published).');
-      }else tagVote(id,name,1);
-    },'tag'));
-    if(!current.demo)tags.append(button('−',()=>tagVote(id,name,-1),'tag'));
+  const allTags=recognizedTags(current.event);
+  const showAll=state.expandedTags.has(id);
+  for(const [name,count] of (showAll?allTags:allTags.slice(0,20))){
+    const chip=element('span','tag-chip');
+    const tagLabel=button('#'+name,()=>{},'tag-name');
+    tagLabel.title='Find posts with #'+name;
+    tagLabel.onclick=()=>{
+      const include=$('searchIncludeTags');
+      const included=new Set(include.value.split(',').map(v=>v.trim()).filter(Boolean));
+      included.add(name);include.value=[...included].join(', ');
+      readSearchFilters();state.search='';$('searchPosts').value='';
+      closeSelected();showSearch(true);render();
+    };
+    chip.append(tagLabel,element('span','tag-count',String(count)));
+    const myVote=latestVotes('tag-vote',id).find(event=>
+      event.payload.author===state.identity.author&&event.payload.body.tag===name)?.payload.body.value;
+    const up=button('+',()=>tagVote(id,name,1),'tag-up'+(myVote===1?' selected':''));
+    const down=button('−',()=>tagVote(id,name,-1),'tag-down'+(myVote===-1?' selected':''));
+    up.title='Support this tag';down.title='Disagree with this tag';
+    up.setAttribute('aria-pressed',String(myVote===1));
+    down.setAttribute('aria-pressed',String(myVote===-1));
+    chip.append(up,down);tags.append(chip);
   }
-  if(!current.demo)tags.append(button('+ Add tag',()=>{
+  if(allTags.length>20&&!showAll){
+    tags.append(button('…',()=>{
+      state.expandedTags.add(id);expand(id,{focus:false});
+    },'tag-more'));
+  }
+  tags.append(button('+ add tag',()=>{
     const input=window.prompt('Tag (letters, numbers, period, dash, colon or underscore)');
     const tag=String(input||'').trim().toLowerCase();
-    if(!tag)return;if(!validTag(tag))return toast('Invalid tag name');
+    if(!tag)return;
+    if(!validTag(tag))return toast('Invalid tag name');
     tagVote(id,tag,1);
-  }));
+  },'tag-add'));
   body.append(tags);
   const votes=element('div','reactions');
+  const chosenReaction=latestVotes('reaction',id).find(event=>
+    event.payload.author===state.identity.author)?.payload.body.value||null;
   if(current.demo){
     votes.append(element('span','score',String(state.demoVotes.get(id)||0)));
     for(const [label,v] of [['++',2],['+',1],['−',-1],['−−',-2]]){
@@ -697,8 +959,14 @@ function expand(id,{focus=true}={}){
     renderReplies(body,current.event);
   }else{
     votes.append(element('span','score',String(reactionScore(id))));
-    for(const [label,v] of [['++',2],['+',1],['−',-1],['−−',-2]])
-      votes.append(button(label,()=>react(id,v),v===2?'vote-max':v===1?'vote-up':v===-1?'vote-down':'vote-min'));
+    for(const [label,v] of [['++',2],['+',1],['−',-1],['−−',-2]]){
+      const type=v===2?'vote-max':v===1?'vote-up':v===-1?'vote-down':'vote-min';
+      const action=button(label,()=>react(id,v),type+(chosenReaction===v?' selected':''));
+      action.dataset.reactionValue=String(v);
+      action.setAttribute('aria-pressed',String(chosenReaction===v));
+      action.title=(chosenReaction===v?'Your selected vote: ':'Vote: ')+label;
+      votes.append(action);
+    }
     votes.append(renderReportControl(current.event));
     votes.append(button(state.audit?'− Audit':'⚖ Audit',()=>{
       state.audit=!state.audit;expand(id,{focus:false});
@@ -719,7 +987,7 @@ function expand(id,{focus=true}={}){
     if(next.offsetTop!==top)break;end=next;
   }
   end.after(panel);
-  if(focus){card.focus({preventScroll:true});panel.scrollIntoView({block:'nearest',behavior:'instant'});}
+  if(focus){card.focus({preventScroll:true});alignGridRow(card);}
 }
 function navigate(direction){
   const feed=effectiveFeed(),idx=feed.findIndex(x=>x.event.id===state.selected);
@@ -729,7 +997,7 @@ function navigate(direction){
 function onKey(e){
   const target=e.target;
   if(target.matches?.('input,textarea,select,[contenteditable],dialog')||target.closest?.('dialog'))return;
-  if(e.key==='Escape'){state.selected=null;render();return;}
+  if(e.key==='Escape'){if(state.selected){e.preventDefault();closeSelected();}return;}
   const keys={ArrowUp:'up',w:'up',ArrowDown:'down',s:'down',ArrowLeft:'left',a:'left',ArrowRight:'right',d:'right'};
   if(e.key==='Enter'&&target.classList?.contains('post')){e.preventDefault();expand(target.dataset.id);return;}
   if(!keys[e.key])return;
@@ -748,10 +1016,14 @@ function onKey(e){
       .sort((a,b)=>Math.abs(a.getBoundingClientRect().left+a.offsetWidth/2-cx)-
         Math.abs(b.getBoundingClientRect().left+b.offsetWidth/2-cx))[0];
   }
-  if(next){e.preventDefault();next.focus();if(state.selected)expand(next.dataset.id,{focus:false});}
+  if(next){e.preventDefault();next.focus({preventScroll:true});if(state.selected){expand(next.dataset.id,{focus:false});alignGridRow(next);}else next.scrollIntoView({block:'nearest'});}
 }
 function openIdentitySettings(){
   $('identityPublicKey').textContent=state.identity.author;
+  const profile=latestProfile(state.identity.author)||{};
+  $('profileName').value=profile.name||'';
+  $('profileDescription').value=profile.description||'';
+  $('profileWebsite').value=profile.website||'';
   $('identityPassword').value='';
   $('identityMessage').textContent='';
   $('identityDialog').showModal();
@@ -781,6 +1053,11 @@ function openMockKarma(author=state.identity?.author){
 }
 function selectSpace(name){
   if(!safeSpace(name))return toast('Invalid namespace');
+  if(state.profileAuthor){
+    state.profileAuthor=null;
+    const u=new URL(location.href);u.searchParams.delete('profile');
+    history.replaceState({},'',u.pathname+u.search+u.hash);
+  }
   state.space=name;
   state.selected=null;
   $('spaceName').value=name;
@@ -811,6 +1088,36 @@ function renderSpaces(){
     },'space-follow'));
     all.append(row);
   }
+}
+function renderRecommendedSpaces(){
+  const row=$('recommendedSpaceNav'),links=$('recommendedSpaceLinks');
+  const toggle=$('toggleRecommendedSpaces');
+  toggle.textContent=state.showGroupSpaces?'Hide':'Show';
+  links.replaceChildren();row.classList.toggle('collapsed',!state.showGroupSpaces);
+  if(!state.showGroupSpaces){
+    links.append(element('span','recommended-empty','Recommendations hidden in this browser'));
+    return;
+  }
+  const names=new Map();
+  for(const group of state.groupViews){
+    if(!state.groupSubscriptions.includes(group.id))continue;
+    const recommended=group.event.payload.body.recommendedSpaces||[];
+    for(const name of recommended){
+      if(!safeSpace(name))continue;
+      const sponsors=names.get(name)||[];
+      sponsors.push(group.event.payload.body.name);
+      names.set(name,sponsors);
+    }
+  }
+  for(const [name,sponsors] of [...names].slice(0,18)){
+    const chip=button('/'+name,()=>selectSpace(name),'group-space-chip');
+    chip.title='Suggested by '+sponsors.join(', ')+' — not an ownership claim';
+    chip.classList.toggle('active',name===state.space);
+    links.append(chip);
+  }
+  if(!names.size)
+    links.append(element('span','recommended-empty',
+      'Follow a clan that recommends spaces, or publish recommendations in your own group charter'));
 }
 function renderTagCloud(){
   const records=allEvents(),policy=choosePolicy();
@@ -872,7 +1179,7 @@ async function refreshGroups(){
       }catch(error){console.warn('Invalid group charter',error);}
     }
     state.groupViews=next.sort((a,b)=>a.event.payload.body.name.localeCompare(b.event.payload.body.name));
-    renderGroupList();
+    renderGroupList();renderRecommendedSpaces();
   }finally{groupRefreshPending=false;}
 }
 function renderGroupList(){
@@ -996,6 +1303,10 @@ function bind(){
   document.addEventListener('pointerdown',e=>{
     if(!$('searchPanel').hidden&&!e.target.closest('.search-wrap'))showSearch(false);
   });
+  $('toggleRecommendedSpaces').onclick=async()=>{
+    state.showGroupSpaces=!state.showGroupSpaces;
+    await store();renderRecommendedSpaces();
+  };
   $('allSpaces').onclick=()=>{$('spaceExplorer').hidden=!$('spaceExplorer').hidden;};
   $('closeSpaces').onclick=()=>{$('spaceExplorer').hidden=true;};
   $('openDemoSpace').onclick=()=>selectSpace('demo');
@@ -1013,7 +1324,8 @@ function bind(){
       const q=Number($('groupQuorum').value);
       const charter=await publish('group',{
         name,description:$('groupDescription').value.trim(),governance,
-        quorum:{numerator:q,denominator:100}
+        quorum:{numerator:q,denominator:100},
+        recommendedSpaces:parseCSV($('groupRecommendedSpaces').value)
       },{space:'groups'});
       if(!state.groupSubscriptions.includes(charter.id))state.groupSubscriptions.push(charter.id);
       await store();await refreshGroups();renderGroupList();
@@ -1022,6 +1334,28 @@ function bind(){
     }catch(error){toast('Could not create group: '+error.message);}
   };
   $('identityButton').onclick=openIdentitySettings;
+  $('myProfileButton').onclick=()=>{
+    $('identityDialog').close();showProfile(state.identity.author);
+  };
+  $('backToBoardButton').onclick=()=>{
+    $('identityDialog').close();selectSpace(state.space);
+  };
+  $('publishProfile').onclick=async()=>{
+    const control=$('publishProfile');control.disabled=true;
+    try{
+      const name=$('profileName').value.trim(),description=$('profileDescription').value.trim();
+      const website=$('profileWebsite').value.trim();
+      if(website){
+        const url=new URL(website);
+        if(!['http:','https:'].includes(url.protocol)||url.username||url.password)
+          throw Error('Profile website must be an HTTP(S) URL without credentials');
+      }
+      await publish('profile',{name,description,website},{space:'profiles'});
+      render();
+      identityMessage('Signed profile metadata published to your selected peers.');
+    }catch(error){identityMessage('Could not publish profile: '+error.message);}
+    finally{control.disabled=false;}
+  };
   $('closeIdentity').onclick=()=>{
     $('identityPassword').value='';
     $('identityDialog').close();
@@ -1218,6 +1552,7 @@ async function init(){
   state.mockMode=await getItem(state.db,'classic-mock-mode')===true;
   state.followedSpaces=await getItem(state.db,'classic-followed-spaces')||['demo','commons'];
   state.groupSubscriptions=await getItem(state.db,'classic-group-subscriptions')||[];
+  state.showGroupSpaces=await getItem(state.db,'classic-show-group-spaces')!==false;
   state.autoDemoPeerDisabled=await getItem(state.db,'classic-auto-demo-peer-disabled')===true;
   try{
     const demo=await (await fetch('./demo.json',{cache:'no-store'})).json();
@@ -1229,6 +1564,15 @@ async function init(){
   const hint=readSiteContext(location.href);
   state.space=hint.space||await getItem(state.db,'classic-space')||'demo';
   state.ownerHint=hint.preferredAuthor;
+  const selectedProfile=new URLSearchParams(location.search).get('profile');
+  if(selectedProfile==='me')state.profileAuthor=state.identity.author;
+  else if(/^ed25519:[A-Za-z0-9_-]{43}$/.test(selectedProfile||''))state.profileAuthor=selectedProfile;
+  window.addEventListener('popstate',()=>{
+    const query=new URLSearchParams(location.search).get('profile');
+    state.profileAuthor=query==='me'?state.identity.author:
+      /^ed25519:[A-Za-z0-9_-]{43}$/.test(query||'')?query:null;
+    state.selected=null;render();
+  });
   // Owner-preferred views are a host suggestion, not a namespace write lock.
   // The visitor can inspect suppressed records via Audit, and uncheck the
   // owner view at any time from the compact board toolbar.

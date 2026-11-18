@@ -97,3 +97,18 @@ test('one locally ignored signed spam flag cannot erase the post or other labels
   assert.equal(replica.get(label.id)?.id,label.id,'local override must preserve flag evidence');
   assert.equal(replica.get(post.id)?.id,post.id,'local override does not alter publication');
 });
+
+test('independent signed profile metadata can be published without claiming a namespace',async()=>{
+  const alice=await generateIdentity(),bob=await generateIdentity();
+  const one=await signEvent(alice,{kind:'profile',space:'profiles',
+    body:{name:'Alice',description:'My self-authored profile',website:'https://example.org'}});
+  const two=await signEvent(bob,{kind:'profile',space:'profiles',
+    body:{name:'Another Alice',description:'Unrelated identity',website:''}});
+  assert.equal(await verifyEvent(one),true);
+  assert.equal(await verifyEvent(two),true);
+  const r=new Replica();assert.equal((await r.ingest(one)).accepted,true);
+  assert.equal((await r.ingest(two)).accepted,true);
+  assert.equal(r.size,2);
+  await assert.rejects(signEvent(alice,{kind:'profile',space:'profiles',
+    body:{name:'a'.repeat(81),description:''}}),/profile/);
+});

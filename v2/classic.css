@@ -335,3 +335,193 @@ dialog::backdrop{background:#000b}
 .identity-actions #saveIdentityBackup{background:#d2ac6d;color:#241a20;font-weight:700}
 .identity-warning{border-left:2px solid #90724b;padding:7px 10px;color:#c7ada2!important;background:#2d2825;font-size:11px}
 #identityMessage{min-height:16px;font-size:11px;color:#e7d5ae}
+
+/* WEB9000 original compact tag capsules: label, weighted count and both
+   colored vote controls belong INSIDE one coherent pill. */
+.label-row{align-items:center;gap:4px}
+.label-row .tag-chip{display:inline-flex;align-items:center;gap:0;
+ background:#342e36;color:#e4dbe6;border-radius:13px;border:1px solid #574655;
+ overflow:hidden;max-width:100%;font-size:11px;line-height:1.2}
+.expanded-body .label-row .tag-chip button{background:none;border:0;font-size:11px;padding:4px 5px}
+.label-row .tag-chip .tag-name{color:#e7dfe7;padding-left:9px}
+.label-row .tag-chip .tag-count{color:#aa9cae;padding:0 4px 0 1px;font-size:10px}
+.label-row .tag-chip .tag-up{color:#90caa1!important}
+.label-row .tag-chip .tag-down{color:#e99b9b!important;padding-right:8px}
+.label-row .tag-chip .tag-up:hover,.label-row .tag-chip .tag-up.selected{background:#274f38;box-shadow:inset 0 -2px #88d99c}
+.label-row .tag-chip .tag-down:hover,.label-row .tag-chip .tag-down.selected{background:#563339;box-shadow:inset 0 -2px #f39c9c}
+.expanded-body .label-row .tag-more{border:1px solid #645464;background:#38323b;
+ border-radius:12px;padding:2px 9px;color:#f2d59a;font-weight:700;font-size:14px}
+.expanded-body .label-row .tag-add{border:0;background:none;padding:2px 6px;
+ color:#c8b9ca;font-size:11px;font-style:italic}
+.label-row .tag-add:hover{text-decoration:underline;color:var(--gold)}
+/* Details expose portable IPFS IDs through the signed record audit, not
+   through decorative technical buttons in the ordinary reading interface. */
+.expanded-body .cid-copy{display:none!important}
+/* The demo signer is already identified in the post details. It must not
+   obscure media or overlap the content-type badge. */
+.post .demo-label{display:none}
+/* Real checkbox sizes and a compact grid: never inherit text input dimensions. */
+.search-excludes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px 8px}
+.search-excludes label{display:inline-flex;align-items:center;gap:5px;min-width:0;
+ white-space:nowrap;font-size:11px;line-height:1.4}
+.search-excludes input[type=checkbox]{display:inline-block;appearance:auto;width:13px!important;
+ height:13px!important;min-width:13px!important;max-width:13px!important;
+ flex:0 0 13px;margin:0!important;padding:0!important}
+@media(max-width:540px){.search-excludes{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+
+/* Blog rows use the available text column rather than wasting most of it
+   on an isolated centered headline. Mixed view keeps its existing 3-cell text. */
+.post-copy{display:contents}
+.post-description{display:none}
+.grid.blog .post{min-height:185px;max-height:238px;grid-template-columns:172px minmax(0,1fr);
+ grid-template-rows:minmax(0,1fr);position:relative;overflow:hidden}
+.grid.blog .post>.post-thumb,.grid.blog .post>.post-text-preview,
+.grid.blog .post>.post-reveal,.grid.blog .post>.mini-audio{grid-column:1;grid-row:1;
+ width:172px;height:100%;max-height:238px;aspect-ratio:auto}
+.grid.blog .post>.post-copy{display:flex;grid-column:2;grid-row:1;min-width:0;
+ flex-direction:column;align-items:stretch;justify-content:flex-start;
+ gap:5px;padding:11px 14px 12px;overflow:hidden}
+.grid.blog .post .post-copy .post-headline{display:block;position:static;align-self:stretch;
+ padding:0;margin:0;min-height:0;max-height:55px;overflow:hidden;
+ font-size:16px;line-height:1.28;font-weight:700;background:none}
+.grid.blog .post .post-copy .post-description{display:-webkit-box;flex:1;
+ -webkit-box-orient:vertical;-webkit-line-clamp:9;
+ overflow:hidden;min-width:0;max-height:none;line-height:1.42;font-size:12px;
+ color:#c8bfc8;white-space:pre-wrap;overflow-wrap:anywhere}
+.grid.blog .post .post-icons{position:absolute;top:5px;right:5px;left:auto;
+ max-width:min(65%,210px);z-index:4}
+.grid.blog .post>.post-small{display:none}
+.grid.blog .post .post-copy{padding-top:14px}
+/* Media-first previews: hover starts a muted looping video, while audio
+   uses custom compact controls with no native <audio controls> chrome. */
+.post .hover-video{position:absolute;inset:0 auto auto 0;width:100%;
+ aspect-ratio:1/1;object-fit:cover;z-index:2;display:none;pointer-events:none;background:#17141b}
+.post:hover .hover-video{display:block}
+.post .hover-video-progress{position:absolute;top:calc(min(100vw,100%) - 4px);
+ left:0;height:3px;width:0;background:var(--gold);z-index:4;pointer-events:none}
+.grid.blog .post .hover-video{height:100%;width:172px;aspect-ratio:auto}
+.grid.blog .post .hover-video-progress{top:auto;bottom:0}
+.mini-audio{display:flex;align-items:center;gap:7px;padding:8px 10px;flex-wrap:wrap;
+ background:linear-gradient(140deg,#352936,#241e27);border-radius:2px;max-width:720px}
+.mini-audio audio{display:none}
+.mini-audio-toggle{display:grid;place-items:center;flex:0 0 29px;
+ width:29px;height:29px;border-radius:50%;border:0!important;background:#dfba73!important;
+ color:#211725!important;font-size:14px!important;padding:0!important;box-shadow:0 1px 5px #0006}
+.mini-wave{flex:1;min-width:35px;display:flex;align-items:center;gap:2px;
+ height:27px;overflow:hidden;justify-content:center;opacity:.8}
+.mini-wave i{display:block;background:#c7a2ca;min-width:2px;max-width:5px;flex:1;
+ border-radius:1px;box-shadow:0 0 3px #f6baeb33}
+.mini-audio.playing .mini-wave i{background:#efcf83}
+.mini-audio-progress{flex:1 1 100%;height:4px;min-width:0;accent-color:var(--gold);cursor:pointer}
+.mini-audio-clock{font-size:10px;color:#d6c5cc}
+.mini-audio.compact{width:100%;aspect-ratio:1/1;flex-direction:column;justify-content:center;
+ align-content:center;gap:5px;padding:10px 7px;flex-wrap:nowrap}
+.mini-audio.compact .mini-wave{width:100%;flex:0 0 42px;height:42px}
+.mini-audio.compact .mini-audio-progress{width:100%;flex:0 0 4px}
+.mini-audio.compact .mini-audio-clock{font-size:10px}
+.grid.blog .mini-audio.compact{aspect-ratio:auto}
+@media(max-width:620px){
+ .grid.blog .post{grid-template-columns:100px minmax(0,1fr);min-height:130px;max-height:190px}
+ .grid.blog .post>.post-thumb,.grid.blog .post>.post-text-preview,
+ .grid.blog .post>.post-reveal,.grid.blog .post>.mini-audio{width:100px;max-height:190px}
+ .grid.blog .post .post-copy{padding:8px 10px}
+ .grid.blog .post .post-copy .post-headline{font-size:13px}
+ .grid.blog .post .post-copy .post-description{font-size:11px;-webkit-line-clamp:8}
+ .grid.blog .post .hover-video{width:100px}
+}
+
+
+/* Restrained board theme: vote state is visible through the gold edge and
+   inset shadow, not four clashing colored button backgrounds. */
+.expanded-body .reactions{gap:5px}
+.expanded-body .reactions button[data-reaction-value]{
+  min-width:34px;padding:6px 9px;background:#39333b;color:#e6dce7;
+  border:1px solid #544855;box-shadow:none;font-weight:700}
+.expanded-body .reactions button[data-reaction-value].selected,
+.expanded-body .reactions button[data-reaction-value][aria-pressed=true]{
+  border-color:var(--gold);color:#fff1c5;background:#5b4934;
+  box-shadow:inset 0 0 0 1px #f3c66777,0 0 7px #f3c6675c}
+.expanded-body .reactions button[data-reaction-value]:hover{
+  box-shadow:0 0 0 1px var(--gold)}
+.expanded-body .reactions .score{font-size:20px;color:var(--gold);min-width:32px}
+.expanded-body .reactions .audit-action,.expanded-body .reactions .trust-action,
+.expanded-body .reactions .source-action{background:#332e34;color:#c9bec6;border:1px solid #433a44}
+.expanded-body .reactions .audit-action:hover,
+.expanded-body .reactions .trust-action:hover,
+.expanded-body .reactions .source-action:hover{border-color:#c8a861}
+.expanded-body .reactions .report-control > summary{
+  background:#3b2f37;border:1px solid #524250;color:#d9bbc3}
+.expanded-body .reactions .report-control[open] > summary{
+  border-color:var(--gold);box-shadow:0 0 0 1px #bfa16b44}
+/* Optional independent, signed clan suggestions appear on a SECOND
+   strip, explicitly separate from the user's own favorites. */
+.recommended-space-nav{max-width:1240px;margin:0 auto;display:flex;gap:9px;
+ align-items:center;min-height:29px;padding:2px 8px;border-bottom:1px solid #252128;
+ background:#151316;color:#b8a9bb}
+.recommended-space-nav .space-nav-title{color:#b69abf;font-size:10px;min-width:93px}
+.recommended-space-nav .space-links{display:flex;flex:1;min-width:0;overflow-x:auto;gap:4px}
+.recommended-space-nav button{background:none;border:0;color:#d3bfdb;
+ padding:4px 7px;font-size:10px;white-space:nowrap}
+.recommended-space-nav .group-space-chip{color:#d5c7da;background:#2c2532;border-radius:2px}
+.recommended-space-nav .group-space-chip.active{color:var(--gold);box-shadow:inset 0 -2px var(--gold)}
+.recommended-space-nav .recommended-empty{font-size:10px;color:#7f7782;white-space:nowrap}
+.recommended-space-nav.collapsed{opacity:.75}
+.recommended-space-nav #toggleRecommendedSpaces{color:#c6b17d}
+/* Public personal pages are another view of the SAME signed grid. */
+.profile-header{max-width:1220px;margin:10px auto 5px;padding:15px 18px 12px;
+ background:#211d23;border-top:2px solid #a57c9e;box-shadow:0 2px 11px #0005}
+.profile-heading{display:flex;justify-content:space-between;align-items:baseline;gap:13px;flex-wrap:wrap}
+.profile-title{font-size:19px;line-height:1.3;margin:0;color:#f4e6ee}
+.profile-key{font-size:10px;overflow-wrap:anywhere;color:#938894}
+.profile-stats{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0 8px}
+.profile-stat{min-width:110px;padding:6px 10px;background:#29232d;display:flex;
+ flex-direction:column;gap:3px}
+.profile-stat b{color:var(--gold);font-size:17px;line-height:1.2}
+.profile-stat span{color:#c8bac8;font-size:10px}
+.profile-description{white-space:pre-wrap;overflow-wrap:anywhere;color:#d8cbd6;
+ line-height:1.6;font-size:12px;max-width:880px;margin:8px 0 4px}
+.profile-website{font-size:11px}
+.profile-actions{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin-top:10px}
+.profile-actions button{background:#3a313d;border:0;color:#e5ccdd;
+ font-size:11px;padding:5px 9px}
+.profile-status{font-size:10px;color:#9c928f}
+.details-line .author-profile-link{padding:0;border:0;background:none;color:#d7b7d2;
+ font-size:10px;white-space:nowrap}
+.details-line .author-profile-link:hover{text-decoration:underline;color:var(--gold)}
+.account-nav{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.account-nav button{background:#352f39;border:0;color:#dec9dc;font-size:11px;padding:6px 9px}
+.account-nav #myProfileButton{background:#544258;color:#fff0d1}
+.profile-editor{margin:4px 0 5px;padding:9px;background:#29242c}
+.profile-editor summary{cursor:pointer;font-size:12px;color:#e5cecb}
+.profile-editor label{display:flex;flex-direction:column;gap:3px;margin:10px 0;color:#d2c4cf;font-size:11px}
+.profile-editor input,.profile-editor textarea{background:#1c191f;color:#eee;border:1px solid #534657;
+ padding:7px 8px;width:100%;font-size:12px}
+.profile-editor #publishProfile{background:#d4b16b;color:#251a1f;border:0;
+ padding:7px 11px;font-weight:700;font-size:11px}
+@media(max-width:620px){.profile-header{margin:6px;padding:12px}
+ .profile-stat{min-width:100px;flex:1}.recommended-space-nav .space-nav-title{min-width:63px}}
+
+
+/* Purpose-built WEB9000 video mini-player, not browser native controls. */
+.mini-video-player{display:flex;flex-direction:column;width:min(100%,760px);
+ background:#100e13;box-shadow:0 2px 14px #0008}
+.mini-video-frame{width:100%;height:auto;max-height:68vh;object-fit:contain;cursor:pointer}
+.mini-video-controls{display:flex;align-items:center;gap:7px;padding:7px 9px;
+ background:#25212a;min-height:38px}
+.mini-video-controls button{background:none;border:0;color:#e6d3df;font-size:11px;padding:4px 6px}
+.mini-video-controls .mini-video-play{background:#d1ad70;color:#23171d;border-radius:50%;
+ width:28px;height:28px;flex:0 0 28px;font-weight:700}
+.mini-video-timeline{flex:1;min-width:50px;height:4px;accent-color:var(--gold)}
+.mini-video-clock{font-size:10px;white-space:nowrap;color:#c6b7c4}
+.mini-video-controls .mini-video-mute[aria-pressed=true]{color:var(--gold)}
+.mini-video-controls .mini-video-fullscreen{font-size:16px}
+
+/* Enough trailing scrolling room to anchor the last grid row beneath the
+   sticky toolbar even after collapsing a large expanded post. */
+#imageGrid:not(:empty)+#feedStatus{padding-bottom:max(180px,calc(100vh - 95px))}
+
+/* Badge collision avoidance: icon rows must not paint over long text. */
+.grid:not(.blog) .post.has-icons > .post-text-preview{padding-top:31px}
+.grid.blog .post.has-icons .post-copy .post-headline{padding-right:min(29%,155px)}
+.grid.blog .post.has-icons .post-copy .post-description{padding-top:1px}

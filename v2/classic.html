@@ -59,17 +59,23 @@
   <button id="allSpaces" type="button" title="Browse all observed namespaces">Browse</button>
   <button id="clansButton" type="button" title="Independent voluntary governance groups">Clans / groups</button>
 </nav>
+<nav id="recommendedSpaceNav" class="recommended-space-nav" aria-label="Followed group-recommended spaces">
+  <span class="space-nav-title">Groups suggest</span>
+  <div id="recommendedSpaceLinks" class="space-links"></div>
+  <button id="toggleRecommendedSpaces" type="button">Hide</button>
+</nav>
 <div class="classic-toolbar">
 <label>Space <input id="spaceName" type="text" value="commons" maxlength="180" placeholder="commons"></label>
 <button type="button" id="goSpace">Open</button>
 <label>View <select id="viewStyle"><option value="grid">Classic grid</option><option value="mixed">Mixed</option><option value="blog">Blog</option></select></label>
 <label><input type="checkbox" id="showUnverified"> Show unstaked / unverified (raw lane)</label>
-<button id="identityButton" type="button" title="Your portable signing identity">Identity</button>
+<button id="identityButton" type="button" title="Your profile and portable signing identity">My account</button>
 <button id="mockKarmaButton" type="button">Test karma</button>
 <span id="mockModeLabel" class="mock-active" hidden></span>
 <span class="peer-state" id="peerStatus">Local, disconnected</span>
 <a href="./dashboard.html" class="subtle-link">Developer dashboard (experimental)</a>
 </div>
+<section id="profileHeader" class="profile-header" hidden aria-label="Personal profile"></section>
 <div id="spaceExplorer" class="space-explorer" hidden>
   <div class="space-explorer-header"><strong>Observed spaces</strong><button id="closeSpaces" type="button">×</button></div>
   <p>All names are public commons. They cannot be reserved, claimed or owned by whoever posted first.</p>
@@ -93,7 +99,10 @@
         <option value="democracy">Member democracy</option><option value="representative" disabled>Elected / delegated council (future)</option>
         <option value="dao" disabled>DAO / stake governance (future)</option><option value="steward" disabled>Founding steward with democratic succession (future)</option>
       </select></label>
-      <label>Approval threshold <select id="groupQuorum">
+      <label>Suggest public spaces (comma separated)
+<input id="groupRecommendedSpaces" placeholder="cats, photography, demo" maxlength="600">
+</label>
+<label>Approval threshold <select id="groupQuorum">
         <option value="50">Simple majority</option><option value="67">Two-thirds</option><option value="100">Unanimous</option>
       </select></label>
       <button type="submit" class="primary-mini">Publish signed founding charter</button>
@@ -114,6 +123,16 @@
 <dialog id="identityDialog"><div class="dialog-inner">
 <div class="dialog-title"><strong>Your signing identity</strong>
 <button type="button" id="closeIdentity" aria-label="Close identity settings">×</button></div>
+<div class="account-nav"><button id="myProfileButton" type="button">My page and posts</button>
+<button id="backToBoardButton" type="button">Return to board</button></div>
+<details id="profileEditor" class="profile-editor">
+<summary>Edit public profile (signed)</summary>
+<label>Display name <input id="profileName" type="text" maxlength="80" placeholder="Optional name"></label>
+<label>Description <textarea id="profileDescription" maxlength="2000" rows="4" placeholder="Describe your page or projects"></textarea></label>
+<label>Website <input id="profileWebsite" type="url" maxlength="400" placeholder="https://example.org"></label>
+<button id="publishProfile" type="button">Publish signed profile</button>
+<p class="fine">Profile metadata is signed by your key and can be replicated by willing peers. Anyone can publish a name; it does not claim a namespace or prove real-world identity.</p>
+</details>
 <p>Your public key signs posts, replies and group votes. It belongs to you, not to a namespace owner or test peer. The encrypted backup carries the signing key only; it does not archive all posts and attachments.</p>
 <div class="identity-public"><span>Public identity</span><code id="identityPublicKey"></code>
 <button type="button" id="copyIdentity">Copy public key</button></div>

@@ -157,4 +157,12 @@ The composer supports searchable custom key/value attributes and a normal offer-
 
 Use **Identity** in the classic toolbar to copy your public signing key or save a password-encrypted backup. The password must contain at least twelve characters. The backup file contains encrypted Ed25519 signing material, not public post history or IPFS files. Keep the backup and password separately and only open it on a trusted website. Restore the file into another static WEB9000 deployment using **Identity → Restore from encrypted file**; publication from the restored key carries the same public author identity without centralized login.
 
-The Chromium end-to-end test specifically performs this backup/restore operation between distinct website origins, then checks a valid signed publication on the independently replicated peer. Production adversarial security review remains necessary; a malicious website can modify its own JavaScript.
+The Chromium end-to-end test specifically performs this backup/restore operation between distinct website origins, then checks a valid signed publication on the independently replicated peer. Production adversarial security review remains necessary; a malicious website can modify its own JavaScript.### User-facing classic layout and profiles
+
+Opening and closing posts, keyboard navigation and direct-reply focus use the sticky-header-aware row/comment anchors. Tag chips have score/+/- controls, a 20-tag expansion pill and a separate add-tag action. Blog mode provides full-width reading excerpts; Mixed keeps three-wide text tiles. Type-filter boxes are small native checkboxes.
+
+The first Spaces strip contains reader-selected favorites. The Groups suggest strip is optional and reads signed recommendedSpaces arrays from followed group charters; no group owns a namespace. Group founders can recommend names without reserving them.
+
+My account contains encrypted key export/restore and a signed editable public profile. User/author pages use the same grid filtered to the signing key, with self-authored bio, website and score/stats. The karma field is explicitly TEST-ONLY unless an independent verifier is actually connected.
+
+Site-only /demo video supports muted hover animation and a custom expanded video player; a site-hosted sound example supports a custom audio waveform mini-player. These legacy video/audio bytes are site-hosted, NOT IPFS-pinned: only separately uploaded image CIDs are served by the currently running image-only IPFS peer. The media source allowlist is restricted to the trusted demo signer.

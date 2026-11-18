@@ -31,7 +31,8 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const base=await mkdtemp(path.join(os.tmpdir(),'w9-classic-'));
 const servers=[];let browser,libp2p,helia,orbitdb,index,bridge,demoIdentity,demoCid,demoBytes;
 function serve(){
- const mime={'.html':'text/html','.css':'text/css','.js':'text/javascript','.jpg':'image/jpeg'};
+ const mime={'.html':'text/html','.css':'text/css','.js':'text/javascript',
+   '.jpg':'image/jpeg','.mp4':'video/mp4','.mp3':'audio/mpeg'};
  const server=createServer(async(req,res)=>{
    const url=new URL(req.url,'http://local.invalid');
    if(url.pathname==='/v2/demo.json'){
@@ -129,9 +130,44 @@ try{
  assert.ok((await a.$$('.post')).length>=20,'original visual demo board');
  console.log('CLASSIC checkpoint 2: demo tile grid rendered');
  const kinds=await a.$$eval('.post-icons',els=>els.map(e=>e.textContent));
- for(const expected of ['Meetup','Poll','Jobs','Offer','Project','Text','Video'])
+ for(const expected of ['Meetup','Poll','Jobs','Offer','Project'])
    assert.ok(kinds.some(value=>value.includes(expected)), 'missing sample content icon: '+expected);
  assert.equal(await a.evaluate(()=>document.querySelectorAll('.post-small.demo-label').length),24);
+ assert.equal(await a.evaluate(()=>[...document.querySelectorAll('.post-icons')]
+   .some(e=>/(^| · )(▣ Image|☰ Text|▶ Video|♪ Sound)/.test(e.textContent))),false,
+   'obvious media-type labels are CSS/JS-hidden; only useful metadata gets badges');
+ await a.evaluate(()=>document.getElementById('showSearchOptions').click());
+ const excludes=await a.evaluate(()=>[...document.querySelectorAll('.search-excludes input')].map(x=>({
+   width:x.getBoundingClientRect().width,height:x.getBoundingClientRect().height,
+   label:x.parentElement.getBoundingClientRect().width
+ })));
+ assert.equal(excludes.length,8);
+ assert.ok(excludes.every(x=>x.width<=18&&x.height<=18&&x.label>x.width+15),
+   'type filters must have real tiny checkboxes instead of giant text inputs '+JSON.stringify(excludes));
+ await a.evaluate(()=>document.getElementById('closeSearch').click());
+ await a.evaluate(()=>{
+   document.getElementById('viewStyle').value='blog';
+   document.getElementById('viewStyle').dispatchEvent(new Event('change',{bubbles:true}));
+ });
+ await eventually(()=>a.evaluate(()=>document.querySelector('#imageGrid')?.classList.contains('blog')),
+   'blog grid change committed');
+ const blogGeometry=await a.evaluate(()=>{
+   const tile=document.querySelector('.post'),heading=tile.querySelector('.post-headline').getBoundingClientRect();
+   const preview=tile.querySelector('.post-description'),rect=preview.getBoundingClientRect();
+   return {copyW:rect.width,display:getComputedStyle(preview).display,headingTop:heading.top,
+     previewTop:rect.top,postTop:tile.getBoundingClientRect().top};
+ });
+ assert.ok(blogGeometry.copyW>=180&&blogGeometry.display!=='none'&&
+   blogGeometry.headingTop-blogGeometry.postTop<=22 &&
+   blogGeometry.previewTop>blogGeometry.headingTop,
+   'blog view needs a generous readable right-side text description '+JSON.stringify(blogGeometry));
+ await a.evaluate(()=>{
+   document.getElementById('viewStyle').value='grid';
+   document.getElementById('viewStyle').dispatchEvent(new Event('change',{bubbles:true}));
+ });
+
+ await eventually(()=>a.evaluate(()=>document.querySelector('#imageGrid')?.classList.contains('grid')&&
+   !document.querySelector('#imageGrid')?.classList.contains('blog')), 'classic grid view restored');
  await a.evaluate(()=>document.querySelector('.post[data-index="2"]').click());
  assert.ok((await a.$$eval('.poll button',els=>els.length))>=3,'sample poll has choices');
  assert.ok((await a.$$eval('.reactions button',els=>els.length))>=5,'sample preview has voting and flagging bar');
@@ -139,6 +175,9 @@ try{
  const beforeScore=await a.$eval('.reactions .score',e=>Number(e.textContent));
  await a.evaluate(()=>document.querySelector('.reactions button').click());
  await eventually(()=>a.evaluate(before=>Number(document.querySelector('.reactions .score')?.textContent)===before+2,beforeScore), 'signed demo reaction applied');
+ assert.equal(await a.evaluate(()=>document.querySelector('.reactions .vote-max')?.classList.contains('selected')),true,
+   'the selected vote has persistent highlighted styling');
+ assert.equal(await a.evaluate(()=>document.querySelector('.reactions .vote-max')?.getAttribute('aria-pressed')),'true');
  const afterScore=await a.$eval('.reactions .score',e=>Number(e.textContent));
  assert.equal(afterScore,beforeScore+2,'signed demonstration post can be voted on like real content');
  assert.equal(await a.evaluate(()=>document.querySelector('.post-container.expanded')!==null),true);
@@ -184,6 +223,37 @@ try{
  await a.keyboard.press('Escape');
  assert.equal(await a.$$eval('.post-container.expanded',x=>x.length),0);
  console.log('CLASSIC checkpoint 4: row collapsed');
+ await a.setViewport({width:1440,height:520});
+ await a.evaluate(()=>document.querySelector('.post[data-index="15"]').click());
+ const openedScroll=await a.evaluate(()=>{
+   const tile=document.querySelector('.post.selected').getBoundingClientRect();
+   const top=document.getElementById('topHeader').getBoundingClientRect().height+5;
+   return {top:tile.top,expected:top};
+ });
+ assert.ok(Math.abs(openedScroll.top-openedScroll.expected)<=17,
+   'opening a post must anchor its grid row under sticky header: '+JSON.stringify(openedScroll));
+ await a.evaluate(()=>document.querySelector('.post.selected').click());
+ const closedScroll=await a.evaluate(()=>{
+   const tile=document.querySelector('.post[data-index="15"]').getBoundingClientRect();
+   return {top:tile.top,expected:document.getElementById('topHeader').getBoundingClientRect().height+5};
+ });
+ assert.ok(Math.abs(closedScroll.top-closedScroll.expected)<=17,
+   'closing a post must preserve current grid row, not jump to page top: '+JSON.stringify(closedScroll));
+ await a.evaluate(()=>document.querySelector('.post[data-index="14"]').click());
+ await a.evaluate(()=>document.querySelector('.post.selected').focus({preventScroll:true}));
+ await a.keyboard.press('ArrowRight');
+ const navigatedScroll=await a.evaluate(()=>{
+   const tile=document.querySelector('.post.selected').getBoundingClientRect();
+   return {index:document.querySelector('.post.selected').dataset.index,
+     top:tile.top,expected:document.getElementById('topHeader').getBoundingClientRect().height+5};
+ });
+ assert.equal(navigatedScroll.index,'15');
+ assert.ok(Math.abs(navigatedScroll.top-navigatedScroll.expected)<=17,
+   'arrow navigation must align selected grid row: '+JSON.stringify(navigatedScroll));
+ await a.keyboard.press('Escape');
+ await a.setViewport({width:1440,height:900});
+ console.log('CLASSIC checkpoint 4a: row scroll anchoring on open, close, and arrow navigation');
+
  await a.evaluate(()=>document.getElementById('clansButton').click());
  await eventually(()=>a.evaluate(()=>document.querySelectorAll('.group-entry').length>=2),
    'signed group charters listed in clans panel');
@@ -254,6 +324,13 @@ try{
  assert.ok((await b.$$eval('.poll button',x=>x.length))>=2,'native poll UI');
  assert.ok((await b.$$eval('.schedule',x=>x.length))>=1,'native date UI');
  console.log('CLASSIC checkpoint 11: post details, poll and schedule visible');
+ await b.focus('.comments-section > .comment-form textarea');
+ const directReplyAnchor=await b.evaluate(()=>({
+   controls:document.querySelector('.reactions').getBoundingClientRect().top,
+   wanted:document.querySelector('#topHeader').getBoundingClientRect().height+5
+ }));
+ assert.ok(Math.abs(directReplyAnchor.controls-directReplyAnchor.wanted)<=25,
+   'focus a direct post comment with the reaction bar anchored below the header: '+JSON.stringify(directReplyAnchor));
  await b.type('.comment-form textarea','A separate, real signed comment',{delay:4});
  assert.equal(await b.$eval('.comment-form textarea',el=>el.value),'A separate, real signed comment',
    'incoming peer data must not destroy the focused comment draft');
@@ -308,6 +385,7 @@ try{
    document.getElementById('createGroupDetails').open=true;
    document.getElementById('groupName').value='Chromium test cooperative';
    document.getElementById('groupDescription').value='Test signed charter from a web browser';
+   document.getElementById('groupRecommendedSpaces').value='demo, cats, makerspace';
    document.getElementById('createGroupForm').requestSubmit();
  });
  await eventually(()=>bridge.replica.list().some(e=>e.payload.kind==='group'&&
@@ -316,6 +394,15 @@ try{
     'new voluntary group appears in its creator UI');
  await b.evaluate(()=>document.getElementById('closeClans').click());
  console.log('CLASSIC checkpoint 15: group creation publishes an independent signed charter');
+ await eventually(()=>b.evaluate(()=>document.querySelector('#recommendedSpaceLinks')?.textContent.includes('/makerspace')),
+   'followed group recommendation appears in separate row');
+ await b.evaluate(()=>document.getElementById('toggleRecommendedSpaces').click());
+ await eventually(()=>b.evaluate(()=>document.querySelector('#recommendedSpaceNav').classList.contains('collapsed')),
+   'hide followed group recommendations');
+ await b.evaluate(()=>document.getElementById('toggleRecommendedSpaces').click());
+ await eventually(()=>b.evaluate(()=>document.querySelector('#recommendedSpaceLinks')?.textContent.includes('/cats')),
+   'restore group recommendation chips');
+
  // Reply threading is a *tree*, not a flat list with an indiscriminate
  // vertical line across text. Verify a second-level signed reply and that
  // collapse changes only that subtree, not the parent or other comments.
@@ -430,6 +517,66 @@ try{
  assert.match(attributes.license,/licenseCC0/i,'custom attribute displays in expanded post, not only in search');
  console.log('CLASSIC checkpoint 18: structured marketplace form and arbitrary attribute search');
 
+ // Exercise long tags and original-style demo media: reveal the last tags
+ // only when the inline ellipsis is selected, and keep image/sound badges off.
+ await b.evaluate(()=>{
+   document.getElementById('searchCustomField').value='';
+   document.getElementById('searchPosts').value='';
+   document.getElementById('searchPosts').dispatchEvent(new Event('input',{bubbles:true}));
+   document.querySelector('.detail-close')?.click();
+ });
+ const manyTagPost=await signEvent(demoIdentity,{space:'demo',kind:'post',
+   body:{title:'24 tags expansion test',text:'Tags should remain in compact vote chips.',
+     media:[],fields:{presentation:'text',
+       tags:Array.from({length:24},(_,i)=>'testtag'+i)}}});
+ await index.publish(manyTagPost);
+ await eventually(()=>b.evaluate(id=>!!document.querySelector('.post[data-id="'+id+'"]'),manyTagPost.id),
+   'signed 24-tag test post delivered');
+ await b.evaluate(id=>document.querySelector('.post[data-id="'+id+'"]').click(),manyTagPost.id);
+ assert.equal(await b.$$eval('.tag-chip',all=>all.length),20,'tag display is limited to 20 by default');
+ assert.equal(await b.$$eval('.tag-more',all=>all.length),1,'one ellipsis reveals additional tags');
+ const chipDetails=await b.evaluate(()=>{
+   const chip=document.querySelector('.tag-chip');
+   return {up:!!chip.querySelector('.tag-up'),down:!!chip.querySelector('.tag-down'),
+     children:chip.children.length,addIsChip:document.querySelector('.tag-add')?.closest('.tag-chip')!==null};
+ });
+ assert.ok(chipDetails.up&&chipDetails.down&&chipDetails.children>=4);
+ assert.equal(chipDetails.addIsChip,false,'add-tag must be a link, not an existing tag pill');
+ await b.evaluate(()=>document.querySelector('.tag-more').click());
+ assert.equal(await b.$$eval('.tag-chip',all=>all.length),24);
+ assert.equal(await b.$$eval('.tag-more',all=>all.length),0,'ellipsis disappears after expansion');
+ await b.evaluate(()=>document.querySelector('.detail-close').click());
+ const soundPost=await signEvent(demoIdentity,{space:'demo',kind:'post',
+   body:{title:'Sound controls test',text:'Example static sound clip',
+     media:[],fields:{presentation:'audio',demo:true,demoVersion:1,
+       demoAudio:'../content/festival_theme.mp3',tags:['sound']}}});
+ const videoPost=await signEvent(demoIdentity,{space:'demo',kind:'post',
+   body:{title:'Hover video controls test',text:'Example static video clip',
+     media:[],fields:{presentation:'video',demo:true,demoVersion:1,
+       demoVideo:'../thumb/thumb10.mp4',demoThumb:'../thumb/thumb11.jpg',tags:['video']}}});
+ await index.publish(soundPost);
+ await index.publish(videoPost);
+ await eventually(()=>b.evaluate((audioId,videoId)=>
+   !!document.querySelector('.post[data-id="'+audioId+'"] .mini-audio.compact')&&
+   !!document.querySelector('.post[data-id="'+videoId+'"] .hover-video'),
+   soundPost.id,videoPost.id),'separate signed audio and hover-video examples render');
+ await b.evaluate(id=>document.querySelector('.post[data-id="'+id+'"]').click(),soundPost.id);
+ assert.equal(await b.$$eval('.mini-audio-toggle',buttons=>buttons.length)>=1,true);
+ assert.equal(await b.$$('.mini-audio audio').then(all=>all.length)>=1,true);
+ await b.evaluate(()=>document.querySelector('.detail-close').click());
+ const videoTile='.post[data-id="'+videoPost.id+'"]';
+ await b.hover(videoTile);
+ await eventually(()=>b.evaluate(id=>{
+   const video=document.querySelector('.post[data-id="'+id+'"] .hover-video');
+   return video?.src?.endsWith('thumb10.mp4')&&video.muted&&video.loop;
+ },videoPost.id),'mouse-hover loads muted looping thumbnail preview');
+ await b.evaluate(id=>document.querySelector('.post[data-id="'+id+'"]').click(),videoPost.id);
+ assert.equal(await b.$$eval('.mini-video-player video',els=>els.length),1,
+   'expanded video uses custom player instead of native controls');
+ assert.equal(await b.$eval('.mini-video-player video',el=>el.controls),false);
+ await b.evaluate(()=>document.querySelector('.detail-close').click());
+ console.log('CLASSIC checkpoint 18a: compact tag voting, signed sound and hover video previews');
+
  // Export a password-encrypted identity from this classic website, then
  // restore it at a THIRD independent website origin. The restored signer
  // must publish valid events without a centrally registered account.
@@ -485,6 +632,26 @@ try{
  await eventually(()=>bridge.replica.list().some(e=>e.payload.kind==='post'&&
    e.payload.body.title==='Portable key on a third independent website'&&
    e.payload.author===originalSigner),'third site publishes a correctly signed post with restored key');
+ await c.evaluate(()=>{
+   document.getElementById('identityButton').click();
+   document.getElementById('profileEditor').open=true;
+   document.getElementById('profileName').value='Interoperable test author';
+   document.getElementById('profileDescription').value='A signed user bio visible on separate static websites.';
+   document.getElementById('profileWebsite').value='https://example.org/';
+   document.getElementById('publishProfile').click();
+ });
+ await eventually(()=>bridge.replica.list().some(e=>e.payload.kind==='profile'&&
+   e.payload.author===originalSigner&&
+   e.payload.body.description.includes('separate static websites')),
+   'signed portable profile metadata accepted by independent peer');
+ await c.evaluate(()=>document.getElementById('myProfileButton').click());
+ await eventually(()=>c.evaluate(()=>document.querySelector('.profile-title')?.textContent===
+   'Interoperable test author'),'signed user page displays authored name');
+ assert.ok(await c.$eval('.profile-description',el=>el.textContent.includes('separate static websites')));
+ assert.ok(await c.$$eval('.profile-stat',items=>items.length)>=4,'profile has karma and posting stats');
+ assert.ok(await c.$$eval('.post-headline',els=>els.some(e=>
+   e.textContent==='Portable key on a third independent website')));
+ console.log('CLASSIC checkpoint 19a: signed personal page and unified grid of authored posts');
  console.log('CLASSIC checkpoint 19: encrypted identity backup and signing across three website origins');
  console.log('PASS classic board, threads, audit, attributes and portable identities across three origins');
 }finally{
