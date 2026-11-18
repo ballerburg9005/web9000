@@ -199,6 +199,7 @@ async function init() {
   }
   await refreshGroups();
   bindEvents();await setupNetwork();applySiteContext();render();
+  document.documentElement.dataset.web9000Ready='1';
 }
 async function refreshGroups() {
   const events=state.replica.list(), compiled={},views=[];

@@ -52,7 +52,7 @@ async function eventually(test,label,ms=25000){
   throw Error('Timed out: '+label);
 }
 async function ready(page){
-  await page.waitForFunction(()=>document.querySelector('#identityKey')?.textContent.startsWith('ed25519:'),{timeout:20000});
+  await page.waitForFunction(()=>document.documentElement.dataset.web9000Ready==='1' && document.querySelector('#identityKey')?.textContent.startsWith('ed25519:'),{timeout:20000});
 }
 async function createPost(page,title,body,media=''){
   await page.click('#composeButton');
