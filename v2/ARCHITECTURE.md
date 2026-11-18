@@ -39,7 +39,7 @@ anonymous browser / embedded widget / always-on peer
 
 `{id, payload, signature}` where `id = sha256(canonical(payload))`; domain-separated Ed25519 signature covers the ID. `payload` contains `version, kind, space, author, time, nonce, body`. Post body contains arbitrary `fields` JSON alongside `title`, `text` and an optional array of IPFS CID references. There are **no exclusive post types**. A listing can simultaneously be an event, job, marketplace item, funding appeal and discussion.
 
-Event kinds: `post`, `reply`, `label`, `endorse`, `group`, `policy`, `membership`, `invitation`, `retraction`. Only the first five have a basic local interpretation in the prototype; the others have signature/schema support but **no canonical governance semantics yet**. All records are immutable. Edits create new signed assertions referring to previous IDs. A retraction is not deletion.
+Event kinds include `post`, `reply`, `label`, `endorse`, `group`, `proposal`, `vote`, `invitation`, `accept`, `policy`, `membership`, and `retraction`. Signed `group` charters, `proposal`/`vote` ratification, mutually signed `invitation`/`accept` sponsorship, and content/CID labels have local interpreter modules. Generic `policy`, `membership`, and `retraction` events remain **protocol-valid but without finalized common semantics**; their existence grants no global database authority. All records are immutable. Edits create new signed assertions referring to previous IDs. A retraction is not deletion.
 
 Signed labels contain `target`, arbitrary `tag`, `reason` and a reviewer identity. A label by itself proves only that the reviewer asserted it. It is not a global verdict. A local view can choose to trust an organization, a factional specialist, a commercial review agency, an artist guild, or nobody. Group subscriptions can inherit other group review weights, without imposing a single hierarchy; recursive cycles are bounded and duplicate reviewers use max weights instead of summation.
 
@@ -71,10 +71,10 @@ Reputational sponsorship must track **explicit signed invitations** with depth, 
 
 1. Preserve the legacy UI as a reference and build `v2/` without destroying it.
 2. Test portable signed immutable event protocol, local conflict-free mirror, two contradictory policy views, and embedded UI.
-3. Implement robust browser persistence (IndexedDB CryptoKeys + blockstore), peer connectivity, explicit discoverable OrbitDB indexes and multi-peer tests.
-4. Implement signed membership proposals, weighted/quorum democratic group governance, nested delegations and independent dispute-resolution rules.
+3. Extend existing browser IndexedDB key storage and encrypted portable backups with blockstore persistence, multi-relay browser connectivity and *discovery* (Node-to-Node OrbitDB two-peer smoke tests now pass).
+4. Expand implemented signed membership proposals, member quorum and fork-aware group governance with richer democratic voting, nested delegations, dispute resolution and browser selection of explicit forks.
 5. Add optional Stake4Karma adapter after contract verification and testnet E2E tests; evaluate bot economics.
-6. Implement image/video safety workflows and selective IPFS pinning with legal review, browser isolation and abuse testing.
+6. Integrate implemented local CID/media label and unpin policies with actual IPFS pin managers, legal review, browser isolation and abuse testing.
 7. Publish a multi-website embed test: two independent sites can publish to the same space, and a third peer can retain posts even when both sites disappear.
 
 ## Versions and references
@@ -86,3 +86,16 @@ Use current `@orbitdb/core` 4.x, Helia 6.x and libp2p 3.x families, but **test t
 - https://github.com/ballerburg9005/stake4karma
 
 Media-specific moderation may target a **signed post/event ID** or an **IPFS CID**, so known harmful bytes can be declined regardless of the number of posts referring to them. `core/media-policy.js` demonstrates locally chosen evidence thresholds, no implicit fetch and opt-in automatic **local** unpinning. It does not perform a remote takedown, magic detection of never-seen harmful media, or override another operator's storage decisions.
+
+## Current demonstrable milestones (November 2026)
+
+- **Cryptographic data integrity:** signature-verified content-addressed Ed25519 publication into any string namespace. No signer can claim an exclusive database address.
+- **Independent group interpretation:** signed founder charter, signed member proposals and yes/no votes, quorum against a parent snapshot, no imposed canonical winner for ratified forks. Rejections cannot retroactively invalidate already approved changes. Local subscription activates selected reviewer appointments.
+- **Sponsorship anti-Sybil evidence:** signer-issued invitation + separately signed acceptance, bounded promotion, dampened multi-hop inherited trust, and viewer-chosen reviewer sanctions with local sponsor liability. This is not a blockchain stake verification and confers no publication gate.
+- **Media safety evidence:** label event or CID, distinct weighted reviewers, default no automatic byte fetch, optional local automatic unpin. Nothing unpins another operator's blocks.
+- **Portable identity:** password-encrypted backup and import using PBKDF2-SHA256/AES-256-GCM; extractable key must be protected from malicious hosting scripts.
+- **Working network experiment:** GitHub Actions independently launches two Node libp2p/Helia/OrbitDB peers and verifies two-way exchange of signed events. Full browser-to-browser networking and independent global discovery remain unfinished.
+
+### Threat-model reminders
+
+Every direct connection can reveal a browser's network address, and the current network experiment is **not anonymous**. Membership records, public invitations, governance votes, signed content and stake wallets can create linkable social graphs. For political organizing, use compartmentalized identities and treat private-group encryption, metadata minimization and privacy-preserving routing as future work—not as present guarantees. Local policies must guard against coordinated false labels, reporting abuse, Sybil coalitions, and malicious host scripts. Neither blockchain staking nor group voting can prove real-world identity or honest intent.
