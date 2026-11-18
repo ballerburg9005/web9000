@@ -884,6 +884,12 @@ try{
  assert.equal(await c.$$eval('.compose-preview-gallery video',els=>els.length),1);
  assert.equal(await c.$$eval('.compose-preview-gallery audio',els=>els.length),1);
  await c.evaluate(()=>{
+   const indicator=document.getElementById('composeUploadIndicator');
+   window.__web9000UploadProgressSeen=false;
+   const observer=new MutationObserver(()=>{
+     if(!indicator.hidden)window.__web9000UploadProgressSeen=true;
+   });
+   observer.observe(indicator,{attributes:true,attributeFilter:['hidden']});
    const radio=document.querySelector('.compose-preview-gallery input[value="1"]');
    radio.click();
    document.getElementById('composePermanentAck').click();
@@ -892,6 +898,12 @@ try{
  await eventually(()=>bridge.replica.list().some(e=>e.payload.kind==='post'&&
    e.payload.body.title==='Mixed images, sound and video'),
    'audio and video sent through independent media peer and signed metadata published');
+ assert.equal(await c.evaluate(()=>window.__web9000UploadProgressSeen),true,
+   'author sees a progress indicator during mixed-media transfer');
+ await eventually(()=>c.evaluate(()=>
+   document.getElementById('composeUploadIndicator').hidden&&
+   !document.getElementById('composePreviewDialog').open),
+   'transfer progress resets after successful signing and preview closes');
  const mixed=bridge.replica.list().find(e=>e.payload.kind==='post'&&
    e.payload.body.title==='Mixed images, sound and video');
  assert.deepEqual(mixed.payload.body.fields.mediaTypes,

@@ -1608,7 +1608,34 @@ async function changeWithdrawal(item){
   }catch(error){toast('Could not publish signed request: '+error.message);}
 }
 let composerPreviewObjectURLs=[];
+let activeMediaXHR=null;
+let signingPublication=false;
+function setUploadStatus(text,percent=0){
+  const indicator=$('composeUploadIndicator');
+  indicator.hidden=false;
+  $('composeUploadStatus').textContent=text;
+  $('composeUploadProgress').value=Math.max(0,Math.min(100,percent));
+  signingPublication=/signing|distributing/i.test(text);
+  $('editPostPreview').disabled=signingPublication;
+  $('closeComposePreview').disabled=signingPublication;
+  if(!signingPublication)
+    $('editPostPreview').textContent=activeMediaXHR?
+      '× Cancel transfer / edit post':'← Edit post';
+}
+function resetUploadStatus(){
+  $('composeUploadIndicator').hidden=true;
+  $('composeUploadStatus').textContent='';
+  $('composeUploadProgress').value=0;
+  $('editPostPreview').textContent='← Edit post';
+  $('editPostPreview').disabled=false;
+  $('closeComposePreview').disabled=false;
+  signingPublication=false;
+}
 function clearComposerPreview(){
+  // Aborting a transfer cannot reclaim blocks already accepted by a willing
+  // IPFS operator; the UI warns about that before publishing.
+  if(activeMediaXHR){activeMediaXHR.abort();activeMediaXHR=null;}
+  resetUploadStatus();
   for(const url of composerPreviewObjectURLs)URL.revokeObjectURL(url);
   composerPreviewObjectURLs=[];
   $('composePreviewContent').replaceChildren();
@@ -1929,6 +1956,13 @@ function bind(){
     clearComposerPreview();
   };
   $('closeComposePreview').onclick=$('editPostPreview').onclick;
+  $('composePreviewDialog').addEventListener('cancel',event=>{
+    if(signingPublication)event.preventDefault();
+  });
+  $('composePreviewDialog').addEventListener('close',()=>{
+    // Esc closes a <dialog> natively; abort its media transfer too.
+    if(composerPreviewObjectURLs.length||activeMediaXHR)clearComposerPreview();
+  });
   $('confirmPublishPost').onclick=async()=>{
     if(!$('composePermanentAck').checked)return;
     $('confirmPublishPost').disabled=true;
@@ -1936,7 +1970,7 @@ function bind(){
     if($('composeError').hidden){
       $('composePreviewDialog').close();
       clearComposerPreview();
-    }else{
+    }else if($('composePreviewDialog').open){
       $('composePreviewError').hidden=false;
       $('composePreviewError').textContent=$('composeError').textContent;
       $('confirmPublishPost').disabled=false;
@@ -1983,20 +2017,53 @@ async function uploadMedia(files){
   if(!state.mediaBase)throw Error('No media peer configured. Connect or choose a voluntary media provider first.');
   validateLocalUploads(files);
   const uploaded=[];
-  for(const file of files){
-    const response=await fetch(state.mediaBase.replace(/\/$/,'')+'/upload',
-      {method:'POST',headers:{'content-type':file.type},body:file});
-    if(!response.ok){
-      const reason=await response.json().then(x=>x.error).catch(()=>null);
-      throw Error('Independent media peer refused '+file.name+' ('+response.status+
-        '): '+(reason||'check its upload settings and file-size limits'));
-    }
-    const data=await response.json();
-    if(typeof data.cid!=='string'||!/^ipfs:\/\/[A-Za-z0-9]{20,120}$/.test(data.cid)||
+  const base=state.mediaBase.replace(/\/$/,'');
+  for(const [index,file] of files.entries()){
+    const prefix='Uploading '+(index+1)+'/'+files.length+': '+file.name;
+    setUploadStatus(prefix+' · 0%',Math.floor(index/files.length*100));
+    const data=await new Promise((resolve,reject)=>{
+      const xhr=new XMLHttpRequest();
+      activeMediaXHR=xhr;
+      xhr.open('POST',base+'/upload',true);
+      xhr.timeout=120000;
+      xhr.setRequestHeader('Content-Type',file.type);
+      xhr.upload.onprogress=event=>{
+        if(!event.lengthComputable)return;
+        const fraction=event.total>0?event.loaded/event.total:0;
+        setUploadStatus(prefix+' · '+Math.floor(100*fraction)+'%',
+          Math.floor((index+fraction)/files.length*100));
+      };
+      xhr.onload=()=>{
+        if(activeMediaXHR===xhr)activeMediaXHR=null;
+        let result=null;
+        try{result=JSON.parse(xhr.responseText);}catch{}
+        if(xhr.status<200||xhr.status>=300){
+          reject(Error('Independent media peer refused '+file.name+' ('+xhr.status+
+            '): '+(result?.error||'check its upload settings and 10 MiB cap')));
+        }else resolve(result);
+      };
+      xhr.onerror=()=>{
+        if(activeMediaXHR===xhr)activeMediaXHR=null;
+        reject(Error('Network error uploading '+file.name));
+      };
+      xhr.ontimeout=()=>{
+        if(activeMediaXHR===xhr)activeMediaXHR=null;
+        reject(Error('Media peer upload timed out for '+file.name));
+      };
+      xhr.onabort=()=>{
+        if(activeMediaXHR===xhr)activeMediaXHR=null;
+        reject(new DOMException('Upload cancelled','AbortError'));
+      };
+      xhr.send(file);
+    });
+    if(typeof data?.cid!=='string'||!/^ipfs:\/\/[A-Za-z0-9]{20,120}$/.test(data.cid)||
       data.type!==file.type)
       throw Error('Media peer returned invalid CID or incorrect MIME type');
     uploaded.push({cid:data.cid,type:file.type});
+    setUploadStatus('Stored '+(index+1)+'/'+files.length+
+      ' attachments on your independent media peer',Math.floor((index+1)/files.length*100));
   }
+  setUploadStatus('All uploads stored · signing your publication…',100);
   return uploaded;
 }
 async function compose(event){
@@ -2045,6 +2112,8 @@ async function compose(event){
     if(schedule)fields.schedule=schedule;else delete fields.schedule;
     if(pollQuestion)fields.poll={question:pollQuestion,options};else delete fields.poll;
     if(positions.length)fields.positions=positions;else delete fields.positions;
+    if($('composePreviewDialog').open)
+      setUploadStatus('Signing and distributing your publication…',100);
     const message=await publish('post',{title,text,fields,media},{space});
     if(root)toast('New signed correction '+message.id.slice(0,16)+'… published; the original remains intact.');
     state.editingPostId=null;state.editingMedia=[];state.editingFields=null;
@@ -2055,9 +2124,20 @@ async function compose(event){
     updateComposeType();
     close('postDialog');render();
   }catch(err){
-    error.textContent=err.message;error.hidden=false;
-    toast('Posting failed: '+err.message);
-  }finally{buttonEl.disabled=false;}
+    if(err?.name!=='AbortError'){
+      error.textContent=err.message;error.hidden=false;
+      toast('Posting failed: '+err.message);
+      if(!$('composeUploadIndicator').hidden)
+        setUploadStatus('Upload failed · '+err.message,$('composeUploadProgress').value);
+    }
+  }finally{
+    buttonEl.disabled=false;
+    if($('composePreviewDialog').open&&signingPublication){
+      signingPublication=false;
+      $('editPostPreview').disabled=false;
+      $('closeComposePreview').disabled=false;
+    }
+  }
 }
 async function init(){
   state.db=await openLocal();

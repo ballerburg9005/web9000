@@ -731,3 +731,13 @@ dialog::backdrop{background:#000b}
  border:1px solid #635466;padding:6px}
 .compose-preview-retained input[type=radio]{width:14px;height:14px;
  margin-right:6px;accent-color:#d6b072}
+/* Transfer progress in the ordinary publish preview, with explicit
+   cancellation via the existing Edit/Close controls. */
+.compose-upload-indicator{display:flex;flex-direction:column;gap:6px;
+  margin:12px 0 8px;padding:9px 10px;background:#2d2631;
+  border-left:2px solid #d2ad76}
+.compose-upload-indicator[hidden]{display:none}
+.compose-upload-indicator progress{display:block;width:100%;height:9px;
+  accent-color:#d2ad76}
+.compose-upload-indicator span{font-size:11px;line-height:1.4;
+  color:#dac8d9;overflow-wrap:anywhere}

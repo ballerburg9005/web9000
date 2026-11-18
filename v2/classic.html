@@ -188,6 +188,7 @@
 <section id="composePreviewContent" class="compose-preview-content" aria-label="Your unpublished post"></section>
 <label class="compose-ack"><input type="checkbox" id="composePermanentAck"> I understand that information published to independent peers cannot reliably be deleted or recalled, even if I later retract or revise it.</label>
 <p class="fine">No central owner can guarantee removal from other people’s independent replicas. Do not publish sensitive personal information, passwords or illegal media.</p>
+<div class="compose-upload-indicator" id="composeUploadIndicator" hidden><progress id="composeUploadProgress" value="0" max="100"></progress><span id="composeUploadStatus" role="status" aria-live="polite"></span></div>
 <div class="actions"><button class="accent" type="button" id="confirmPublishPost" disabled>Sign & publish now</button><button type="button" id="editPostPreview">← Edit post</button></div>
 <p id="composePreviewError" role="alert" class="error" hidden></p>
 </div></dialog>
