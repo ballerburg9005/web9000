@@ -2,7 +2,7 @@
 
 This folder is the **replacement project**, built independently of the legacy single-file GunDB UI.
 
-## Browser interface with optional peers
+## Original-style classic image board, with optional peers
 
 From the repository root:
 
@@ -111,3 +111,7 @@ Two simultaneously ratified amendments to the same signed charter are **separate
 ## Image-board IPFS references
 
 Posts now accept up to 12 signed `ipfs://` CID references in the composer. The interface displays reference counts and CIDs, but intentionally does not download arbitrary media when opening a feed. Uploading and pinning actual bytes through an independently operated IPFS node is the next media milestone.
+
+## Default and alternate interfaces
+
+The default `/v2/` is now the original WEB9000-style **classic image grid**: compact seven-column tiles, WASD/arrow keyboard navigation, selected-row expansion, signed comments, tag votes, reactions, polls, schedules and image attachments. Native forms are used instead of mandatory JSON fields. The former dashboard is preserved at [dashboard.html](./dashboard.html) as an alternate experimental view. [classic.html](./classic.html) remains an explicit alias of the classic frontend. All three HTML URLs use the same signed event format and browser identity store. Default public view excludes unverified authors pending an independently deployed stake/earned-karma verifier; to see raw test posts explicitly opt in using the classic toolbar.

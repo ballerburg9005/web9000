@@ -8,7 +8,9 @@
       "scope": "Experimental public raw index",
       "operator": "Independent test infrastructure",
       "notice": "Experimental public test peer: image upload opt-in, JPEG/PNG/WebP max 256 KiB, per-client daily rate limits. No automatic unknown-media downloads.",
-      "mediaUrl": "https://syburg.my.to/web9000/media/"
+      "mediaUrl": "https://syburg.my.to/web9000/media/",
+      "qualifiedUrl": "wss://syburg.my.to/web9000/qualified/",
+      "qualificationNotice": "Separate curated OrbitDB index exists but contains zero records until an independently checked Stake4Karma verifier is installed. Raw peer remains permissionless."
     }
   ]
 }

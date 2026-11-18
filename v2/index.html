@@ -1,99 +1,53 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="color-scheme" content="dark"><title>WEB9000 — Open content, independent views</title>
-  <link rel="stylesheet" href="./styles.css">
-</head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>WEB9000 — Commons image board</title>
+<link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="./classic.css"></head>
 <body>
-  <header class="topbar">
-    <a class="brand" href="./"><span class="brandmark">W<span>9</span></span><span class="brandtext">WEB9000<small>THE OPEN CONTENT MESH</small></span></a>
-    <span class="bar-divider"></span><div class="crumb">Explore <span>/</span> <strong id="currentSpace">All followed spaces</strong></div>
-    <div class="top-actions"><span class="status" id="networkStatusBar"><i></i> LOCAL / NO PEERS</span><button class="ghost small" id="importButton">Import events</button><button class="primary" id="composeButton">＋ New post</button></div>
-  </header>
-  <div class="shell">
-    <aside class="sidebar">
-      <div class="side-section">
-        <div class="side-title">YOUR NETWORK</div>
-        <button class="side-link active" data-space="all"><span class="side-icon">◈</span> Following <span class="side-counter" id="followedCount">5</span></button>
-        <button class="side-link" data-space="commons"><span class="side-icon">⌘</span> Commons</button>
-        <button class="side-link" data-space="art"><span class="side-icon">▦</span> Creative works</button>
-        <button class="side-link" data-space="organize"><span class="side-icon">♧</span> Organize</button>
-        <button class="side-link" data-space="exchange"><span class="side-icon">◇</span> Exchange</button>
-        <button class="side-link" data-space="projects"><span class="side-icon">⬡</span> Projects</button>
-      </div>
-      <div class="side-section federation-list">
-        <div class="side-title">FEDERATIONS <span class="hint" title="Voluntary subscriptions to independently published rules">?</span></div>
-        <label class="federation"><input id="subscribeGuild" type="checkbox"><span class="federation-mark">G</span><span><strong>Open Commons Guild</strong><small>Community spam reviewers</small></span></label>
-        <label class="federation"><input id="subscribeSafety" type="checkbox"><span class="federation-mark mark-blue">S</span><span><strong>Safety Cooperative</strong><small>Independent media labels</small></span></label>
-        <div id="customGroups"></div>
-        <button class="side-link" id="createGroupButton"><span class="side-icon">＋</span> Create your own clan</button>
-        <p class="side-caption">Only signed, ratified reviewer authority counts. Following a group influences your view, not publication rights.</p>
-      </div>
-      <div class="side-section">
-        <div class="side-title">PORTABILITY</div>
-        <button class="side-link" id="exportButton"><span class="side-icon">↧</span> Export signed records</button>
-        <button class="side-link" id="showRules"><span class="side-icon">⚙</span> View my rules</button>
-      </div>
-      <div class="sidebar-footer"><div class="mini-logo">W9</div><strong>No central administrator.</strong><p>Anyone can publish to any space. Everybody decides what they mirror and display.</p><a href="./ARCHITECTURE.md" target="_blank" rel="noopener">Read the protocol design ↗</a></div>
-    </aside>
-    <main class="main">
-      <div class="intro"><div><p class="eyebrow">THE OPEN CONTENT MESH <span class="version">PROTOCOL V2 / PREVIEW</span></p><h1>Information without permission.</h1><p class="intro-copy">One open publication layer. Infinite independent communities, viewpoints and ways to organize.</p></div><div class="intro-graphic" aria-hidden="true"><span class="mesh mesh-1"></span><span class="mesh mesh-2"></span><span class="mesh mesh-3"></span><span class="mesh mesh-4"></span><span class="mesh mesh-5"></span><span class="mesh mesh-6"></span></div></div>
-      <div id="siteSpaceBanner" class="site-banner" hidden>
-        <span class="site-icon">◈</span><span><strong>Website-suggested space: <span id="siteSpaceName"></span></strong>
-        <small>This is a preferred view, not a privileged database namespace. Other authors may publish here regardless.</small>
-        </span>
-        <label id="siteOwnerArea" hidden><input id="honorSiteOwner" type="checkbox" checked> Prefer site owner's posts <small id="siteOwnerKey"></small></label>
-      </div>
-      <section class="feed-controls" aria-label="Feed controls"><div class="controls-row"><div class="segmented" id="layoutOptions"><button class="selected" data-layout="grid">▦ Grid</button><button data-layout="list">☷ List</button></div><div class="sort-wrap"><span class="small-label">SORT</span><select id="sortBy"><option value="new">Newest first</option><option value="old">Oldest first</option></select></div><div class="search"><span>⌕</span><input id="searchInput" type="search" placeholder="Search your local index..." autocomplete="off"></div></div><div class="filter-row"><div id="typeFilters" class="filters"></div><div class="results-summary"><span id="resultCount">0 records</span> <span class="sep">·</span> <button id="hiddenToggle">Show filtered</button></div></div></section>
-      <div class="network-strip"><span class="peer-dot"></span><strong>NETWORK</strong><span id="networkSummary">No peers configured</span><button id="managePeers" class="ghost small" type="button">Manage peers</button></div>
-      <div id="peerSettings" class="peer-settings" hidden>
-        <p>Connect to independently operated WebSocket-accessible OrbitDB peers. These are transports, not authorities. Nobody can reserve a namespace or rewrite signed posts. Browser IP addresses and public activity may be visible to connected peers.</p>
-        <div class="peer-form-grid">
-          <label>PEER WEBSOCKET URLS (ONE PER LINE, MAX 8)<textarea id="networkEndpoints" rows="3" spellcheck="false" placeholder="ws://127.0.0.1:8787&#10;wss://your-peer.example/ws"></textarea></label>
-          <label>REPLICATE SCOPES (COMMA SEPARATED OR *)<input id="networkScopes" value="commons, art, organize, exchange, projects" spellcheck="false"><small>Controls which signed records your browser requests. * fetches all spaces; it does not download IPFS media.</small></label>
-        </div>
-        <div class="peer-actions"><button id="suggestedPeers" class="ghost small" type="button">Load suggested test peers</button><button id="connectPeers" class="primary" type="button">Connect selected peers</button><button id="disconnectPeers" class="ghost small" type="button">Disconnect</button><button id="republishButton" class="ghost small" type="button">Republish my records</button><span id="networkLastError" role="status"></span></div>
-        <div class="mirror-options"><label><input id="autoMirror" type="checkbox"> Mirror signed posts from authors I trust between my selected peers <small>Off by default. Only content allowed by my local moderation and replication scopes is carried. No media bytes are fetched. Operators may independently refuse to store a record.</small></label><button class="ghost small" id="mirrorNowButton" type="button">Mirror approved records now</button></div>
-        <div class="follow-area"><input id="followSpaceInput" placeholder="Name of space to follow in my view"><button id="followSpaceButton" class="ghost small" type="button">Follow space</button></div>
-      </div>
-      <div id="notice" class="notice"><span class="notice-star">✳</span><span class="notice-message">No peer connected yet. Signed posts stay local until you configure an independent network peer.</span><button id="noticeClose" aria-label="Dismiss notice">×</button></div>
-      <div id="feed" class="feed"></div>
-      <div id="emptyState" class="empty" hidden><span>◈</span><strong>Nothing matches this view.</strong><p>Change your filters or add a post. Filtering never deletes a signed publication.</p></div>
-    </main>
-    <aside class="inspector" id="inspector">
-      <div class="panel"><div class="panel-title"><span class="dot-title"></span> YOUR CURRENT VIEW <button class="icon-btn" id="settingsButton" title="Toggle view settings">⚙</button></div><p class="panel-copy">Your rules determine the content visible <em>here</em>, not what others can publish.</p><div class="setting"><span>Show unknown authors <small>New identities start unverified</small></span><label class="switch"><input id="showUnknown" type="checkbox"><span></span></label></div><div class="setting"><span>Show filtered records <small>Metadata only, no media previews</small></span><label class="switch"><input id="showFiltered" type="checkbox"><span></span></label></div><div class="panel-stat"><div><strong id="statVisible">0</strong><small>VISIBLE</small></div><div><strong id="statHidden">0</strong><small>FILTERED</small></div><div><strong id="statPeers">0</strong><small>CONNECTED PEERS</small></div></div></div>
-      <div class="panel"><div class="panel-title"><span class="dot-title violet"></span> DECENTRALIZED AUTHORITY</div><div class="authority-diagram"><div class="authority-node">You <span>choose your rules</span></div><div class="arrow-down">↓ subscribe / override</div><div class="authority-row"><div>Clans</div><div>Guilds</div></div><div class="arrow-down">↓ form / delegate</div><div class="authority-row"><div>Alliances</div><div>Federations</div></div><div class="arrow-down">↓ no global veto</div><div class="authority-node bottom">Unrestricted publications</div></div><p class="panel-copy">Groups can inherit, contest, or ignore other groups' moderation signals. Nothing grants them exclusive database rights.</p></div>
-      <div class="panel last"><div class="panel-title"><span class="dot-title green"></span> IDENTITY</div><div class="identity-box"><span class="avatar-id">◈</span><span><strong>Local signing key</strong><small id="identityKey">Generating…</small></span></div>
-      <button class="ghost small" id="identityBackupButton">Encrypted key backup / restore</button>
-      <button class="ghost small" id="migrateLegacyIdentity" hidden>Migrate legacy key</button>
-      <p class="panel-copy">Your identity is independent of any website. Protect your encrypted backup and password. Stake4Karma is optional testnet research, not a publishing requirement.</p></div>
-    </aside>
-  </div>
-  <dialog id="rulesDialog"><div class="detail-shell">
-    <div class="dialog-head"><div><p class="eyebrow">INDEPENDENT RULES</p><h2>Your chosen governance view</h2></div><button id="closeRules" class="icon-btn" type="button">×</button></div>
-    <p id="rulesDetails" class="rules-details"></p>
-  </div></dialog>
-  <dialog id="identityDialog"><div class="compose-form">
-    <div class="dialog-head"><div><p class="eyebrow">PORTABLE AUTHENTICATION</p><h2>Identity backup / restore</h2></div><button type="button" id="closeIdentity" class="icon-btn">×</button></div>
-    <p class="form-intro">Download a password-encrypted Ed25519 signing-key backup, or restore that identity on another WEB9000 website. This does not export your public feed, which is separately portable.</p>
-    <label>ENCRYPTION PASSWORD<input id="backupPassword" type="password" minlength="12" autocomplete="new-password" placeholder="At least 12 characters"></label>
-    <div class="detail-actions"><button class="primary" type="button" id="downloadBackup">Download encrypted backup</button><button class="ghost" type="button" id="restoreBackup">Restore from file</button></div>
-    <p class="form-intro">A malicious host can misuse signing keys while its code is running. Use only WEB9000 installations you trust; there is no central recovery authority.</p>
-    <input id="identityFile" type="file" accept=".json,application/json" hidden>
-  </div></dialog>
-  <dialog id="composer"><form method="dialog" id="composeForm" class="compose-form"><div class="dialog-head"><div><p class="eyebrow">SIGNED PUBLICATION</p><h2>Publish without permission</h2></div><button type="button" id="closeCompose" class="icon-btn">×</button></div><p class="form-intro">The space is a claim, not a privileged database. This preview saves locally; export the signed event to share it with other peers.</p><div class="form-grid"><label>SPACE<input id="postSpace" list="spacesList" value="commons" required maxlength="180"><datalist id="spacesList"><option>commons</option><option>art</option><option>organize</option><option>exchange</option><option>projects</option></datalist></label><label>PRESENTATION<select id="postKind"><option value="discussion">Discussion</option><option value="art">Art / media</option><option value="event">Meetup / event</option><option value="offer">Offer / listing</option><option value="project">Project</option><option value="job">Job / opportunity</option></select></label></div><label>TITLE<input id="postTitle" maxlength="160" placeholder="What are you sharing?" required></label><label>CONTENT<textarea id="postText" rows="6" maxlength="16000" placeholder="Write about your idea, event, project, offer..." required></textarea></label><label>IPFS MEDIA REFERENCES (OPTIONAL, ONE PER LINE)<textarea id="postMedia" rows="2" spellcheck="false" placeholder="ipfs://bafy..."></textarea><small>Use already-pinned IPFS CIDs. Unknown media bytes are never automatically fetched or uploaded.</small></label><label>OPTIONAL STRUCTURED FIELDS (JSON)<textarea id="postFields" rows="3" spellcheck="false" placeholder='{"start":"2027-01-01","price":{"amount":20,"currency":"USD"}}'></textarea></label><div class="dialog-actions"><small id="composeMessage">Signed records are immutable. Updates use new records.</small><button class="primary" type="submit" value="submit">Save signed post locally</button></div></form></dialog>
-  <dialog id="groupComposer"><form method="dialog" id="groupForm" class="compose-form">
-    <div class="dialog-head"><div><p class="eyebrow">VOLUNTARY SELF-GOVERNANCE</p><h2>Create a group</h2></div><button type="button" id="closeGroup" class="icon-btn">×</button></div>
-    <p class="form-intro">Anyone can found another group, even with the same name. Its signed charter ID defines its identity. No membership or vote imposes authority on non-subscribers.</p>
-    <label>GROUP NAME<input id="groupName" required maxlength="80" placeholder="Neighborhood Guild"></label>
-    <label>APPROVAL QUORUM<select id="groupThreshold"><option value="67">Two thirds (67%)</option><option value="51">Simple majority (51%)</option><option value="100">Unanimous (100%)</option></select></label>
-    <label class="federation"><input type="checkbox" id="selfReviewer" checked> Ratify my own reviewer role in the founding one-person group</label>
-    <div class="dialog-actions"><small>Created locally. Export signed records to share.</small><button class="primary" type="submit">Create group</button></div>
-  </form></dialog>
-  <dialog id="detail"><div class="detail-shell"><div class="dialog-head"><div><p class="eyebrow">CONTENT ADDRESSED EVENT</p><h2 id="detailTitle">Record</h2></div><button id="closeDetail" class="icon-btn">×</button></div><div id="detailBody"></div><div id="detailInfo" class="detail-info"></div><div class="detail-actions"><button class="ghost" id="copyEvent">Copy signed JSON</button><button class="ghost" id="trustAuthor">Trust author</button><button class="ghost danger" id="flagEvent">Flag as spam (my view)</button></div></div></dialog>
-  <input id="importFile" type="file" accept=".json,application/json" hidden>
-  <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script type="module" src="./app.js"></script>
-</body>
-</html>
+<header class="header" id="topHeader"><a class="logo" href="./">WEB9000</a>
+<nav class="menu" aria-label="Board navigation">
+<button type="button" data-sort="new" class="active">New</button><button type="button" data-sort="popular">Popular</button>
+<button type="button" data-sort="old">Old</button><button type="button" id="viewAudited">Audit</button>
+<input id="searchPosts" type="search" placeholder="Search posts, tags..." aria-label="Search posts">
+<button type="button" id="postNew" title="Create post">✎ Post</button>
+</nav>
+<button class="join-network" id="joinNetwork" type="button">Join Network</button>
+</header>
+<div class="classic-toolbar">
+<label>Space <input id="spaceName" type="text" value="commons" maxlength="180" placeholder="commons"></label>
+<button type="button" id="goSpace">Open</button>
+<label>View <select id="viewStyle"><option value="grid">Classic grid</option><option value="mixed">Mixed</option><option value="blog">Blog</option></select></label>
+<label><input type="checkbox" id="showUnverified"> Show unstaked / unverified (raw lane)</label>
+<span class="peer-state" id="peerStatus">Local, disconnected</span>
+<a href="./dashboard.html" class="subtle-link">Alternate dashboard</a>
+</div>
+<div class="board-notice" id="boardNotice">
+<strong>WEB9000 experimental board.</strong> The default view excludes unverified authors. There is no live Stake4Karma qualification service yet: to inspect actual test posts from other identities, deliberately enable <b>Show unstaked / unverified</b>. No website or namespace owner can invalidate the original signed records.
+</div>
+<div id="imageGrid" class="grid" aria-label="Posts"></div>
+<div id="feedStatus" class="feed-status"></div>
+
+<dialog id="networkDialog"><div class="dialog-inner">
+<div class="dialog-title"><strong>Choose independent peers</strong><button id="closeNetwork" type="button" aria-label="Close">×</button></div>
+<p>Peer listings are suggestions, never a mandatory registry or authority. Each peer may refuse to replicate content; anybody can run a different one. Browser WebSocket connections expose your IP to the chosen operator.</p>
+<label>Peer WebSocket addresses (one per line)<textarea id="peerURLs" rows="3" spellcheck="false" placeholder="wss://your-peer.example/ws/"></textarea></label>
+<div class="actions"><button id="suggestPeers" type="button">Load test peer list</button><button id="connectPeers" type="button" class="accent">Connect</button><button id="disconnectPeers" type="button">Disconnect</button></div>
+<p class="fine">Local-only posts queue until a willing peer acknowledges them. If an endpoint is offline, export and share signed records or try another peer.</p>
+</div></dialog>
+
+<dialog id="postDialog"><form id="postForm" class="dialog-inner">
+<div class="dialog-title"><strong>Make a post</strong><button id="closeComposer" type="button" aria-label="Close">×</button></div>
+<div class="two-cols"><label>Namespace <input id="composeSpace" maxlength="180" value="commons" required></label>
+<label>Presentation <select id="composePresentation"><option value="image">Image board</option><option value="text">Text / blog</option><option value="event">Event</option><option value="offer">Listing / offer</option><option value="job">Job / position</option></select></label></div>
+<label>Headline (optional) <input id="composeTitle" maxlength="160" placeholder="What is this about?"></label>
+<label>Text <textarea id="composeText" rows="4" maxlength="16000" placeholder="Write something. Plain text and paragraphs work."></textarea></label>
+<label>Images (optional) <input type="file" id="composeFiles" accept="image/jpeg,image/png,image/webp" multiple></label>
+<p class="fine">File uploads use the optional selected media peer, not a centralized website database. Images cannot be published as arbitrary inline code. If no upload peer is configured, publishing image files is refused with an explanation.</p>
+<label>Tags <input id="composeTags" placeholder="cats, memes, funny (comma separated)" maxlength="400"></label>
+<fieldset><legend>Schedule (optional)</legend><div class="two-cols"><label>Start <input type="datetime-local" id="composeStart"></label><label>End <input type="datetime-local" id="composeEnd"></label></div><label>Place <input id="composeLocation" maxlength="200" placeholder="Location / online"></label></fieldset>
+<fieldset><legend>Poll (optional)</legend><label>Question <input id="composePollQuestion" maxlength="180" placeholder="Choose one"></label><label>Options, one per line <textarea id="composePollOptions" rows="3" placeholder="Yes&#10;No"></textarea></label></fieldset>
+<fieldset><legend>Open positions (optional)</legend><label>Positions, one per line <textarea id="composePositions" rows="2" placeholder="Organizer&#10;Designer"></textarea></label></fieldset>
+<p id="composeError" role="alert" class="error" hidden></p>
+<div class="actions"><button class="accent" type="submit" id="submitPost">Sign & publish</button><button id="cancelPost" type="button">Cancel</button></div>
+</form></dialog>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<script type="module" src="./classic.js"></script>
+</body></html>

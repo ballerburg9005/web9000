@@ -32,7 +32,7 @@ async function serveStatic(){
   const server=createServer(async(req,res)=>{
     try{
       const url=new URL(req.url,'http://localhost');
-      const pathname=decodeURIComponent(url.pathname==='/v2/'?'/v2/index.html':url.pathname);
+      const pathname=decodeURIComponent(url.pathname==='/v2/'?'/v2/dashboard.html':url.pathname);
       const filename=path.resolve(repo,'.'+pathname);
       if(!filename.startsWith(repo+path.sep)){res.writeHead(403).end();return;}
       const data=await readFile(filename);
