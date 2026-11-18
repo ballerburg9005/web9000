@@ -87,7 +87,7 @@ dialog::backdrop{background:#000b}.dialog-inner{display:flex;flex-direction:colu
 .post-detail-heading h2{flex:1;margin:0 0 8px}
 .expanded-body .post-detail-heading .detail-close{flex-shrink:0;background:#383838}
 .post-detail-heading button:hover{background:#555}
-.expanded-body .attachments img{max-width:100%;max-height:min(75vh,690px);width:auto;height:auto}
+.expanded-body .attachments img{display:block;width:min(100%,640px);height:auto;max-height:75vh;object-fit:contain}
 .expanded-body .post-preview-video{max-width:100%;max-height:550px;width:auto;height:auto;background:#111;display:block}
 .expanded-body .reactions{max-width:960px}
 .expanded-body .reactions .score{font-size:16px;color:#c4e5b4}

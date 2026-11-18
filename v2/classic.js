@@ -427,7 +427,7 @@ function expand(id,{focus=true}={}){
   body.append(metadata);
   if(current.thumb){
     const region=element('div','attachments'),img=document.createElement('img');
-    img.src=current.thumb;img.alt=b.title||'Demo image';img.loading='lazy';region.append(img);body.append(region);
+    img.src=current.thumb;img.alt=b.title||'Demo image';img.loading='eager';img.decoding='async';region.append(img);body.append(region);
   }else showMedia(body,current.event);
   if(current.video){
     const video=document.createElement('video');
