@@ -6,6 +6,7 @@ import {openLocal,getItem,setItem} from './core/persist.js';
 import {buildFeed,DEFAULT_POLICY} from './core/policy.js';
 import {BrowserPeerMesh,parsePeerUrls} from './network/browser-mesh.js';
 import {readSiteContext} from './network/site-context.js';
+import {MockKarmaProvider} from './core/mock-karma.js';
 
 const $=id=>document.getElementById(id);
 const state={
@@ -13,7 +14,7 @@ const state={
   peers:[],mesh:null,suggested:[],mediaBase:null,
   space:'commons',sort:'new',view:'grid',search:'',showUnverified:false,
   ownerHint:null,respectOwner:true,selected:null,trust:[],audit:false,showMedia:false,
-  demo:[],lastError:'',renderPending:false
+  demo:[],mockKarma:null,mockMode:false,lastError:'',renderPending:false
 };
 const safeSpace=s=>typeof s==='string'&&s.length>0&&s.length<=180&&!/[\x00-\x1f]/.test(s);
 const validTag=s=>/^[a-z0-9][a-z0-9._:-]{0,47}$/.test(s);
@@ -56,6 +57,12 @@ function button(label,handler,className=''){
 const who=author=>author===state.identity?.author?'You':author==='demo'?'Demo fixture':shortAuthor(author);
 function choosePolicy(){
   const known=[state.identity.author,...state.trust,...(state.ownerHint&&state.respectOwner?[state.ownerHint]:[])];
+  if(state.mockMode&&state.mockKarma){
+    for(const event of allEvents()){
+      const author=event.payload.author;
+      if(state.mockKarma.isTestQualified(author))known.push(author);
+    }
+  }
   const owner=state.ownerHint&&state.respectOwner?{[state.space]:state.ownerHint}:{};
   return {...DEFAULT_POLICY,followedSpaces:[state.space],trustedAuthors:known,
     showUnknown:state.showUnverified,ownerPreference:owner,
@@ -159,6 +166,8 @@ function updateNetworkStatus(){
     ' signed posts · '+state.outbox.length+' queued';
   $('joinNetwork').textContent=state.mesh?.connected?'◉ Network':'Join Network';
   $('joinNetwork').classList.toggle('connected',!!state.mesh?.connected);
+  $('mockModeLabel').hidden=!state.mockMode;
+  $('mockModeLabel').textContent=state.mockMode?'SIMULATED KARMA — NOT STAKE':'';
 }
 function render(){
   if(!state.identity)return;
@@ -202,7 +211,9 @@ async function store(){
     setItem(state.db,'classic-show-unknown',state.showUnverified),
     setItem(state.db,'classic-view',state.view),
     setItem(state.db,'classic-show-media',state.showMedia),
-    setItem(state.db,'classic-media-url',state.mediaBase)
+    setItem(state.db,'classic-media-url',state.mediaBase),
+    setItem(state.db,'classic-mock-mode',state.mockMode),
+    setItem(state.db,'classic-mock-scores',state.mockKarma?.snapshot()||{})
   ]);
 }
 async function ingest(e,{outgoing=false}={}){
@@ -397,6 +408,7 @@ function expand(id,{focus=true}={}){
       try{await publish('label',{target:id,tag:'spam',reason:reason.slice(0,500)});expand(id,{focus:false});}
       catch(error){toast(error.message);}
     }));
+    if(state.mockMode)votes.append(button('Test karma…',()=>openMockKarma(p.author)));
     votes.append(button('Trust author',async()=>{
       if(!state.trust.includes(p.author))state.trust.push(p.author);
       await store();scheduleRender();toast('You locally trust this author. No global rule changed.');
@@ -443,9 +455,44 @@ function onKey(e){
   }
   if(next){e.preventDefault();next.focus();if(state.selected)expand(next.dataset.id,{focus:false});}
 }
+function renderMockRoster(){
+  const target=$('mockRoster');target.replaceChildren();
+  for(const {author,score} of state.mockKarma.entries()){
+    const row=element('div','mock-entry',author.slice(0,25)+'… · '+score+'/100');
+    row.append(button('Edit',()=>{$('mockIdentity').value=author;$('mockScore').value=String(score);}));
+    row.append(button('×',async()=>{
+      state.mockKarma.clear(author);await store();renderMockRoster();render();
+    }));
+    target.append(row);
+  }
+  if(!target.children.length)target.append(element('p','fine','No simulated scores assigned.'));
+}
+function openMockKarma(author=state.identity?.author){
+  $('mockIdentity').value=MockKarmaProvider.validIdentity(author)?author:state.identity.author;
+  $('mockScore').value=String(state.mockKarma.scoreFor($('mockIdentity').value));
+  $('mockEnabled').checked=state.mockMode;
+  renderMockRoster();
+  $('mockDialog').showModal();
+}
 function bind(){
   for(const btn of document.querySelectorAll('[data-sort]'))
     btn.onclick=()=>{state.sort=btn.dataset.sort;document.querySelectorAll('[data-sort]').forEach(b=>b.classList.toggle('active',b===btn));render();};
+  $('mockKarmaButton').onclick=()=>openMockKarma();
+  $('closeMockDialog').onclick=()=>$('mockDialog').close();
+  $('mockEnabled').onchange=async e=>{
+    state.mockMode=e.target.checked;await store();render();
+    toast(state.mockMode?
+      'TEST MODE enabled: fabricated scores only affect this browser display.':
+      'Mock karma disabled; ordinary trust rules restored.');
+  };
+  $('saveMockKarma').onclick=async()=>{
+    try{
+      if($('mockScore').value.trim()==='')throw Error('Enter a score');
+      state.mockKarma.assign($('mockIdentity').value.trim(),Number($('mockScore').value));
+      await store();renderMockRoster();render();
+      toast('Simulated local key score saved. No coins checked or locked.');
+    }catch(error){toast(error.message);}
+  };
   $('viewAudited').onclick=()=>{state.audit=!state.audit;$('viewAudited').classList.toggle('active',state.audit);render();};
   $('searchPosts').oninput=e=>{state.search=e.target.value;render();};
   $('showUnverified').onchange=async e=>{state.showUnverified=e.target.checked;await store();render();};
@@ -555,6 +602,8 @@ async function init(){
   state.view=await getItem(state.db,'classic-view')||'grid';
   state.showMedia=await getItem(state.db,'classic-show-media')===true;
   state.mediaBase=await getItem(state.db,'classic-media-url')||null;
+  state.mockKarma=new MockKarmaProvider(await getItem(state.db,'classic-mock-scores')||{});
+  state.mockMode=await getItem(state.db,'classic-mock-mode')===true;
   const hint=readSiteContext(location.href);
   state.space=hint.space||await getItem(state.db,'classic-space')||'commons';
   state.ownerHint=hint.preferredAuthor;
@@ -571,6 +620,7 @@ async function init(){
   }
   $('spaceName').value=state.space;
   $('showUnverified').checked=state.showUnverified;
+  $('mockEnabled').checked=state.mockMode;
   $('viewStyle').value=state.view;
   $('peerURLs').value=state.peers.join('\n');
   $('mediaPeerUrl').value=state.mediaBase||'';

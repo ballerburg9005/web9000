@@ -16,6 +16,8 @@
 <button type="button" id="goSpace">Open</button>
 <label>View <select id="viewStyle"><option value="grid">Classic grid</option><option value="mixed">Mixed</option><option value="blog">Blog</option></select></label>
 <label><input type="checkbox" id="showUnverified"> Show unstaked / unverified (raw lane)</label>
+<button id="mockKarmaButton" type="button">Test karma</button>
+<span id="mockModeLabel" class="mock-active" hidden></span>
 <span class="peer-state" id="peerStatus">Local, disconnected</span>
 <a href="./dashboard.html" class="subtle-link">Alternate dashboard</a>
 </div>
@@ -35,6 +37,16 @@
 <p class="fine">Local-only posts queue until a willing peer acknowledges them. If an endpoint is offline, export and share signed records or try another peer.</p>
 </div></dialog>
 
+<dialog id="mockDialog"><div class="dialog-inner">
+<div class="dialog-title"><strong>Numeric karma test provider</strong><button id="closeMockDialog" type="button" aria-label="Close">×</button></div>
+<p><strong>Simulation only.</strong> Assign a numerical score to a public signing identity to prototype how qualified feeds might behave. This does not represent locked coins, independently earned reputation, or an on-chain verification. This browser stores its own simulated numbers.</p>
+<label class="mock-toggle"><input type="checkbox" id="mockEnabled"> Enable simulated key-score feed filtering in this browser</label>
+<label>Public identity <input id="mockIdentity" spellcheck="false" placeholder="ed25519:..."></label>
+<label>Simulated karma (0–100) <input id="mockScore" type="number" min="0" max="100" step="1" value="0"></label>
+<p class="fine">Score 10+ passes the local simulated feed. The shared qualified peer remains independently verified and does not accept these numbers. Do not mistake this for Sybil protection.</p>
+<div class="actions"><button id="saveMockKarma" type="button" class="accent">Set simulated score</button></div>
+<div id="mockRoster" class="mock-roster"></div>
+</div></dialog>
 <dialog id="postDialog"><form id="postForm" class="dialog-inner">
 <div class="dialog-title"><strong>Make a post</strong><button id="closeComposer" type="button" aria-label="Close">×</button></div>
 <div class="two-cols"><label>Namespace <input id="composeSpace" maxlength="180" value="commons" required></label>
