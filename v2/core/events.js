@@ -1,7 +1,7 @@
 // WEB9000/2 portable signed events. No transport, server, namespace owner or gatekeeper.
 export const DOMAIN = 'WEB9000/event/v1';
 const utf8 = new TextEncoder();
-const kinds = new Set(['post','reply','label','endorse','group','policy','membership','invitation','retraction','proposal','vote']);
+const kinds = new Set(['post','reply','label','endorse','group','policy','membership','invitation','retraction','proposal','vote','accept']);
 const toB64 = a => typeof Buffer !== 'undefined' ? Buffer.from(a).toString('base64url') : btoa(String.fromCharCode(...a)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 const fromB64 = s => {
   if (typeof s !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(s)) throw Error('Invalid encoding');
@@ -62,6 +62,7 @@ export function validatePayload(p) {
   if (p.kind==='vote' && (!digest(p.body.proposal) || !['approve','reject'].includes(p.body.choice))) throw Error('Invalid governance vote');
   if (p.kind==='invitation' && (!identity(p.body.invitee) || typeof p.body.scope!=='string' || !p.body.scope || p.body.scope.length > 180 ||
       (p.body.expiresAt!==undefined && (!Number.isSafeInteger(p.body.expiresAt) || p.body.expiresAt < p.time)))) throw Error('Invalid invitation');
+  if (p.kind==='accept' && !digest(p.body.invitation)) throw Error('Invalid invitation acceptance');
   if (p.kind === 'endorse' && (typeof p.body.subject !== 'string' || !/^ed25519:[a-zA-Z0-9_-]{43}$/.test(p.body.subject) || !['trust','distrust'].includes(p.body.action))) throw Error('Invalid endorsement');
   return p;
 }
