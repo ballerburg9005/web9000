@@ -88,6 +88,9 @@ try{
  await a.keyboard.press('Escape');
  assert.equal(await a.$$('.post-container.expanded').then(x=>x.length),0);
  console.log('CLASSIC checkpoint 4: row collapsed');
+ // Explicitly opt into the raw/unverified lane, including comments from
+ // another independent identity. The public default remains filtered.
+ await a.evaluate(()=>document.getElementById('showUnverified').click());
  await a.evaluate(()=>document.getElementById('postNew').click());
  await a.type('#composeTitle','My first actual cats post');
  await a.type('#composeText','This is real signed text, not placeholder debug output.');
@@ -107,6 +110,10 @@ try{
  await connect(a,bridge.url);
  await eventually(()=>bridge.replica.list().some(x=>x.payload.body.title==='My first actual cats post'),'offline classic post delivery');
  console.log('CLASSIC checkpoint 7: offline post reached mirror');
+ // Open the origin author's own post so incoming comments have a displayed
+ // thread to appear in. The earlier test mistakenly inspected a closed row.
+ await a.evaluate(()=>document.querySelector('.post[data-index="0"]').click());
+ assert.equal(await a.$('.comments-section').then(rows=>rows.length),1);
  await b.goto(originB,{waitUntil:'domcontentloaded'});await ready(b);
  console.log('CLASSIC checkpoint 8: second browser ready');
  await b.evaluate(()=>document.getElementById('showUnverified').click());
@@ -120,6 +127,8 @@ try{
  console.log('CLASSIC checkpoint 11: post details, poll and schedule visible');
  await b.type('.comment-form textarea','A separate, real signed comment');
  await b.evaluate(()=>document.querySelector('.comment-form button').click());
+ await eventually(()=>bridge.replica.list().some(e=>e.payload.kind==='reply' &&
+   e.payload.body.text==='A separate, real signed comment'),'remote comment accepted by peer');
  await eventually(()=>a.evaluate(()=>[...document.querySelectorAll('.comment-text')].some(x=>x.textContent==='A separate, real signed comment')),'remote signed comment rendered');
  console.log('CLASSIC checkpoint 12: signed comment received');
  await b.evaluate(()=>document.querySelector('.reactions button').click());
