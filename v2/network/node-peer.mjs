@@ -2,7 +2,8 @@
  * Experimental real OrbitDB/Helia/libp2p peer for signed-event synchronization.
  * node node-peer.mjs [data-dir] [orbitdb-address-or-new-name] [peer-multiaddr]
  * A manually exchanged OrbitDB address and reachable peer multiaddr are required.
- * This is NOT a browser relay or a public always-online discovery service.
+ * The optional browser WebSocket bridge is user-run, not a mandatory relay,
+ * permission server or public bootstrap/discovery service.
  */
 import {mkdir} from 'node:fs/promises';
 import path from 'node:path';

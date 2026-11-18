@@ -5,12 +5,13 @@ import {deriveGroup} from './core/governance.js';
 import {exportIdentityBackup,importIdentityBackup} from './core/identity-backup.js';
 import {openLocal,getItem,setItem} from './core/persist.js';
 import {BrowserPeerMesh,parsePeerUrls} from './network/browser-mesh.js';
+import {mirrorDecision} from './network/mirror-policy.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const spaces={commons:'Commons',art:'Creative works',organize:'Organize',exchange:'Exchange',projects:'Projects'};
 const types=['All','Discussion','Art','Event','Offer','Project','Job'];
-const state={replica:new Replica(),identity:null,db:null,space:'all',type:'All',layout:'grid',sort:'new',search:'',showFiltered:false,showUnknown:true,subscribed:[],policy:null,selected:null,fixtureKeys:{},localIds:[],groupIds:{},compiledGroups:{},groupViews:[],userTrusted:[],followedSpaces:Object.keys(spaces),mesh:null,peerUrls:[],replicationScopes:Object.keys(spaces),pending:[],lastConnected:0};
+const state={replica:new Replica(),identity:null,db:null,space:'all',type:'All',layout:'grid',sort:'new',search:'',showFiltered:false,showUnknown:true,subscribed:[],policy:null,selected:null,fixtureKeys:{},localIds:[],groupIds:{},compiledGroups:{},groupViews:[],userTrusted:[],followedSpaces:Object.keys(spaces),mesh:null,peerUrls:[],replicationScopes:Object.keys(spaces),pending:[],lastConnected:0,autoMirror:false};
 // Moderation authority derives from signed group checkpoints, not hard-coded group objects.
 const previewContent=[
  {space:'art',type:'Art',title:'Some interesting visual experiments',text:'A small collection of sketches and procedural compositions. What should be explored next?',image:'../thumb/thumb11.jpg',fields:{media:'Image gallery',count:4},author:'maker'},
@@ -61,7 +62,8 @@ async function persistNetwork(){
     setItem(state.db,'outbox',state.pending),
     setItem(state.db,'peer-urls',state.peerUrls),
     setItem(state.db,'replicate-scopes',state.replicationScopes),
-    setItem(state.db,'followed-spaces',state.followedSpaces)
+    setItem(state.db,'followed-spaces',state.followedSpaces),
+    setItem(state.db,'auto-mirror',state.autoMirror)
   ]);
 }
 function ensureSpace(name){
@@ -89,7 +91,8 @@ function updateNetworkStatus(){
     : 'Local mode · '+state.peerUrls.length+' peer address'+(state.peerUrls.length===1?'':'es')+' configured · '+state.pending.length+' queued';
   $('#networkStatusBar').textContent=connected?'● '+connected+' PEER'+(connected===1?'':'S')+' CONNECTED':'● LOCAL / NO PEERS';
   $('#networkStatusBar').classList.toggle('online',connected>0);
-  $('#notice').querySelector('.notice-message').textContent=connected
+  const notice=$('#notice .notice-message');
+  if(notice)notice.textContent=connected
     ? 'Connected to independent WebSocket-accessible OrbitDB peers. Records are signed and verified locally; peers cannot edit them or authorize namespaces. Transport peers can refuse to store or forward records.'
     : 'No browser peer connected. Signed posts stay in local storage and your outgoing queue. Add independently operated WebSocket peer addresses to exchange records without an administrator.';
 }
@@ -100,15 +103,20 @@ async function setupNetwork(){
     state.peerUrls=await getItem(state.db,'peer-urls')||[];
     state.replicationScopes=await getItem(state.db,'replicate-scopes')||Object.keys(spaces);
     state.followedSpaces=await getItem(state.db,'followed-spaces')||Object.keys(spaces);
+    state.autoMirror=await getItem(state.db,'auto-mirror')===true;
   }
+  $('#autoMirror').checked=state.autoMirror;
   for(const name of state.followedSpaces)ensureSpace(name);
   $('#networkEndpoints').value=state.peerUrls.join('\n');
   $('#networkScopes').value=state.replicationScopes.join(', ');
   state.mesh=new BrowserPeerMesh({
     securePage:location.protocol==='https:',
-    onEvent:async(event)=>{
+    onEvent:async(event,sourceUrl)=>{
       const result=await addLocal(event);
       if(!result.accepted||result.duplicate)return;
+      const decision=mirrorDecision(event,state.replica.list(),policy(),state.identity.author,
+        {enabled:state.autoMirror,spaces:state.replicationScopes});
+      if(decision.mirror)state.mesh?.publish(event,state.peerUrls.filter(url=>url!==sourceUrl));
       if(['group','proposal','vote'].includes(event.payload.kind)){
         clearTimeout(groupRefreshTimer);
         groupRefreshTimer=setTimeout(async()=>{await refreshGroups();render();},120);
@@ -286,6 +294,22 @@ function openDetail(event) {
 }
 function bindEvents(){
   $('#managePeers').onclick=()=>{$('#peerSettings').hidden=!$('#peerSettings').hidden;};
+  $('#autoMirror').onchange=async e=>{
+    state.autoMirror=e.target.checked;
+    await persistNetwork();
+    newToast(state.autoMirror?'Trusted-record mirroring enabled: local policies still apply.':'Cross-index mirroring disabled.');
+  };
+  $('#mirrorNowButton').onclick=()=>{
+    if(!state.mesh?.connected)return newToast('Connect to at least one peer first.');
+    let n=0;
+    const records=state.replica.list(),p=policy();
+    for(const event of records){
+      if(mirrorDecision(event,records,p,state.identity.author,{enabled:true,spaces:state.replicationScopes}).mirror){
+        state.mesh.publish(event);n++;
+      }
+    }
+    newToast('Submitted '+n+' locally approved signed posts to your selected peers.');
+  };
   $('#connectPeers').onclick=async()=>{
     try{
       const peers=parsePeerUrls($('#networkEndpoints').value,location.protocol==='https:');
