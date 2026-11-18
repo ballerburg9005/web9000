@@ -17,6 +17,21 @@ const state={
 };
 const safeSpace=s=>typeof s==='string'&&s.length>0&&s.length<=180&&!/[\x00-\x1f]/.test(s);
 const validTag=s=>/^[a-z0-9][a-z0-9._:-]{0,47}$/.test(s);
+function normalizeMediaBase(raw){
+  if(!String(raw||'').trim())return null;
+  const u=new URL(String(raw).trim());
+  if(!['http:','https:'].includes(u.protocol)||!u.hostname||u.username||u.password||u.hash)
+    throw Error('Independent media peer requires an HTTP(S) URL without credentials');
+  if(location.protocol==='https:'&&u.protocol!=='https:'&&!['localhost','127.0.0.1','[::1]'].includes(u.hostname))
+    throw Error('Use HTTPS for a public media peer');
+  return u.href.replace(/\/$/,'');
+}
+function mediaURL(cid){
+  return state.mediaBase?.replace(/\/$/,'')+'/ipfs/'+encodeURIComponent(cid.slice(7));
+}
+function trustedForMedia(author){
+  return author===state.identity?.author||state.trust.includes(author);
+}
 const demoImages=[1,2,3,5,6,7,8,9,11,12,14,15,16,18,19,20,22,23,24,25,26,27,28,31];
 const sampleTitles=[
   'Cats enjoy cardboard boxes','Small image experiment','An unexpected visitor','Photographic archive',
@@ -103,7 +118,7 @@ function columns(){
   const w=window.innerWidth;
   return state.view==='blog'?1:w<=410?2:w<=620?3:w<=800?4:w<=1130?5:7;
 }
-function tile(item,i){
+function tile(item,i,replyCounts){
   const p=item.event.payload,b=p.body;
   const card=element('div','post'+(item.decision?.visible?'':' filtered')+(b.fields?.presentation==='text'||!item.thumb&&!b.media?.length?' text-only':''));
   card.dataset.index=String(i);card.dataset.id=item.event.id;
@@ -112,8 +127,17 @@ function tile(item,i){
     const img=document.createElement('img');img.className='post-thumb';img.loading='lazy';img.src=item.thumb;img.alt=b.title||'Demo picture';
     card.append(img);
   } else if(b.media?.length){
-    // No unknown remote media is fetched simply because a peer publishes a CID.
-    card.append(element('div','post-reveal',state.showMedia?'Select to view this IPFS image':'IPFS image · open to load'));
+    if(item.decision?.visible && state.mediaBase && trustedForMedia(p.author)){
+      // Only self-uploaded images or identities this viewer explicitly trusts.
+      // Raw publications by strangers NEVER trigger media download.
+      const img=document.createElement('img');
+      img.className='post-thumb';img.loading='lazy';img.alt=b.title||'Trusted image';
+      img.src=mediaURL(b.media[0]);
+      img.onerror=()=>img.replaceWith(element('div','post-reveal','Media unavailable · click to inspect CID'));
+      card.append(img);
+    } else {
+      card.append(element('div','post-reveal','IPFS image · open to load'));
+    }
   }else{
     card.append(element('div','post-text-preview',b.text||b.title||'Text post'));
   }
@@ -121,7 +145,7 @@ function tile(item,i){
   const icons=[];if(item.demo)icons.push('DEMO');if(b.media?.length)icons.push('▣ '+b.media.length);
   if(b.fields?.poll)icons.push('▤');if(b.fields?.schedule)icons.push('▣');
   if(b.fields?.positions?.length)icons.push('◈');
-  const replyCount=allEvents().filter(e=>e.payload.kind==='reply'&&e.payload.body.parent===item.event.id).length;
+  const replyCount=replyCounts.get(item.event.id)||0;
   if(replyCount)icons.push('☰ '+replyCount);
   if(icons.length)card.append(element('div','post-icons',icons.join(' ')));
   if(!item.decision?.visible)card.append(element('div','post-small','FILTERED · AUDIT'));
@@ -141,7 +165,15 @@ function render(){
   const feed=effectiveFeed(),grid=$('imageGrid');
   const prev=state.selected;
   grid.className='grid '+state.view;
-  const nodes=feed.map(tile);
+  // Index reply counts once per render, instead of scanning the entire
+  // replica for each image tile (the old code was O(posts × events)).
+  const replyCounts=new Map();
+  for(const event of allEvents()){
+    if(event.payload.kind!=='reply')continue;
+    const id=event.payload.body.parent;
+    replyCounts.set(id,(replyCounts.get(id)||0)+1);
+  }
+  const nodes=feed.map((item,i)=>tile(item,i,replyCounts));
   grid.replaceChildren(...nodes);
   updateNetworkStatus();
   $('feedStatus').textContent=feed.length+' '+(feed.length===1?'post':'posts')+
@@ -169,7 +201,8 @@ async function store(){
     setItem(state.db,'classic-trust',state.trust),
     setItem(state.db,'classic-show-unknown',state.showUnverified),
     setItem(state.db,'classic-view',state.view),
-    setItem(state.db,'classic-show-media',state.showMedia)
+    setItem(state.db,'classic-show-media',state.showMedia),
+    setItem(state.db,'classic-media-url',state.mediaBase)
   ]);
 }
 async function ingest(e,{outgoing=false}={}){
@@ -279,11 +312,18 @@ function showMedia(body,post){
       if(!url){toast('No independent IPFS media gateway configured. The signed CID can be copied to another gateway.');return;}
       const img=document.createElement('img');
       img.loading='lazy';img.alt='Explicitly loaded IPFS attachment';
-      img.src=url.replace(/\/$/,'')+'/ipfs/'+encodeURIComponent(cid.slice(7));
+      img.src=mediaURL(cid);
       img.onerror=()=>{img.replaceWith(element('p','','Image unavailable at this peer. CID is still present.'));};
       wrap.replaceChildren(img);
     });
-    wrap.append(load,button('Copy CID',()=>navigator.clipboard?.writeText(cid).then(()=>toast('CID copied'))));
+    if(state.mediaBase&&trustedForMedia(post.payload.author)){
+      // Safe-to-fetch self / explicitly trusted images render in the
+      // expanded post without an additional manual click.
+      load.click();
+    }else{
+      wrap.append(load);
+    }
+    wrap.append(button('Copy CID',()=>navigator.clipboard?.writeText(cid).then(()=>toast('CID copied'))));
     area.append(wrap);
   }
   body.append(area);
@@ -427,20 +467,25 @@ function bind(){
   document.addEventListener('keydown',onKey);
   window.addEventListener('resize',()=>state.selected&&scheduleRender());
 }
-async function loadSuggestions(){
+async function loadSuggestions({silent=false}={}){
   try{
     const data=await(await fetch('./peers.json',{cache:'no-store'})).json();
     if(data.format!=='web9000-peer-suggestions-v1'||!Array.isArray(data.peers)||data.peers.length>8)throw Error('Invalid peer directory');
     state.suggested=data.peers;
     $('peerURLs').value=data.peers.map(x=>x.url).join('\n');
-    state.mediaBase=data.peers[0]?.mediaUrl||null;
-    toast('Loaded '+data.peers.length+' voluntary peer suggestion(s). Review before connecting.');
+    if(data.peers[0]?.mediaUrl){
+      state.mediaBase=normalizeMediaBase(data.peers[0].mediaUrl);
+      $('mediaPeerUrl').value=state.mediaBase;
+    }
+    await store();
+    if(!silent)toast('Loaded '+data.peers.length+' voluntary peer suggestion(s). Review before connecting.');
   }catch(error){toast('Cannot load suggestions: '+error.message);}
 }
 async function connectPeers(){
   try{
     const urls=parsePeerUrls($('peerURLs').value,location.protocol==='https:');
     if(!urls.length)throw Error('Enter one or more peer addresses');
+    state.mediaBase=normalizeMediaBase($('mediaPeerUrl').value);
     state.peers=urls;
     state.mesh.connect(urls,{spaces:['*']});
     await store();close('networkDialog');render();
@@ -509,6 +554,7 @@ async function init(){
   state.showUnverified=await getItem(state.db,'classic-show-unknown')===true;
   state.view=await getItem(state.db,'classic-view')||'grid';
   state.showMedia=await getItem(state.db,'classic-show-media')===true;
+  state.mediaBase=await getItem(state.db,'classic-media-url')||null;
   const hint=readSiteContext(location.href);
   state.space=hint.space||await getItem(state.db,'classic-space')||'commons';
   state.ownerHint=hint.preferredAuthor;
@@ -527,8 +573,12 @@ async function init(){
   $('showUnverified').checked=state.showUnverified;
   $('viewStyle').value=state.view;
   $('peerURLs').value=state.peers.join('\n');
+  $('mediaPeerUrl').value=state.mediaBase||'';
   makeDemo();
   bind();
+  // Pre-fill independently replaceable peer suggestions, without connecting.
+  // Consent is still required to open any WebSocket or upload images.
+  if(!state.peers.length&&!state.mediaBase)await loadSuggestions({silent:true});
   state.mesh=new BrowserPeerMesh({
     securePage:location.protocol==='https:',
     getPending:()=>state.outbox.map(x=>x.event),

@@ -57,6 +57,7 @@ async function ready(page){
 }
 async function connect(page,url){
  await page.evaluate(()=>document.getElementById('joinNetwork').click());
+ await page.evaluate(()=>{document.getElementById('peerURLs').value='';});
  await page.type('#peerURLs',url);
  await page.evaluate(()=>document.getElementById('connectPeers').click());
  await eventually(()=>page.evaluate(()=>document.querySelector('#peerStatus')?.textContent.includes('1 peer(s)')),'connected browser peer',20000);
