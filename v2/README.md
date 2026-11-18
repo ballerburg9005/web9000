@@ -115,3 +115,7 @@ Posts now accept up to 12 signed `ipfs://` CID references in the composer. The i
 ## Default and alternate interfaces
 
 The default `/v2/` is now the original WEB9000-style **classic image grid**: compact seven-column tiles, WASD/arrow keyboard navigation, selected-row expansion, signed comments, tag votes, reactions, polls, schedules and image attachments. Native forms are used instead of mandatory JSON fields. The former dashboard is preserved at [dashboard.html](./dashboard.html) as an alternate experimental view. [classic.html](./classic.html) remains an explicit alias of the classic frontend. All three HTML URLs use the same signed event format and browser identity store. Default public view excludes unverified authors pending an independently deployed stake/earned-karma verifier; to see raw test posts explicitly opt in using the classic toolbar.
+
+## Normative product requirements and future handoff
+
+**Important:** [Product requirements](../docs/PRODUCT-REQUIREMENTS.md) and [chat/decision ledger](../docs/CHAT-DECISIONS.md) govern direction, spam economics, namespace freedom, media safety and original UI acceptance criteria. Please read them before implementing changes. Features or design shortcuts in the prototype are not instructions to override the owner's words.

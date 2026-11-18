@@ -1,5 +1,7 @@
 # WEB9000 — development specification (v2)
 
+**MANDATORY HANDOFF:** Read [docs/PRODUCT-REQUIREMENTS.md](./docs/PRODUCT-REQUIREMENTS.md) and [docs/CHAT-DECISIONS.md](./docs/CHAT-DECISIONS.md) before editing. The user's detailed chat requirements outrank accidental choices made in the experimental prototype. Each future session must append new product constraints and corrections to the ledger, including significant direct user quotations and unresolved decisions. Never regard the chat as secret; preserve it as project design history, without copying credentials.
+
 **Status:** Actively rebuilding. The root `index.html`, `stubloader.js`, `styles.css` and legacy tests are historical prototypes. The new application lives in `v2/`. The original historical instructions are archived at `legacy/AGENTS-2025.md`.
 
 ## Non-negotiable protocol constraints
@@ -27,7 +29,7 @@
 - `v2/network/browser-mesh.js`, `browser-bridge.mjs`, `mirror-policy.js`: browser-to-independent-peer transport, signature validation, manual replication scopes, optional conservative trusted-record mirroring across unrelated indexes.
 - `v2/network/site-context.js`: a website can suggest a space and an owner-preferred *view*; this is never exclusive write permission.
 
-The browser currently uses WebSocket to arbitrary independent Node mirrors, **not** direct browser-native libp2p or a public bootstrap network. IPFS upload/pinning and abuse screening are not complete. Do not claim a production-ready or anonymous network.
+The classic grid is the default, the dashboard is an alternate view, and real post detail/composer behavior is a core acceptance criterion. The browser currently uses WebSocket to arbitrary independent Node mirrors, **not** direct browser-native libp2p or a public bootstrap network. IPFS upload/pinning and abuse screening are not complete. Do not claim a production-ready or anonymous network.
 
 ## Operational instructions
 
