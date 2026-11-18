@@ -191,6 +191,28 @@ function bindEvents(){
   $('#hiddenToggle').onclick=()=>{state.showFiltered=!state.showFiltered;$('#showFiltered').checked=state.showFiltered;render();};
   $('#subscribeGuild').onchange=e=>{state.subscribed=e.target.checked?[...new Set([...state.subscribed,state.groupIds.guild])]:state.subscribed.filter(x=>x!==state.groupIds.guild);render();};
   $('#subscribeSafety').onchange=e=>{state.subscribed=e.target.checked?[...new Set([...state.subscribed,state.groupIds.safety])]:state.subscribed.filter(x=>x!==state.groupIds.safety);render();};
+  $('#createGroupButton').onclick=()=>$('#groupComposer').showModal();
+  $('#closeGroup').onclick=()=>$('#groupComposer').close();
+  $('#groupForm').onsubmit=async e=>{
+    e.preventDefault();
+    try{
+      const name=$('#groupName').value.trim();
+      const quorum={numerator:Number($('#groupThreshold').value),denominator:100};
+      const charter=await signEvent(state.identity,{kind:'group',body:{name,quorum}});
+      await addLocal(charter);
+      if($('#selfReviewer').checked){
+        const proposal=await signEvent(state.identity,{kind:'proposal',body:{
+          group:charter.id,parent:charter.id,
+          change:{type:'appoint-reviewer',author:state.identity.author,weight:1}}});
+        const ballot=await signEvent(state.identity,{kind:'vote',body:{proposal:proposal.id,choice:'approve'}});
+        await addLocal(proposal);await addLocal(ballot);
+      }
+      state.subscribed.push(charter.id);
+      await refreshGroups();
+      $('#groupComposer').close();$('#groupForm').reset();render();
+      newToast('Signed group created. Export events to share its charter and ballots.');
+    }catch(error){newToast('Group creation failed: '+error.message);}
+  };
   $('#composeButton').onclick=()=>$('#composer').showModal();
   $('#closeCompose').onclick=()=>$('#composer').close();
   $('#closeDetail').onclick=()=>$('#detail').close();

@@ -26,7 +26,9 @@
         <div class="side-title">FEDERATIONS <span class="hint" title="Voluntary subscriptions to independently published rules">?</span></div>
         <label class="federation"><input id="subscribeGuild" type="checkbox"><span class="federation-mark">G</span><span><strong>Open Commons Guild</strong><small>Community spam reviewers</small></span></label>
         <label class="federation"><input id="subscribeSafety" type="checkbox"><span class="federation-mark mark-blue">S</span><span><strong>Safety Cooperative</strong><small>Independent media labels</small></span></label>
-        <p class="side-caption">Each group publishes its own opinions. Subscribing changes your view—not the network.</p>
+        <div id="customGroups"></div>
+        <button class="side-link" id="createGroupButton"><span class="side-icon">＋</span> Create your own clan</button>
+        <p class="side-caption">Only signed, ratified reviewer authority counts. Following a group influences your view, not publication rights.</p>
       </div>
       <div class="side-section">
         <div class="side-title">PORTABILITY</div>
@@ -49,6 +51,14 @@
     </aside>
   </div>
   <dialog id="composer"><form method="dialog" id="composeForm" class="compose-form"><div class="dialog-head"><div><p class="eyebrow">SIGNED PUBLICATION</p><h2>Publish without permission</h2></div><button type="button" id="closeCompose" class="icon-btn">×</button></div><p class="form-intro">The space is a claim, not a privileged database. This preview saves locally; export the signed event to share it with other peers.</p><div class="form-grid"><label>SPACE<input id="postSpace" list="spacesList" value="commons" required maxlength="180"><datalist id="spacesList"><option>commons</option><option>art</option><option>organize</option><option>exchange</option><option>projects</option></datalist></label><label>PRESENTATION<select id="postKind"><option value="discussion">Discussion</option><option value="art">Art / media</option><option value="event">Meetup / event</option><option value="offer">Offer / listing</option><option value="project">Project</option><option value="job">Job / opportunity</option></select></label></div><label>TITLE<input id="postTitle" maxlength="160" placeholder="What are you sharing?" required></label><label>CONTENT<textarea id="postText" rows="6" maxlength="16000" placeholder="Write about your idea, event, project, offer..." required></textarea></label><label>OPTIONAL STRUCTURED FIELDS (JSON)<textarea id="postFields" rows="3" spellcheck="false" placeholder='{"start":"2027-01-01","price":{"amount":20,"currency":"USD"}}'></textarea></label><div class="dialog-actions"><small id="composeMessage">Signed records are immutable. Updates use new records.</small><button class="primary" type="submit" value="submit">Save signed post locally</button></div></form></dialog>
+  <dialog id="groupComposer"><form method="dialog" id="groupForm" class="compose-form">
+    <div class="dialog-head"><div><p class="eyebrow">VOLUNTARY SELF-GOVERNANCE</p><h2>Create a group</h2></div><button type="button" id="closeGroup" class="icon-btn">×</button></div>
+    <p class="form-intro">Anyone can found another group, even with the same name. Its signed charter ID defines its identity. No membership or vote imposes authority on non-subscribers.</p>
+    <label>GROUP NAME<input id="groupName" required maxlength="80" placeholder="Neighborhood Guild"></label>
+    <label>APPROVAL QUORUM<select id="groupThreshold"><option value="67">Two thirds (67%)</option><option value="51">Simple majority (51%)</option><option value="100">Unanimous (100%)</option></select></label>
+    <label class="federation"><input type="checkbox" id="selfReviewer" checked> Ratify my own reviewer role in the founding one-person group</label>
+    <div class="dialog-actions"><small>Created locally. Export signed records to share.</small><button class="primary" type="submit">Create group</button></div>
+  </form></dialog>
   <dialog id="detail"><div class="detail-shell"><div class="dialog-head"><div><p class="eyebrow">CONTENT ADDRESSED EVENT</p><h2 id="detailTitle">Record</h2></div><button id="closeDetail" class="icon-btn">×</button></div><div id="detailBody"></div><div id="detailInfo" class="detail-info"></div><div class="detail-actions"><button class="ghost" id="copyEvent">Copy signed JSON</button><button class="ghost" id="trustAuthor">Trust author</button><button class="ghost danger" id="flagEvent">Flag as spam (my view)</button></div></div></dialog>
   <input id="importFile" type="file" accept=".json,application/json" hidden>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
