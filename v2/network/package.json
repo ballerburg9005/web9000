@@ -21,6 +21,7 @@
   },
   "scripts": {
     "test:peers": "node smoke.mjs",
-    "test:browser-bridge": "node smoke-browser.mjs"
+    "test:browser-bridge": "node smoke-browser.mjs",
+    "test:independent-indexes": "node smoke-islands.mjs"
   }
 }
