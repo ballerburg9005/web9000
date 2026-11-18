@@ -13,7 +13,7 @@ export function postKind(item){
   if(['offer','marketplace'].includes(p))return 'offer';
   if(['job','positions'].includes(p))return 'job';
   if(p==='project')return 'project';
-  if(p==='discussion'||p==='text'||p==='blog')return 'text';
+  if(['discussion','text','blog','idea'].includes(p))return 'text';
   if(Array.isArray(b.media)&&b.media.length)return 'image';
   return 'text';
 }

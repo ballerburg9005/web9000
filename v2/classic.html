@@ -158,10 +158,10 @@
 <dialog id="postDialog"><form id="postForm" class="dialog-inner">
 <div class="dialog-title"><strong>Make a post</strong><button id="closeComposer" type="button" aria-label="Close">×</button></div>
 <div class="two-cols"><label>Namespace <input id="composeSpace" maxlength="180" value="commons" required></label>
-<label>Presentation <select id="composePresentation"><option value="image">Image board</option><option value="text">Text / blog</option><option value="event">Event</option><option value="offer">Listing / offer</option><option value="job">Job / position</option><option value="project">Project</option><option value="discussion">Discussion</option></select></label></div>
+<label>Presentation <select id="composePresentation"><option value="image">Image board</option><option value="text">Text / blog</option><option value="event">Event</option><option value="offer">Listing / offer</option><option value="job">Job / position</option><option value="project">Project</option><option value="idea">Idea / initiative</option><option value="discussion">Discussion</option></select></label></div>
 <label>Headline (optional) <input id="composeTitle" maxlength="160" placeholder="What is this about?"></label>
 <label>Text <textarea id="composeText" rows="4" maxlength="16000" placeholder="Write something. Plain text and paragraphs work."></textarea></label>
-<label>Images (optional) <input type="file" id="composeFiles" accept="image/jpeg,image/png,image/webp" multiple></label>
+<label>Images (optional) <input type="file" id="composeFiles" accept="image/jpeg,image/png,image/webp" multiple></label>\n<input type="hidden" id="composePrimaryIndex" value="0">
 <p class="fine">File uploads use the optional selected media peer, not a centralized website database. Images cannot be published as arbitrary inline code. If no upload peer is configured, publishing image files is refused with an explanation.</p>
 <label>Tags <input id="composeTags" placeholder="cats, memes, funny (comma separated)" maxlength="400"></label>
 <label id="composePriceWrap" hidden>Offer price / terms (optional)
@@ -176,8 +176,18 @@
 <fieldset><legend>Poll (optional)</legend><label>Question <input id="composePollQuestion" maxlength="180" placeholder="Choose one"></label><label>Options, one per line <textarea id="composePollOptions" rows="3" placeholder="Yes&#10;No"></textarea></label></fieldset>
 <fieldset><legend>Open positions (optional)</legend><label>Positions, one per line <textarea id="composePositions" rows="2" placeholder="Organizer&#10;Designer"></textarea></label></fieldset>
 <p id="composeError" role="alert" class="error" hidden></p>
-<div class="actions"><button class="accent" type="submit" id="submitPost">Sign & publish</button><button id="cancelPost" type="button">Cancel</button></div>
+<div class="actions"><button class="accent" type="submit" id="submitPost">Preview post</button><button id="cancelPost" type="button">Cancel</button></div>
 </form></dialog>
+<dialog id="composePreviewDialog" class="compose-preview-dialog" aria-labelledby="composePreviewTitle">
+<div class="dialog-inner">
+<div class="dialog-title"><strong id="composePreviewTitle">Preview before publishing</strong><button type="button" id="closeComposePreview" aria-label="Close preview">×</button></div>
+<p class="fine">This is exactly the text, space, tags and file order you are about to sign. Attachments are not uploaded until you confirm.</p>
+<section id="composePreviewContent" class="compose-preview-content" aria-label="Your unpublished post"></section>
+<label class="compose-ack"><input type="checkbox" id="composePermanentAck"> I understand that information published to independent peers cannot reliably be deleted or recalled, even if I later retract or revise it.</label>
+<p class="fine">No central owner can guarantee removal from other people’s independent replicas. Do not publish sensitive personal information, passwords or illegal media.</p>
+<div class="actions"><button class="accent" type="button" id="confirmPublishPost" disabled>Sign & publish now</button><button type="button" id="editPostPreview">← Edit post</button></div>
+<p id="composePreviewError" role="alert" class="error" hidden></p>
+</div></dialog>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <script type="module" src="./classic.js"></script>
 </body></html>

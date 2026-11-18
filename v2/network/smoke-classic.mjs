@@ -181,6 +181,8 @@ try{
  const afterScore=await a.$eval('.reactions .score',e=>Number(e.textContent));
  assert.equal(afterScore,beforeScore+2,'signed demonstration post can be voted on like real content');
  assert.equal(await a.evaluate(()=>document.querySelector('.post-container.expanded')!==null),true);
+ assert.equal(await a.evaluate(()=>!!document.querySelector('.detail-close')),false,
+   'the redundant Close button must be absent; selected tile and Escape close details');
  await a.evaluate(()=>document.querySelector('.post.selected').click());
  assert.equal(await a.evaluate(()=>document.querySelectorAll('.post-container.expanded').length),0);
  await a.evaluate(()=>document.getElementById('mockKarmaButton').click());
@@ -210,6 +212,15 @@ try{
    const image=document.querySelector('.expanded-body .attachments img').getBoundingClientRect();
    return {gridWidth:grid.width,bodyWidth:panel.width,imgWidth:image.width};
  });
+ const mediaOrder=await a.evaluate(()=>{
+   const body=document.querySelector('.expanded-body');
+   return [...body.children].map(x=>x.className);
+ });
+ assert.equal(mediaOrder[0],'post-main-media',
+   'primary image/video/audio must appear above post title and metadata');
+ assert.equal(mediaOrder[1],'post-detail-heading');
+ assert.ok(mediaOrder.indexOf('reactions')>mediaOrder.indexOf('details-line'));
+ assert.ok(mediaOrder.indexOf('label-row')>mediaOrder.indexOf('reactions'));
  assert.ok(layout.bodyWidth>=layout.gridWidth*.7,
    'expanded post must have a usable full-row content area: '+JSON.stringify(layout));
  assert.ok(layout.imgWidth>=100,'demo image must render at a readable size');
@@ -251,8 +262,37 @@ try{
  assert.ok(Math.abs(navigatedScroll.top-navigatedScroll.expected)<=17,
    'arrow navigation must align selected grid row: '+JSON.stringify(navigatedScroll));
  await a.keyboard.press('Escape');
+ // With more than half the selected row already in view, do not force it
+ // to the top or jump the page. Only recover a row that is largely clipped.
+ await a.evaluate(()=>{
+   document.querySelector('.post[data-index="15"]').click();
+   window.scrollTo({top:Math.max(0,window.scrollY-62),behavior:'instant'});
+ });
+ const previous=await a.evaluate(()=>window.scrollY);
+ await a.evaluate(()=>document.querySelector('.post.selected')?.click());
+ const retained=await a.evaluate(()=>window.scrollY);
+ assert.ok(Math.abs(previous-retained)<=3,
+   'closing a post with a mostly visible row should preserve scroll: '+
+     JSON.stringify({previous,retained}));
+ await a.evaluate(()=>{
+   document.querySelector('.post[data-index="15"]').click();
+   window.scrollBy({top:240,behavior:'instant'});
+ });
+ const visibility=await a.evaluate(()=>{
+   const r=document.querySelector('.post.selected').getBoundingClientRect();
+   return {top:r.top,bottom:r.bottom,header:document.getElementById('topHeader').getBoundingClientRect().bottom};
+ });
+ assert.ok(visibility.bottom<=visibility.header+20,
+   'test scroll should genuinely hide the selected grid row '+JSON.stringify(visibility));
+ await a.evaluate(()=>document.querySelector('.post.selected')?.click());
+ const realigned=await a.evaluate(()=>{
+   const r=document.querySelector('.post[data-index="15"]').getBoundingClientRect();
+   return {top:r.top,header:document.getElementById('topHeader').getBoundingClientRect().bottom+5};
+ });
+ assert.ok(Math.abs(realigned.top-realigned.header)<=18,
+   'only a clipped row is realigned on close '+JSON.stringify(realigned));
  await a.setViewport({width:1440,height:900});
- console.log('CLASSIC checkpoint 4a: row scroll anchoring on open, close, and arrow navigation');
+ console.log('CLASSIC checkpoint 4a: conditional row scroll preservation, clipping and arrow navigation');
 
  await a.evaluate(()=>document.getElementById('clansButton').click());
  await eventually(()=>a.evaluate(()=>document.querySelectorAll('.group-entry').length>=2),
@@ -285,6 +325,13 @@ try{
  await a.type('#composeLocation','A local meetup');
  console.log('CLASSIC checkpoint 5: composed native form');
  await a.evaluate(()=>document.getElementById('postForm').requestSubmit());
+ assert.equal(await a.evaluate(()=>document.querySelector('#composePreviewDialog').open),true,
+   'post composer must show preview before signing');
+ assert.equal(await a.evaluate(()=>document.getElementById('confirmPublishPost').disabled),true,
+   'publication blocked until explicit permanence acknowledgement');
+ await a.evaluate(()=>document.getElementById('composePermanentAck').click());
+ assert.equal(await a.evaluate(()=>document.getElementById('confirmPublishPost').disabled),false);
+ await a.evaluate(()=>document.getElementById('confirmPublishPost').click());
  await eventually(()=>a.evaluate(()=>[...document.querySelectorAll('.post-headline')].some(x=>x.textContent==='My first actual cats post')),'signed classic post rendered');
  console.log('CLASSIC checkpoint 6: signed local post visible');
  await connect(a,bridge.url);
@@ -324,13 +371,13 @@ try{
  assert.ok((await b.$$eval('.poll button',x=>x.length))>=2,'native poll UI');
  assert.ok((await b.$$eval('.schedule',x=>x.length))>=1,'native date UI');
  console.log('CLASSIC checkpoint 11: post details, poll and schedule visible');
- await b.focus('.comments-section > .comment-form textarea');
- const directReplyAnchor=await b.evaluate(()=>({
-   controls:document.querySelector('.reactions').getBoundingClientRect().top,
-   wanted:document.querySelector('#topHeader').getBoundingClientRect().height+5
- }));
- assert.ok(Math.abs(directReplyAnchor.controls-directReplyAnchor.wanted)<=25,
-   'focus a direct post comment with the reaction bar anchored below the header: '+JSON.stringify(directReplyAnchor));
+ const replyFocusScroll=await b.evaluate(()=>{
+   const before=window.scrollY;
+   document.querySelector('.comments-section > .comment-form textarea').focus({preventScroll:true});
+   return {before,after:window.scrollY};
+ });
+ assert.equal(replyFocusScroll.after,replyFocusScroll.before,
+   'focusing to write a comment must not trigger any application-driven scroll');
  await b.type('.comment-form textarea','A separate, real signed comment',{delay:4});
  assert.equal(await b.$eval('.comment-form textarea',el=>el.value),'A separate, real signed comment',
    'incoming peer data must not destroy the focused comment draft');
@@ -339,9 +386,14 @@ try{
    e.payload.body.text==='A separate, real signed comment'),'remote comment accepted by peer');
  await eventually(()=>a.evaluate(()=>[...document.querySelectorAll('.comment-text')].some(x=>x.textContent==='A separate, real signed comment')),'remote signed comment rendered');
  console.log('CLASSIC checkpoint 12: signed comment received');
- await b.evaluate(()=>document.querySelector('.reactions button').click());
+ const reactionScrollBefore=await b.evaluate(()=>window.scrollY);
+ await b.evaluate(()=>document.querySelector('.reactions .vote-max').click());
  await eventually(()=>bridge.replica.list().some(x=>x.payload.kind==='reaction'),'signed reaction through OrbitDB');
- console.log('CLASSIC checkpoint 13: signed reaction received');
+ const reactionScrollAfter=await b.evaluate(()=>window.scrollY);
+ assert.ok(Math.abs(reactionScrollAfter-reactionScrollBefore)<=3,
+   'clicking a signed reaction must not scroll the page: '+
+     JSON.stringify({reactionScrollBefore,reactionScrollAfter}));
+ console.log('CLASSIC checkpoint 13: signed reaction received without scrolling');
  assert.deepEqual(errors,[]);
  const artifacts=path.join(path.dirname(fileURLToPath(import.meta.url)),'test-artifacts');
  await mkdir(artifacts,{recursive:true});
@@ -356,13 +408,13 @@ try{
  await b.screenshot({path:path.join(artifacts,'classic-mobile.png'),fullPage:true});
  // Deliberately close the stable expanded discussion before displaying new
  // feed items. Network updates must never detach active comment editors.
- await b.evaluate(()=>document.querySelector('.detail-close')?.click());
+ await b.evaluate(()=>document.querySelector('.post.selected')?.click());
  // One independent record may refer to a whole image gallery. Navigation
  // changes only the selected attachment and never requires raw-CID input.
  const galleryRecord=await signEvent(demoIdentity,{
    kind:'post',space:'demo',
    body:{title:'Multi-image signed gallery test',text:'Two signed CID references.',
-     fields:{presentation:'image',tags:['gallery']},
+     fields:{presentation:'image',tags:['gallery'],primaryMediaIndex:1},
      media:['ipfs://'+demoCid,'ipfs://'+demoCid]}
  });
  await index.publish(galleryRecord);
@@ -372,11 +424,12 @@ try{
  await b.evaluate(id=>document.querySelector('.post[data-id="'+id+'"]').click(),galleryRecord.id);
  assert.equal(await b.$$eval('.gallery-thumb',items=>items.length),2,
    'two CID references should produce gallery navigation thumbnails');
- assert.equal(await b.$eval('.gallery-count',el=>el.textContent),'1 / 2');
+ assert.equal(await b.$eval('.gallery-count',el=>el.textContent),'2 / 2',
+   'explicit signed primary media selection wins over first-attachment fallback');
  await b.evaluate(()=>document.querySelector('.gallery-next').click());
- assert.equal(await b.$eval('.gallery-count',el=>el.textContent),'2 / 2');
- await b.evaluate(()=>document.querySelector('.gallery-prev').click());
  assert.equal(await b.$eval('.gallery-count',el=>el.textContent),'1 / 2');
+ await b.evaluate(()=>document.querySelector('.gallery-prev').click());
+ assert.equal(await b.$eval('.gallery-count',el=>el.textContent),'2 / 2');
  console.log('CLASSIC checkpoint 14: real multi-image gallery navigation');
 
  // The compact Clans panel must actually publish a signed founding charter.
@@ -494,6 +547,11 @@ try{
    document.querySelector('.attribute-value').value='CC0';
    document.getElementById('postForm').requestSubmit();
  });
+ await b.evaluate(()=>{
+   if(!document.querySelector('#composePreviewDialog').open)throw Error('No offer preview');
+   document.getElementById('composePermanentAck').click();
+   document.getElementById('confirmPublishPost').click();
+ });
  await eventually(()=>bridge.replica.list().some(e=>e.payload.kind==='post'&&
    e.payload.body.title==='Actual interoperable field test'&&
    e.payload.body.fields.price==='$25 / trade'&&
@@ -523,7 +581,7 @@ try{
    document.getElementById('searchCustomField').value='';
    document.getElementById('searchPosts').value='';
    document.getElementById('searchPosts').dispatchEvent(new Event('input',{bubbles:true}));
-   document.querySelector('.detail-close')?.click();
+   document.querySelector('.post.selected')?.click();
  });
  const manyTagPost=await signEvent(demoIdentity,{space:'demo',kind:'post',
    body:{title:'24 tags expansion test',text:'Tags should remain in compact vote chips.',
@@ -545,7 +603,7 @@ try{
  await b.evaluate(()=>document.querySelector('.tag-more').click());
  assert.equal(await b.$$eval('.tag-chip',all=>all.length),24);
  assert.equal(await b.$$eval('.tag-more',all=>all.length),0,'ellipsis disappears after expansion');
- await b.evaluate(()=>document.querySelector('.detail-close').click());
+ await b.evaluate(()=>document.querySelector('.post.selected')?.click());
  const soundPost=await signEvent(demoIdentity,{space:'demo',kind:'post',
    body:{title:'Sound controls test',text:'Example static sound clip',
      media:[],fields:{presentation:'audio',demo:true,demoVersion:1,
@@ -562,8 +620,24 @@ try{
    soundPost.id,videoPost.id),'separate signed audio and hover-video examples render');
  await b.evaluate(id=>document.querySelector('.post[data-id="'+id+'"]').click(),soundPost.id);
  assert.equal(await b.$$eval('.mini-audio-toggle',buttons=>buttons.length)>=1,true);
- assert.equal(await b.$$('.mini-audio audio').then(all=>all.length)>=1,true);
- await b.evaluate(()=>document.querySelector('.detail-close').click());
+ assert.equal(await b.$$eval('.mini-audio audio',all=>all.length),0,
+   'one hidden global audio transport replaces separate tile/expanded elements');
+ await b.evaluate(()=>document.querySelector('.post.selected')?.click());
+ await b.click('.post[data-id="'+soundPost.id+'"] .mini-audio-toggle');
+ await eventually(()=>b.evaluate(id=>
+   !!document.querySelector('.post[data-id="'+id+'"] .mini-audio.playing'),
+   soundPost.id),'audio mini-player starts on a real user click');
+ await b.evaluate(id=>document.querySelector('.post[data-id="'+id+'"]').click(),soundPost.id);
+ assert.ok(await b.evaluate(()=>!!document.querySelector('.post-container .mini-audio.playing')),
+   'expanded audio controls reflect the SAME playback session');
+ const beforeTime=await b.evaluate(()=>document.querySelector('.post-container .mini-audio-clock').textContent);
+ await b.evaluate(()=>document.querySelector('.post.selected')?.click());
+ assert.ok(await b.evaluate(id=>!!document.querySelector('.post[data-id="'+id+'"] .mini-audio.playing'),
+   soundPost.id),'closing the expanded post must not stop audio');
+ const afterTime=await b.evaluate(id=>document.querySelector('.post[data-id="'+id+'"] .mini-audio-clock').textContent,
+   soundPost.id);
+ assert.equal(typeof beforeTime,'string');assert.equal(typeof afterTime,'string');
+ await b.click('.post[data-id="'+soundPost.id+'"] .mini-audio-toggle');
  const videoTile='.post[data-id="'+videoPost.id+'"]';
  await b.hover(videoTile);
  await eventually(()=>b.evaluate(id=>{
@@ -574,7 +648,9 @@ try{
  assert.equal(await b.$$eval('.mini-video-player video',els=>els.length),1,
    'expanded video uses custom player instead of native controls');
  assert.equal(await b.$eval('.mini-video-player video',el=>el.controls),false);
- await b.evaluate(()=>document.querySelector('.detail-close').click());
+ assert.equal(await b.$$eval('.mini-video-controls input[type=range]',els=>els.length),2,
+   'minimal custom video controls provide seek timeline and volume slider');
+ await b.evaluate(()=>document.querySelector('.post.selected')?.click());
  console.log('CLASSIC checkpoint 18a: compact tag voting, signed sound and hover video previews');
 
  // Export a password-encrypted identity from this classic website, then
@@ -628,6 +704,11 @@ try{
    document.getElementById('composeTitle').value='Portable key on a third independent website';
    document.getElementById('composeText').value='Signed using the imported key, not a hosted account.';
    document.getElementById('postForm').requestSubmit();
+ });
+ await c.evaluate(()=>{
+   if(!document.querySelector('#composePreviewDialog').open)throw Error('No portable post preview');
+   document.getElementById('composePermanentAck').click();
+   document.getElementById('confirmPublishPost').click();
  });
  await eventually(()=>bridge.replica.list().some(e=>e.payload.kind==='post'&&
    e.payload.body.title==='Portable key on a third independent website'&&

@@ -149,11 +149,31 @@ function closeSelected(){
   const id=state.selected;
   const card=[...document.querySelectorAll('#imageGrid > .post')].find(el=>el.dataset.id===id);
   const index=card?Number(card.dataset.index):-1;
+  const scrollBefore=window.scrollY;
+  // Preserve a reader's deliberate scroll position while the selected row
+  // is already mostly visible. Align it to the header ONLY when the reader
+  // is further down in the expanded body and the selected row is clipped.
+  const rect=card?.getBoundingClientRect();
+  const headerBottom=($('topHeader')?.getBoundingClientRect().bottom||0)+5;
+  const rowVisible=rect?Math.max(0,Math.min(rect.bottom,innerHeight)-
+    Math.max(rect.top,headerBottom)):0;
+  const rowMostlyVisible=!!rect&&rowVisible>=Math.min(rect.height*.6,70);
   state.selected=null;
+  // A programmatically activated or keyboard-selected tile can leave the
+  // old reply textarea focused. Explicitly blur it before replacing its
+  // expanded panel so a new incoming post can update the feed immediately.
+  if(document.activeElement?.closest?.('.comment-form'))document.activeElement.blur();
   render();
   const target=id?[...document.querySelectorAll('#imageGrid > .post')].find(el=>el.dataset.id===id):null;
   const fallback=index>=0?document.querySelector('#imageGrid > .post[data-index="'+index+'"]'):null;
-  alignGridRow(target||fallback);
+  if(!rowMostlyVisible){
+    alignGridRow(target||fallback);
+  }else{
+    // Rebuilding the grid should not move the viewport simply because the
+    // article detail has disappeared. The browser clamps naturally if the
+    // previous position now exceeds the (shorter) document length.
+    window.scrollTo({top:scrollBefore,behavior:'instant'});
+  }
 }
 function columns(){
   const w=window.innerWidth;
@@ -169,20 +189,49 @@ function signedDemoMedia(payload){
   if(audio==='../content/festival_theme.mp3')return {type:'audio',src:audio};
   return null;
 }
+// One lifetime-long audio engine, shared by compact tile and expanded player.
+// Rendering or closing an article never creates a second sound source or
+// interrupts playback. Both controls observe the same transport.
+const sharedAudio=new Audio();
+sharedAudio.preload='none';
+let activeAudioURL='';
+const absoluteAudioURL=source=>new URL(source,document.baseURI).href;
+function syncAudioPlayers(){
+  const duration=sharedAudio.duration||0;
+  const stamp=seconds=>{
+    const n=Math.max(0,Math.floor(seconds||0));
+    return Math.floor(n/60)+':'+String(n%60).padStart(2,'0');
+  };
+  for(const wrap of document.querySelectorAll('.mini-audio')){
+    const matching=wrap.dataset.audioSrc===activeAudioURL;
+    const playing=matching&&!sharedAudio.paused&&!sharedAudio.ended;
+    wrap.classList.toggle('playing',playing);
+    const toggle=wrap.querySelector('.mini-audio-toggle');
+    if(toggle)toggle.textContent=playing?'Ⅱ':'▶';
+    const progress=wrap.querySelector('.mini-audio-progress');
+    if(progress)progress.value=String(matching&&duration>0?
+      Math.round(1000*sharedAudio.currentTime/duration):0);
+    const clock=wrap.querySelector('.mini-audio-clock');
+    if(clock)clock.textContent=stamp(matching?sharedAudio.currentTime:0)+
+      (wrap.classList.contains('compact')?'':' / '+stamp(matching?duration:0));
+  }
+}
+for(const type of ['play','pause','timeupdate','loadedmetadata','ended','seeked'])
+  sharedAudio.addEventListener(type,syncAudioPlayers);
 function miniAudio(source,{compact=false}={}){
-  // Custom browser controls, not <audio controls>. The audio URL comes only
-  // from our allowlisted demo source. Sound begins on explicit user gesture.
+  const src=absoluteAudioURL(source);
   const wrap=element('div','mini-audio'+(compact?' compact':''));
-  const audio=document.createElement('audio');audio.preload='none';audio.src=source;
-  const play=button('▶',event=>{
-    event.stopPropagation();
-    for(const other of document.querySelectorAll('.mini-audio audio')){
-      if(other!==audio&&!other.paused)other.pause();
+  wrap.dataset.audioSrc=src;
+  const play=button('▶',e=>{
+    e.stopPropagation();
+    if(activeAudioURL!==src){
+      sharedAudio.pause();activeAudioURL=src;sharedAudio.src=src;sharedAudio.load();
     }
-    if(audio.paused)audio.play().catch(()=>{play.textContent='▶';toast('Audio could not be played.');});
-    else audio.pause();
+    if(sharedAudio.paused)sharedAudio.play().catch(()=>toast('Unable to play audio'));
+    else sharedAudio.pause();
+    syncAudioPlayers();
   },'mini-audio-toggle');
-  play.setAttribute('aria-label','Play or pause example audio');
+  play.setAttribute('aria-label','Play or pause sound');
   const waveform=element('div','mini-wave');
   for(let i=0;i<33;i++){
     const bar=element('i');
@@ -191,25 +240,16 @@ function miniAudio(source,{compact=false}={}){
   }
   const progress=element('input','mini-audio-progress');
   progress.type='range';progress.min='0';progress.max='1000';progress.step='1';progress.value='0';
-  progress.setAttribute('aria-label','Seek through audio');
-  progress.addEventListener('input',event=>{
-    event.stopPropagation();
-    if(Number.isFinite(audio.duration)&&audio.duration>0)
-      audio.currentTime=audio.duration*Number(progress.value)/1000;
+  progress.setAttribute('aria-label','Seek through sound');
+  progress.addEventListener('input',e=>{
+    e.stopPropagation();
+    if(activeAudioURL===src&&Number.isFinite(sharedAudio.duration)&&sharedAudio.duration>0)
+      sharedAudio.currentTime=sharedAudio.duration*Number(progress.value)/1000;
   });
-  for(const type of ['pointerdown','click','keydown'])progress.addEventListener(type,e=>e.stopPropagation());
+  for(const type of ['pointerdown','click','keydown'])
+    progress.addEventListener(type,e=>e.stopPropagation());
   const clock=element('span','mini-audio-clock','0:00');
-  const format=t=>{
-    const sec=Math.max(0,Math.floor(t||0));return Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0');
-  };
-  audio.addEventListener('timeupdate',()=>{
-    progress.value=String(audio.duration>0?Math.round(1000*audio.currentTime/audio.duration):0);
-    clock.textContent=format(audio.currentTime)+(compact?'':' / '+format(audio.duration));
-  });
-  audio.addEventListener('play',()=>{play.textContent='Ⅱ';wrap.classList.add('playing');});
-  audio.addEventListener('pause',()=>{play.textContent='▶';wrap.classList.remove('playing');});
-  audio.addEventListener('ended',()=>{play.textContent='▶';wrap.classList.remove('playing');progress.value='0';});
-  wrap.append(audio,play,waveform,progress,clock);
+  wrap.append(play,waveform,progress,clock);
   return wrap;
 }
 function miniVideo(source){
@@ -219,23 +259,27 @@ function miniVideo(source){
   video.className='mini-video-frame';
   const controls=element('div','mini-video-controls');
   const play=button('▶',()=>video.paused?
-    video.play().catch(()=>toast('Video playback failed')):video.pause(),'mini-video-play');
+    video.play().catch(()=>toast('Video could not play')):video.pause(),'mini-video-play');
   play.setAttribute('aria-label','Play or pause video');
   const timeline=element('input','mini-video-timeline');
   timeline.type='range';timeline.min='0';timeline.max='1000';timeline.value='0';
-  timeline.setAttribute('aria-label','Seek in video');
-  timeline.oninput=()=>{if(Number.isFinite(video.duration)&&video.duration>0)
-    video.currentTime=video.duration*Number(timeline.value)/1000;};
+  timeline.setAttribute('aria-label','Seek through video');
+  timeline.oninput=()=>{
+    if(Number.isFinite(video.duration)&&video.duration>0)
+      video.currentTime=video.duration*Number(timeline.value)/1000;
+  };
   const clock=element('span','mini-video-clock','0:00');
-  const mute=button('Muted',()=>{
-    video.muted=!video.muted;mute.textContent=video.muted?'Muted':'Sound on';
-    mute.setAttribute('aria-pressed',String(!video.muted));
-  },'mini-video-mute');
-  mute.setAttribute('aria-pressed','false');
-  const fullscreen=button('⛶',()=>video.requestFullscreen?.().catch(()=>{}),'mini-video-fullscreen');
-  fullscreen.title='Fullscreen';
-  const time=t=>{const n=Math.max(0,Math.floor(t||0));
-    return Math.floor(n/60)+':'+String(n%60).padStart(2,'0');};
+  const volume=element('input','mini-video-volume');
+  volume.type='range';volume.min='0';volume.max='100';volume.value='0';volume.step='1';
+  volume.setAttribute('aria-label','Video volume');
+  volume.oninput=()=>{
+    video.volume=Number(volume.value)/100;
+    video.muted=Number(volume.value)===0;
+  };
+  const time=t=>{
+    const n=Math.max(0,Math.floor(t||0));
+    return Math.floor(n/60)+':'+String(n%60).padStart(2,'0');
+  };
   video.addEventListener('timeupdate',()=>{
     timeline.value=String(video.duration>0?Math.round(video.currentTime/video.duration*1000):0);
     clock.textContent=time(video.currentTime)+' / '+time(video.duration);
@@ -244,7 +288,7 @@ function miniVideo(source){
   video.addEventListener('pause',()=>play.textContent='▶');
   video.addEventListener('ended',()=>play.textContent='▶');
   video.addEventListener('click',()=>play.click());
-  controls.append(play,timeline,clock,mute,fullscreen);
+  controls.append(play,volume,timeline,clock);
   wrap.append(video,controls);
   return wrap;
 }
@@ -275,18 +319,27 @@ function addDemoVideoHover(card,payload){
 }
 function tile(item,i,replyCounts){
   const p=item.event.payload,b=p.body;
-  const card=element('div','post'+(item.decision?.visible?'':' filtered')+(b.fields?.presentation==='text'||!item.thumb&&!b.media?.length?' text-only':''));
+  const category=b.fields?.presentation||'image';
+  // Mixed is a text-promoting layout. Even media posts without a currently
+  // fetchable thumbnail stay a single cell, never 3 or 9.
+  const proseOnly=['text','discussion','idea'].includes(category)&&
+    !item.thumb&&!b.media?.length&&!signedDemoMedia(p);
+  const card=element('div','post'+(item.decision?.visible?'':' filtered')+
+    (proseOnly?' text-only':''));
   card.dataset.index=String(i);card.dataset.id=item.event.id;card.dataset.kind=postKind(item);
   card.tabIndex=0;card.setAttribute('role','button');card.setAttribute('aria-label',b.title||'Post');
   const demoMedia=signedDemoMedia(p);
   if(demoMedia?.type==='audio'){
     card.append(miniAudio(demoMedia.src,{compact:true}));
     card.classList.add('sound-tile');
-  }else if(demoMedia?.type==='video'&&b.fields.demoThumb==='../thumb/thumb11.jpg'){
-    const image=document.createElement('img');
-    image.className='post-thumb';image.loading='lazy';
-    image.src=b.fields.demoThumb;image.alt=b.title||'Example video preview';
-    card.append(image);
+  }else if(demoMedia?.type==='video'){
+    // The old signed demo contained unrelated image CIDs/posters.
+    // Use this video's own first frame rather than a picture of another post.
+    const frame=document.createElement('video');
+    frame.className='post-thumb video-poster';frame.src=demoMedia.src;
+    frame.muted=true;frame.playsInline=true;frame.preload='metadata';
+    frame.setAttribute('aria-label','Video thumbnail');
+    card.append(frame);
   }else if(item.thumb){
     const img=document.createElement('img');img.className='post-thumb';img.loading='lazy';img.src=item.thumb;img.alt=b.title||'Demo picture';
     card.append(img);
@@ -296,7 +349,10 @@ function tile(item,i,replyCounts){
       // Raw publications by strangers NEVER trigger media download.
       const img=document.createElement('img');
       img.className='post-thumb';img.loading='lazy';img.alt=b.title||'Trusted image';
-      img.src=mediaURL(b.media[0]);
+      const mainIndex=Number.isInteger(b.fields?.primaryMediaIndex)&&
+        b.fields.primaryMediaIndex>=0&&b.fields.primaryMediaIndex<b.media.length?
+        b.fields.primaryMediaIndex:0;
+      img.src=mediaURL(b.media[mainIndex]);
       img.onerror=()=>img.replaceWith(element('div','post-reveal','Media unavailable · click to inspect CID'));
       card.append(img);
     } else {
@@ -316,6 +372,7 @@ function tile(item,i,replyCounts){
   else if(b.media?.length>1)icons.push('▣ '+b.media.length+' images');
   else if(kind==='offer')icons.push('◇ Offer');
   else if(kind==='project')icons.push('◆ Project');
+  else if(kind==='idea')icons.push('✦ Idea');
   else if(kind==='job')icons.push('◈ Jobs');
   else if(kind==='discussion'||kind==='text')icons.push('☰ Text');
   else if(item.thumb||b.media?.length)icons.push('▣ Image');
@@ -327,7 +384,24 @@ function tile(item,i,replyCounts){
   const visibleIcons=icons.filter(x=>!['▣ Image','☰ Text','▶ Video','♪ Sound'].includes(x));
   if(visibleIcons.length){
     card.classList.add('has-icons');
-    card.append(element('div','post-icons',visibleIcons.join(' · ')));
+    const box=element('div','post-icons');
+    for(const iconText of visibleIcons){
+      const chip=element('span','post-icon-bubble',iconText);
+      const text=iconText.toLowerCase();
+      chip.title=text.startsWith('☏')?
+        replyCount+' direct signed '+(replyCount===1?'comment':'comments')+
+          ' on this post. Open to view the conversation.':
+        text.includes('meetup')?'This post includes an event date/location':
+        text.includes('poll')?'This post contains a poll with voting options':
+        text.includes('images')?'This post has multiple image attachments':
+        text.includes('jobs')||text.includes('roles')?'Open positions associated with this post':
+        text.includes('offer')?'Marketplace offer/listing':
+        text.includes('project')?'Collaborative project post':
+        'Signed post attribute: '+iconText;
+      chip.setAttribute('aria-label',chip.title);
+      box.append(chip);
+    }
+    card.append(box);
   }
   if(p.space==='demo'&&p.author===state.demoAuthor&&b.fields?.demo)
     card.append(element('div','post-small demo-label','EXAMPLE · SIGNED'));
@@ -429,6 +503,7 @@ function render(){
   $('searchCount').textContent=feed.length+' match'+(feed.length===1?'':'es');
   if(prev && feed.some(x=>x.event.id===prev))expand(prev,{focus:false});
   else state.selected=null;
+  syncAudioPlayers();
 }
 function updateOpenDiscussion(){
   // Incoming network batches can contain hundreds of unrelated records. Do
@@ -531,7 +606,9 @@ function otherRecords(target,kind){
 async function react(id,value){
   try{
     await publish('reaction',{target:id,value});
-    if(state.selected===id)expand(id,{focus:false});
+    // Score/selected styling updates in place on ingest. Rebuilding an
+    // expanded panel or moving focus here used to jump to the page bottom.
+    updateOpenDiscussion();
   }catch(e){toast('Reaction not accepted: '+e.message);}
 }
 async function tagVote(id,tag,value){
@@ -548,10 +625,12 @@ async function appendReply(post,textarea,parent=post.id){
     const message=await publish('reply',{parent,title:'',text:content});
     state.replyDrafts.delete(post.id+'|'+parent);
     textarea.value='';
-    expand(post.id,{focus:false});
-    const anchor=parent===post.id?document.querySelector('.reactions'):
-      document.querySelector('[data-comment-id="'+parent+'"]');
-    alignUnderHeader(anchor);
+    // The draft is committed; clear its focus so the signed result can
+    // replace the thread without either stealing input or scrolling.
+    if(document.activeElement===textarea)textarea.blur();
+    // Keep the reading position fixed. Newly signed replies are reconciled
+    // into this discussion without any programmatic scroll.
+    updateOpenDiscussion();
     toast('Signed reply '+message.id.slice(0,18)+'…');
   }catch(error){toast('Could not publish reply: '+error.message);}
 }
@@ -560,11 +639,6 @@ function addCommentForm(area,post,parent=post.id){
   const ta=document.createElement('textarea');ta.placeholder=parent===post.id?'Write a comment...':'Reply to comment...';
   const draftKey=post.id+'|'+parent;
   ta.value=state.replyDrafts.get(draftKey)||'';
-  ta.addEventListener('focus',()=>{
-    const target=parent===post.id?document.querySelector('.reactions'):
-      document.querySelector('[data-comment-id="'+parent+'"]');
-    alignUnderHeader(target||box);
-  });
   ta.addEventListener('input',()=>{
     if(ta.value)state.replyDrafts.set(draftKey,ta.value);
     else state.replyDrafts.delete(draftKey);
@@ -730,7 +804,8 @@ function showMultiImageGallery(body,post){
   const thumbs=element('div','gallery-thumbnails');
   const counter=element('span','gallery-count');
   const allowed=new Set(state.mediaBase&&trustedForMedia(post.payload.author)?cids:[]);
-  let index=0;
+  const specified=post.payload.body.fields?.primaryMediaIndex;
+  let index=Number.isInteger(specified)&&specified>=0&&specified<cids.length?specified:0;
   function draw(){
     const cid=cids[index];
     stage.replaceChildren();
@@ -757,6 +832,14 @@ function showMultiImageGallery(body,post){
         'gallery-thumb'+(j===index?' active':''));
       b.title='View image '+(j+1);
       b.setAttribute('aria-label','View image '+(j+1));
+      if(allowed.has(cids[j])){
+        const preview=document.createElement('img');
+        preview.className='gallery-thumb-image';
+        preview.loading='lazy';
+        preview.src=mediaURL(cids[j]);
+        preview.alt='';
+        b.replaceChildren(preview);
+      }
       thumbs.append(b);
     }
   }
@@ -801,6 +884,11 @@ function showMedia(body,post){
   }
   body.append(area);
 }
+function redrawCurrentWithoutScroll(id){
+  const top=window.scrollY;
+  expand(id,{focus:false});
+  window.scrollTo({top,behavior:'instant'});
+}
 function expand(id,{focus=true}={}){
   const feed=effectiveFeed(),index=feed.findIndex(x=>x.event.id===id);
   if(index<0)return;
@@ -815,9 +903,10 @@ function expand(id,{focus=true}={}){
   left.tabIndex=0;right.tabIndex=0;
   left.addEventListener('click',()=>navigate(-1));right.addEventListener('click',()=>navigate(1));
   const body=element('div','expanded-body');
+  const mediaRoot=element('div','post-main-media');
+  body.append(mediaRoot);
   const heading=element('div','post-detail-heading');
   heading.append(element('h2','',b.title||'Untitled post'));
-  heading.append(button('× Close',closeSelected,'detail-close'));
   body.append(heading);
   const metadata=element('div','details-line');
   const authorControl=button('From '+who(p.author),()=>showProfile(p.author),'author-profile-link');
@@ -833,17 +922,21 @@ function expand(id,{focus=true}={}){
   body.append(metadata);
   if(signedDemoMedia(p)?.type==='audio'){
     const player=miniAudio(signedDemoMedia(p).src);
-    body.append(player);
+    mediaRoot.append(player);
   }
-  if(current.thumb){
+  if(current.thumb&&!signedDemoMedia(p)){
     const region=element('div','attachments'),img=document.createElement('img');
-    img.src=current.thumb;img.alt=b.title||'Demo image';img.loading='eager';img.decoding='async';region.append(img);body.append(region);
-  }else showMedia(body,current.event);
+    img.src=current.thumb;img.alt=b.title||'Demo image';img.loading='eager';img.decoding='async';region.append(img);mediaRoot.append(region);
+  }else if(!signedDemoMedia(p))showMedia(mediaRoot,current.event);
+  // Earlier example video events accidentally contained unrelated photo CIDs;
+  // they remain in the signed event for audit, never presented as video art.
+
   const demoVideo=signedDemoMedia(p)?.type==='video'?signedDemoMedia(p).src:null;
   if(demoVideo){
     const region=element('div','attachments');
-    region.append(miniVideo(demoVideo));body.append(region);
+    region.append(miniVideo(demoVideo));mediaRoot.append(region);
   }
+  if(!mediaRoot.children.length)mediaRoot.remove();
   if(b.text)body.append(element('p','',b.text));
   const field=b.fields||{};
   if(field.schedule){
@@ -860,7 +953,7 @@ function expand(id,{focus=true}={}){
     if(value)body.append(element('div','listing-price','Listed price: '+value));
   }
   const structured=new Set(['tags','presentation','schedule','poll','positions','price','demo',
-    'demoVersion','demoVideo','media']);
+    'demoVersion','demoVideo','media','primaryMediaIndex']);
   const other=element('dl','extra-attributes');
   let attributes=0;
   for(const [name,value] of Object.entries(field)){
@@ -881,18 +974,35 @@ function expand(id,{focus=true}={}){
   }
   if(field.poll?.options?.length){
     const choices=latestVotes('poll-choice',id);
-    const poll=element('div','poll');poll.append(element('strong','',field.poll.question));
+    const voted=choices.find(e=>e.payload.author===state.identity.author)?.payload.body.option;
+    const total=choices.length;
+    const poll=element('section','poll poll-card');
+    poll.setAttribute('aria-label','Post poll');
+    poll.append(element('div','poll-eyebrow','◉ POLL · '+total+
+      (total===1?' VOTE':' VOTES')));
+    poll.append(element('h3','poll-question',field.poll.question));
+    const options=element('div','poll-options');
     for(const [i,opt] of field.poll.options.entries()){
-      const tally=current.demo?(state.demoPollChoices.get(id)===i?1:0):
-        choices.filter(x=>x.payload.body.option===i).length;
-      poll.append(button(opt+' · '+tally+' vote(s)',()=>{
-        if(current.demo){
-          state.demoPollChoices.set(id,i);
-          expand(id,{focus:false});
-          toast('Preview vote recorded locally (not published).');
-        }else pollVote(id,i);
-      }));
-    }body.append(poll);
+      const tally=choices.filter(e=>e.payload.body.option===i).length;
+      const percent=total?Math.round(tally/total*100):0;
+      const selected=voted===i;
+      const buttonEl=button('',async()=>{
+        await pollVote(id,i);
+        if(state.selected===id)redrawCurrentWithoutScroll(id);
+      },'poll-option'+(selected?' selected':''));
+      buttonEl.setAttribute('aria-pressed',String(selected));
+      buttonEl.setAttribute('aria-label',opt+': '+tally+
+        (tally===1?' vote':' votes')+' ('+percent+' percent)');
+      const fill=element('span','poll-option-fill');
+      fill.style.width=percent+'%';
+      const text=element('span','poll-option-text',
+        (selected?'✓ ':'○ ')+opt);
+      buttonEl.append(fill,text,
+        element('span','poll-option-count',tally+' · '+percent+'%'));
+      options.append(buttonEl);
+    }
+    poll.append(options,element('p','poll-foot','Select an option to publish your signed vote. Results count the latest signed vote per author.'));
+    body.append(poll);
   }
   const tags=element('div','label-row');
   const allTags=recognizedTags(current.event);
@@ -930,7 +1040,6 @@ function expand(id,{focus=true}={}){
     if(!validTag(tag))return toast('Invalid tag name');
     tagVote(id,tag,1);
   },'tag-add'));
-  body.append(tags);
   const votes=element('div','reactions');
   const chosenReaction=latestVotes('reaction',id).find(event=>
     event.payload.author===state.identity.author)?.payload.body.value||null;
@@ -980,6 +1089,10 @@ function expand(id,{focus=true}={}){
     body.append(votes);
     markAudit(body,current);renderReplies(body,current.event);
   }
+  // Primary media first, then headline and provenance, voting controls,
+  // tag chips, prose/poll/attributes and finally signed discussion.
+  // No close button: click the selected grid tile again or press Escape.
+  metadata.after(votes,tags);
   row.append(left,body,right);panel.append(row);
   // Insert below the *actual rendered CSS grid row*, including mixed tiles.
   const top=card.offsetTop;let end=card;
@@ -987,6 +1100,7 @@ function expand(id,{focus=true}={}){
     if(next.offsetTop!==top)break;end=next;
   }
   end.after(panel);
+  syncAudioPlayers();
   if(focus){card.focus({preventScroll:true});alignGridRow(card);}
 }
 function navigate(direction){
@@ -1243,6 +1357,77 @@ function renderGroupList(){
     section.append(controls);box.append(section);
   }
 }
+let composerPreviewObjectURLs=[];
+function clearComposerPreview(){
+  for(const url of composerPreviewObjectURLs)URL.revokeObjectURL(url);
+  composerPreviewObjectURLs=[];
+  $('composePreviewContent').replaceChildren();
+  $('composePermanentAck').checked=false;
+  $('confirmPublishPost').disabled=true;
+}
+function checkComposeInputs(){
+  const space=$('composeSpace').value.trim();
+  if(!safeSpace(space))throw Error('Invalid namespace');
+  const title=$('composeTitle').value.trim(),text=$('composeText').value.trim();
+  const files=[...$('composeFiles').files];
+  if(!title&&!text&&!files.length)throw Error('Provide a headline, text or image');
+  if(files.length>3)throw Error('Maximum three images per test post');
+  for(const file of files)
+    if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>256*1024)
+      throw Error('Example image uploader supports JPEG/PNG/WebP up to 256 KiB each.');
+  const options=$('composePollOptions').value.split(/\n/).map(x=>x.trim()).filter(Boolean);
+  if($('composePollQuestion').value.trim()&&options.length<2)
+    throw Error('Polls need at least two options');
+  customComposeFields();
+  return {space,title,text,files,options};
+}
+function openComposePreview(event){
+  event.preventDefault();
+  const error=$('composeError');
+  try{
+    const input=checkComposeInputs();
+    error.hidden=true;
+    clearComposerPreview();
+    const region=$('composePreviewContent');
+    const heading=element('h2','',input.title||'Untitled post');
+    const detail=element('div','preview-post-meta',
+      '/'+input.space+' · '+$('composePresentation').selectedOptions[0].textContent);
+    region.append(detail,heading);
+    if(input.text)region.append(element('p','preview-post-text',input.text));
+    const tags=$('composeTags').value.trim();
+    if(tags)region.append(element('div','preview-post-tags',tags.split(',').filter(Boolean)
+      .map(x=>'#'+x.trim()).join('  ')));
+    const files=input.files;
+    if(files.length){
+      const gallery=element('div','compose-preview-gallery');
+      const label=element('strong','','Primary image (chosen thumbnail)');
+      gallery.append(label);
+      for(const [index,file] of files.entries()){
+        const card=element('label','compose-preview-media');
+        const radio=document.createElement('input');
+        radio.type='radio';radio.name='composePrimaryImage';
+        radio.value=String(index);
+        radio.checked=index===Math.min(Math.max(0,Number($('composePrimaryIndex').value)||0),files.length-1);
+        radio.onchange=()=>$('composePrimaryIndex').value=radio.value;
+        const image=document.createElement('img');
+        const url=URL.createObjectURL(file);composerPreviewObjectURLs.push(url);
+        image.src=url;image.alt='Local preview '+(index+1)+' '+file.name;
+        card.append(radio,image,element('span','',file.name));
+        gallery.append(card);
+      }
+      region.append(gallery);
+    }
+    if($('composePollQuestion').value.trim())
+      region.append(element('p','preview-post-meta',
+        'Poll · '+$('composePollQuestion').value.trim()+
+        ' · '+input.options.length+' options'));
+    const positions=$('composePositions').value.trim();
+    if(positions)region.append(element('p','preview-post-meta',
+      'Open positions · '+positions.replace(/\n/g,', ')));
+    $('composePreviewError').hidden=true;
+    $('composePreviewDialog').showModal();
+  }catch(err){error.hidden=false;error.textContent=err.message;toast(err.message);}
+}
 function updateComposeType(){
   $('composePriceWrap').hidden=$('composePresentation').value!=='offer';
 }
@@ -1439,7 +1624,28 @@ function bind(){
   $('disconnectPeers').onclick=async()=>{
     state.mesh.disconnect();state.peers=[];state.autoDemoPeerDisabled=true;await store();$('peerURLs').value='';render();toast('Disconnected; local posts and backups remain.');
   };
-  $('postForm').onsubmit=compose;
+  $('postForm').onsubmit=openComposePreview;
+  $('composePermanentAck').onchange=()=>{
+    $('confirmPublishPost').disabled=!$('composePermanentAck').checked;
+  };
+  $('editPostPreview').onclick=()=>{
+    $('composePreviewDialog').close();
+    clearComposerPreview();
+  };
+  $('closeComposePreview').onclick=$('editPostPreview').onclick;
+  $('confirmPublishPost').onclick=async()=>{
+    if(!$('composePermanentAck').checked)return;
+    $('confirmPublishPost').disabled=true;
+    await compose({preventDefault(){}});
+    if($('composeError').hidden){
+      $('composePreviewDialog').close();
+      clearComposerPreview();
+    }else{
+      $('composePreviewError').hidden=false;
+      $('composePreviewError').textContent=$('composeError').textContent;
+      $('confirmPublishPost').disabled=false;
+    }
+  };
   document.addEventListener('focusout',event=>{
     if(state.deferredDuringComment && event.target.closest?.('.comment-form')){
       state.deferredDuringComment=false;
@@ -1499,6 +1705,8 @@ async function compose(event){
   const buttonEl=$('submitPost'),error=$('composeError');
   error.hidden=true;buttonEl.disabled=true;
   try{
+    if(!$('composePermanentAck').checked)throw Error('Review the permanence notice and confirm before publishing.');
+    checkComposeInputs();
     const space=$('composeSpace').value.trim(),title=$('composeTitle').value.trim(),text=$('composeText').value.trim();
     if(!safeSpace(space))throw Error('Invalid namespace');
     const files=[...$('composeFiles').files];
@@ -1511,6 +1719,8 @@ async function compose(event){
     if(!title&&!text&&!files.length)throw Error('Provide a headline, text or image');
     const media=await uploadMedia(files);
     const fields={tags,presentation:$('composePresentation').value};
+    if(media.length)fields.primaryMediaIndex=
+      Math.min(media.length-1,Math.max(0,Number($('composePrimaryIndex').value)||0));
     Object.assign(fields,customComposeFields());
     if(fields.presentation==='offer'){
       const price=$('composePrice').value.trim();
@@ -1522,6 +1732,7 @@ async function compose(event){
     await publish('post',{title,text,fields,media},{space});
     state.space=space;$('spaceName').value=space;await store();
     $('postForm').reset();
+    $('composePrimaryIndex').value='0';
     $('composeAttributeRows').replaceChildren();
     updateComposeType();
     close('postDialog');render();

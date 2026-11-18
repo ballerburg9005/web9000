@@ -211,4 +211,58 @@ Remaining important work: real Stake4Karma proof and adversarial anti-spam econo
 
 A real headless Chromium session on the HTTPS-hosted board (not merely a local mock server) confirmed 26 independently signed demo posts, one functioning custom audio tile, two video hover preview tiles, an active WebSocket test mirror, a third signed group charter named Open Media Circle with volunteered space recommendations, and the signed WEB9000 Demo Publisher profile. The selected group could be followed and its suggestions immediately appeared in the optional second namespace strip. The resulting personal page displayed 26 posts, four signed replies and received signed vote-score 5, with karma explicitly marked NOT VERIFIED. A 390px mobile viewport reported zero horizontal document overflow.
 
-The live test initially exposed that clicking Follow policy updated the group list but neglected to recompute the optional recommended namespace strip. This was fixed by rerendering the recommendation strip on follow/unfollow, not by refreshing the page. The reproducible optional operator test is in v2/network/live-ui-qa.mjs, invoked with npm run test:live-ui. It is deliberately not the core unit-test suite because it depends on independently operated public demo services.
+The live test initially exposed that clicking Follow policy updated the group list but neglected to recompute the optional recommended namespace strip. This was fixed by rerendering the recommendation strip on follow/unfollow, not by refreshing the page. The reproducible optional operator test is in v2/network/live-ui-qa.mjs, invoked with npm run test:live-ui. It is deliberately not the core unit-test suite because it depends on independently operated public demo services.## 2026-11-18: sixth UI refinement — further user corrections
+
+Direct user requirements, preserved for future agents:
+
+> "pls no huge grid cells like I have two now that consume 9 cells or such in mixed view new only the text posts can consume more cells it is meant to promote text because image/video si more catchy"
+
+> "sound player should work such that it continues playing when opening post and this is reflected in the post player not two isolated instances"
+
+> "no scrolling to comment upon write, on second thought disable all scrolling for commenting it just says where it was"
+
+> "pressing ++ or + etc should also never scroll page it just scrolled me to bottom"
+
+> "tooltips for the bubbles like this ☏ 1 what is this I need tooltip with more infos"
+
+> "the demo data you pushed it has videos that have images as thumbnails from other posts it makes no sense"
+
+> "no stopping sound when open->closing post"
+
+> "Choose a picture First image · 0 vote(s) Second image · 1 vote(s) Third image · 0 vote(s) this is not recognizable from UI design as a poll with the tabs very weird"
+
+> "and tags go below that vote bar"
+
+> "And there needs to be some reasonable assumptions about mixed galleries. Like all media can be mixed. I think picking video as main or picture for thumbnail and then opening posts the other stuff is like small grid scroll gallery below the post as attachments like sound/images. No the user must be able to pick which content is the primary one, but if he doesn't it is chosen by criteria by the system."
+
+> "And for posting there is a preview screen, and a box to check I understand that information in the system cannot be deleted."
+
+> "With the video player that is not thumbnail don't do the controls just this bar that can be dragged and a play/pause custom transparent slightly black with volume slider in bottom left."
+
+Additional direct follow-ups:
+
+> "make the text one setting bigger like the images they are distracting and for comments also only what people actually wrote ... perhaps you can also dim the content grid like 30% black if there is text-only post but not sure if that obstructs usage"
+
+> "and perhaps more top/bottom padding for the text so it pops more, like text posts have more value in the presentation ... in actuality it is a content platform and to promote important discussions and ideas, like the ideamarket thing where you can describe ideas like crowdsourcer and then attract people to fill roles like activism etc. political group organization"
+
+> "oh another thing when closing a post and the scroll was such that more than the top row was shown then don't reset the scroll only when less than top row was shown"
+
+> "look, the image/media goes on top then this [title, author, signed provenance, ratings, tags]"
+
+> "and remove close"
+
+Implemented in the development branch:
+
+1. Mixed grid: only text-first discussion/idea posts WITHOUT images/audio/video get the wide three-column treatment. Image and media posts stay compact, even when their preview is unavailable. Text is one step larger with generous vertical padding and a subtle gold-accented reading surface, without dimming the entire imageboard. Idea posts may include positions/roles.
+2. Audio: one shared page-wide audio engine provides sound for compact and expanded mini-player controls. Opening, closing or rerendering a post does not stop or restart playback. Tile and article seek/play state are synchronized.
+3. Scroll behavior: commenting and reacting do not explicitly scroll the document. The click-to-close action preserves scroll when most of the selected row remains visible; if the row is clipped, it aligns the row under the sticky header. Opening and keyboard navigation continue to align the selected row.
+4. Bubble tooltips describe meaningful attributes, including the direct signed-comment count behind ☏ N. Never use unexplained debug overlays.
+5. Demo video previews use the video asset's own muted first frame and hover animation, never a photo CID belonging to another example. The expanded player has minimal translucent play/pause, seek and volume controls.
+6. Polls have a recognizable question header, separate choices, latest signed vote counts, percentages and selected-state feedback. Tag pills go BELOW the reaction/report/audit bar.
+7. Ordinary composer has a preview before publication and an explicit unchecked permanence acknowledgment. Publication requires consent. Uploads occur only after confirmation. A selected primary image index is signed and honored by gallery and thumbnail; absent selection, first image is the fallback.
+8. Expanded post ordering was explicitly corrected again: primary media first, then headline, metadata, reaction/report/audit bar, tags, written body, structured data and signed comments. No visible Close button; the selected tile or Escape closes the post. The UI regression asserts this DOM order and absence of the button.
+9. Real nested comments continue to update without losing a draft; successful submission clears focus without scrolling, so newly published replies can become visible.
+
+Still incomplete, and must not be misrepresented: generic mixed audio/video/image attachment upload and arbitrary primary media types, safe media pinning and scanning, reversible publication/retraction policy, finished Ideamarket-style organization governance, and independently verified real Stake4Karma. The current composer supports a preferred PRIMARY IMAGE among up to three small image uploads; the demo audio/video assets are website-hosted, not pinned by the image-only IPFS peer. The permanence notice correctly says deletion from independent replicas cannot be guaranteed, not that revision requests will never be possible.
+
+TEST: 54 protocol/unit tests and the full real Chromium integration suite are mandatory before pushing; the integration test includes preview consent, selected-row close, media-first details, audio continuity, signed nested comments, audits, group charter creation, gallery and portable identity across three origins.
