@@ -1,7 +1,7 @@
 // WEB9000/2 portable signed events. No transport, server, namespace owner or gatekeeper.
 export const DOMAIN = 'WEB9000/event/v1';
 const utf8 = new TextEncoder();
-const kinds = new Set(['post','reply','label','endorse','group','policy','membership','invitation','retraction','proposal','vote','accept','reaction','tag-vote','poll-choice','profile']);
+const kinds = new Set(['post','reply','label','endorse','group','policy','membership','invitation','retraction','proposal','vote','accept','reaction','tag-vote','poll-choice','profile','media-provider']);
 const toB64 = a => typeof Buffer !== 'undefined' ? Buffer.from(a).toString('base64url') : btoa(String.fromCharCode(...a)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 const fromB64 = s => {
   if (typeof s !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(s)) throw Error('Invalid encoding');
@@ -60,6 +60,20 @@ export function validatePayload(p) {
        !['withdraw','restore'].includes(b.action)||
        (b.reason!==undefined&&(typeof b.reason!=='string'||b.reason.length>500)))
       throw Error('Invalid signed withdrawal/restore');
+  }
+  if(p.kind==='media-provider'){
+    // An independently signed, revocable CID availability CLAIM, not proof
+    // of storage, a mirror permission, or a browser download instruction.
+    const b=p.body;
+    const allowedURL=typeof b.gateway==='string'&&b.gateway.length<=512&&
+      /^https?:\/\/[^\s?#]+\/?$/.test(b.gateway);
+    if(!allowedURL || !['offer','withdraw'].includes(b.action) ||
+       !Array.isArray(b.cids)||b.cids.length<1||b.cids.length>32||
+       b.cids.some(cid=>typeof cid!=='string'||!/^ipfs:\/\/[A-Za-z0-9]{20,120}$/.test(cid)) ||
+       new Set(b.cids).size!==b.cids.length ||
+       !Number.isSafeInteger(b.expiresAt)||b.expiresAt<p.time||
+       b.expiresAt>p.time+7*86400000)
+      throw Error('Invalid media-provider availability claim');
   }
   if(p.kind==='profile'){
     const b=p.body;

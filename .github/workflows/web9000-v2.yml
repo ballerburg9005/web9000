@@ -40,6 +40,10 @@ jobs:
           node --check v2/classic.js
           node --check v2/network/smoke-classic.mjs
           node --check v2/network/media-node.mjs
+          node --check v2/network/mirror-media.mjs
+          node --check v2/network/media-quarantine.mjs
+          node --check v2/network/announce-media.mjs
+          node --check v2/core/media-discovery.js
           node --check v2/network/qualified-index.js
           node --check v2/network/smoke-qualified.mjs
       - name: Protocol and view tests
@@ -84,6 +88,9 @@ jobs:
         working-directory: v2/network
         timeout-minutes: 3
         run: npm run test:media
+      - name: Signed voluntary media-provider announcements through replaceable peer bridge
+        working-directory: v2/network
+        run: npm run test:media-providers
       - name: Real classic board UI across two website origins
         working-directory: v2/network
         timeout-minutes: 4

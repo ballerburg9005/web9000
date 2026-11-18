@@ -53,3 +53,32 @@ node --test media-node.test.mjs
 ```
 
 This is a bounded prototype for operator-reviewed mirroring, not a ready-made automatic volunteer-media network. A future browser opt-in must expose explicit scope, data budget, safety policy, persistent storage and upload bandwidth controls before it is enabled.
+
+## Signed provider discovery and reader-approved backup gateways (2026-11-18)
+
+WEB9000 now supports a **signed `media-provider` event** whose body contains an HTTPS/HTTP gateway base URL, 1–32 explicit `ipfs://CID` references, an `offer` or `withdraw` action, and an expiry no more than 7 days after the signed timestamp. Suggested namespace: `media-providers`. Each event is an ordinary cryptographically signed, immutable record carried by willing raw OrbitDB indexes. It does not prove that a peer actually retains the bytes, create an authoritative provider registry, grant ownership of a space, or authorize automatic replication. The latest signed claim per signer/gateway/CID supersedes older ones while active.
+
+**Browser choices are decisive.** The classic board's **Choose independent peers** dialog now has a primary media gateway, an optional list of up to seven additional explicitly approved backup gateways, and a list of received signed provider claims. Clicking *Add to backup list* only fills the address form; the user must click Connect to approve it. A signed announcement from even a trusted key cannot silently add a host to the allowed list. Unknown authors' binary attachments still require the reader's manual load action. Approved backups are attempted on image/video/audio load errors; the global audio engine remains shared across tile and expanded view.
+
+The optional media gateway provides `GET /have/<CID>`: HTTP 200 with a small JSON availability hint for a locally retained, unquarantined CID, or 404 if absent/locally quarantined. It does not download media bytes or authenticate an independently hosted peer's claim. It is *not* a list of all stored media.
+
+### Operator-controlled signed announcements
+
+An operator can create a separate, local, owner-only signing key for public provider announcements:
+
+```sh
+cd v2/network
+node announce-media.mjs init /path/to/media-provider.private.json
+node announce-media.mjs offer /path/to/media-provider.private.json https://your-node.example/media ipfs://<CID> > claim.json
+node announce-media.mjs publish wss://your-bridge.example/ws/ claim.json https://your-website.example
+```
+
+The `origin` parameter is optional and is meaningful only for an operator who is authorized by their own bridge's Origin filter; it is **not authentication**. Use `withdraw` instead of `offer` to publish a signed superseding withdrawal. By default these claims expire after 48 hours; repeat a claim explicitly if the peer still intends to serve the file. The key file contains a plaintext JWK private key stored with permission 0600; keep it in a private, backed-up operator-only location. **Never place it under a web-served directory or commit it.** The peer still freely decides whether to carry this signed record.
+
+This is transport-agnostic and indexes do not become discovery authorities; a reader can learn the same signed claim from any willing replica. Distribution of claims still requires an independently accessible peer or another portable-record exchange mechanism. There is no global DHT-based media provider search yet.
+
+### Verification, security boundaries and unfinished work
+
+The Chromium test makes the preferred gateway fail intentionally, then confirms retrieval from a user-approved secondary media node and tests the signed claim's presentation. Unit tests validate claims, bounded CID sets, expiry/withdrawal, signature tampering resistance, and zero automatic contact with unapproved claimed hosts. A separate Node test covers operator signing, publishing and acknowledgment through an independent WebSocket bridge.
+
+**Known limitation:** Browser `<img>`/`<video>`/`<audio>` playback via an HTTPS gateway currently does not cryptographically recompute/verify UnixFS CIDs from served bytes. Gateway trust is therefore still relevant. The operator-to-operator importer checks the destination's returned CID, but a malicious gateway could misrepresent data to an ordinary browser; stronger content verification remains necessary. Provider announcements are not proof of holdings. Opt-in background media pinning, multi-peer native IPFS block discovery/Bitswap, disk/bandwidth budgets and automatic expiry refresh have not been implemented; do not describe this as a finished decentralized media network.

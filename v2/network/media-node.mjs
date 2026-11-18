@@ -138,6 +138,22 @@ export async function createImageGateway({
     imageLimit:IMAGE_MAX,audioLimit:AUDIO_MAX,videoLimit:VIDEO_MAX});
    return;
   }
+  // Lightweight, per-CID availability hint. This is a local-manifest claim,
+  // not a network-wide registry, cryptographic proof of retained blocks, or
+  // an instruction for clients to fetch/replicate content.
+  const have=url.pathname.match(/^\/have\/([A-Za-z0-9]{20,120})$/);
+  if(req.method==='GET'&&have){
+   let entry=manifest[have[1]];
+   try{
+    if((await readOperatorQuarantine(localQuarantineFile)).has(have[1]))entry=null;
+   }catch(err){
+    console.error('Local availability policy:',err.message);
+    return send(res,503,{error:'Media peer policy unavailable'});
+   }
+   if(!entry)return send(res,404,{available:false});
+   return send(res,200,{available:true,cid:'ipfs://'+have[1],
+    type:entry.type,bytes:entry.bytes});
+  }
   if(req.method==='POST'&&url.pathname==='/upload'){
    if(!uploadEnabled)return send(res,403,{error:'Operator disabled media ingestion'});
    const type=String(req.headers['content-type']||'').split(';')[0].trim().toLowerCase();

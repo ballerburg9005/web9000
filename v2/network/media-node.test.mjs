@@ -75,6 +75,13 @@ test('explicit opt-in UnixFS media accepts 10 MiB bounded audio/video and suppor
   const sound=await soundResponse.json();
   assert.equal(sound.type,'audio/mpeg');
   assert.ok(sound.cid.startsWith('ipfs://'));
+  const present=await fetch(origin+'/have/'+sound.cid.slice(7));
+  assert.equal(present.status,200);
+  const descriptor=await present.json();
+  assert.equal(descriptor.available,true);
+  assert.equal(descriptor.cid,sound.cid);
+  assert.equal((await fetch(origin+'/have/'+('z'.repeat(60)))).status,404,
+    'a missing CID is not claimed as available');
   const soundBytes=await fetch(origin+'/ipfs/'+sound.cid.slice(7));
   assert.equal(soundBytes.status,200);
   assert.equal(soundBytes.headers.get('content-type'),'audio/mpeg');
@@ -85,6 +92,8 @@ test('explicit opt-in UnixFS media accepts 10 MiB bounded audio/video and suppor
   await changeOperatorQuarantine({file:quarantines,action:'add',cid:sound.cid,
     reason:'Local operator review (test)'});
   assert.equal((await fetch(origin+'/ipfs/'+sound.cid.slice(7))).status,403);
+  assert.equal((await fetch(origin+'/have/'+sound.cid.slice(7))).status,404,
+    'local quarantine hides availability claims from this operator');
   assert.equal((await fetch(origin+'/ipfs/'+sound.cid.slice(7),{method:'HEAD'})).status,403);
   assert.equal((await readOperatorQuarantine(quarantines)).size,1);
   await changeOperatorQuarantine({file:quarantines,action:'remove',cid:sound.cid});

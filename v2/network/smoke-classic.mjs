@@ -441,6 +441,43 @@ try{
  assert.equal(await b.$eval('.gallery-count',el=>el.textContent),'2 / 2');
  console.log('CLASSIC checkpoint 14: real multi-image gallery navigation');
 
+ // Discovery claims are metadata only. The reader explicitly adds this
+ // volunteer peer, and a broken preferred gateway falls back to the
+ // approved independent mirror. No unknown hostname is contacted.
+ await b.evaluate(()=>document.querySelector('.post.selected')?.click());
+ const signedProvider=await signEvent(demoIdentity,{kind:'media-provider',
+  space:'media-providers',body:{
+   gateway:'http://127.0.0.1:'+mediaGateway.port,
+   cids:['ipfs://'+demoCid],action:'offer',expiresAt:Date.now()+86400000
+  }});
+ await index.publish(signedProvider);
+ await eventually(()=>b.evaluate(()=>{
+   document.getElementById('joinNetwork').click();
+   const listed=document.getElementById('mediaProviderSuggestions')
+    .textContent.includes('CID claim');
+   document.getElementById('closeNetwork').click();
+   return listed;
+ }), 'signed voluntary provider hint visible without automatically using it');
+ await b.evaluate(()=>{
+   document.getElementById('joinNetwork').click();
+   document.querySelector('#mediaProviderSuggestions button').click();
+   document.getElementById('mediaPeerUrl').value='http://127.0.0.1:1';
+   document.getElementById('connectPeers').click();
+ });
+ await eventually(()=>b.evaluate((id,port)=>{
+   const img=document.querySelector('.post[data-id="'+id+'"] img.post-thumb');
+   return img?.naturalWidth>0&&img.src.startsWith('http://127.0.0.1:'+port+'/ipfs/');
+ },galleryRecord.id,mediaGateway.port),
+ 'browser recovers signed CID image from explicitly approved backup gateway',16000);
+ await b.evaluate(port=>{
+   document.getElementById('joinNetwork').click();
+   document.getElementById('mediaPeerUrl').value='http://127.0.0.1:'+port;
+   document.getElementById('mediaMirrorURLs').value='';
+   document.getElementById('connectPeers').click();
+ },mediaGateway.port);
+ console.log('CLASSIC checkpoint 14a: signed provider hints and approved-CID fallback');
+
+
  // The compact Clans panel must actually publish a signed founding charter.
  await b.evaluate(()=>{
    document.getElementById('clansButton').click();

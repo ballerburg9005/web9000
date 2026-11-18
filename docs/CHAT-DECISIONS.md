@@ -350,3 +350,15 @@ This distinction is **normative**, not an implementation detail:
 - The current independent media peer already persists uploads by CID; the browser currently retrieves media from one selected HTTP gateway, and multi-mirror CID discovery/failover, native libp2p IPFS-to-IPFS pin acquisition and browser-hosted mirroring are **not yet implemented**. Do not conflate available CID-addressed storage with full specialized multi-node media replication.
 
 Operator-local serving quarantine work (experimental) adds a *revocable* file-based refusal to deliver a CID from that specific HTTP peer, without changing the signed post or any other media node. This is not a universal deletion, does not guarantee physical blockstore garbage collection, and is not content screening. More capable opt-in media mirrors must be developed separately.
+
+## 2026-11-18: implementation pass — signed media-provider discovery and opt-in fallback
+
+The user authorized continuing WEB9000 development after specifically confirming that ordinary browsers mirror signed text/metadata and specialized volunteer IPFS clients/nodes mirror binaries, with voluntary user opt-in to more storage. This pass preserves that distinction.
+
+- A new `media-provider` signed event provides ephemeral, independently verifiable claims for specific media CIDs and a gateway URL (offer/withdraw, 32 CIDs maximum, 7-day maximum signed TTL). *Claims do not prove availability or grant authority; even a trusted claim cannot make a browser contact a new host by itself.*
+- The browser's peer dialog can list received signed provider claims, lets the user explicitly add manually approved backup gateways, and attempts approved backups for media after source failures. No accidental automatic binary replication or unreviewed-author media fetch is introduced.
+- A lightweight `GET /have/<CID>` from an individually operated media peer reports local inventory without downloading binary data; quarantined CIDs are not advertised.
+- An optional operator JWK signing/publishing CLI allows standalone peer operators to announce availability through any willing WebSocket bridge; its private key belongs to that operator.
+- Tests include anti-forgery/invalid event checks, CID-specific claim expiry/withdrawal, zero-contact policy for unapproved hosts, real Node bridge publication and full Chromium browser failover. Existing 10 MiB audio/video cap, separate media-operator quotas and experimental raw vs qualified indexes remain unchanged.
+
+**Important outstanding defects and scope:** Browser media bytes from a potentially malicious gateway are not independently checked against UnixFS CID, and an accepted provider claim is not proof of retrievability. Native IPFS multi-provider routing, browser pinning with explicit storage/bandwidth budgets, broader peer-discovery redundancy, rate/abuse review and a complete legal-media screening process remain unfinished. Do not claim automatic global media replication.

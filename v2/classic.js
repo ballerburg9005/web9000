@@ -13,11 +13,12 @@ import {deriveGroup} from './core/governance.js';
 import {buildPostLifecycles} from './core/lifecycle.js';
 import {mediaItems,primaryMedia,choosePrimaryMediaIndex,categoryForType,
   validateLocalUploads} from './core/media.js';
+import {parseMediaGateways,claimsFromVerifiedEvents,chooseMediaGateways} from './core/media-discovery.js';
 
 const $=id=>document.getElementById(id);
 const state={
   db:null,identity:null,replica:new Replica({maxEvents:25000}),saved:[],outbox:[],
-  peers:[],mesh:null,suggested:[],mediaBase:null,
+  peers:[],mesh:null,suggested:[],mediaBase:null,mediaMirrors:[],
   space:'commons',profileAuthor:null,sort:'new',view:'grid',search:'',showUnverified:false,
   ownerHint:null,respectOwner:true,respectWithdrawals:true,selected:null,trust:[],ignoredLabels:[],audit:false,showMedia:false,
   demo:[],demoVotes:new Map(),demoPollChoices:new Map(),demoReplies:new Map(),demoFlags:new Map(),demoTagVotes:new Map(),
@@ -37,9 +38,34 @@ function normalizeMediaBase(raw){
     throw Error('Use HTTPS for a public media peer');
   return u.href.replace(/\/$/,'');
 }
-function mediaURL(cid){
-  return state.mediaBase?.replace(/\/$/,'')+'/ipfs/'+encodeURIComponent(cid.slice(7));
+const mediaRouteCache=new Map();
+function mediaCandidates(cid){
+  const cacheKey=[cid,state.mediaBase,...state.mediaMirrors,...state.trust,
+    state.identity?.author,state.replica.size,Math.floor(Date.now()/60000)].join('|');
+  if(mediaRouteCache.has(cacheKey))return mediaRouteCache.get(cacheKey);
+  const claims=claimsFromVerifiedEvents(allEvents(),{cid});
+  const bases=chooseMediaGateways({cid,preferred:state.mediaBase,
+    approved:state.mediaMirrors,claims,securePage:location.protocol==='https:',
+    trustedAuthors:[state.identity?.author,...state.trust]});
+  const urls=bases.map(base=>base+'/ipfs/'+encodeURIComponent(cid.slice(7)));
+  if(mediaRouteCache.size>=200)mediaRouteCache.clear();
+  mediaRouteCache.set(cacheKey,urls);
+  return urls;
 }
+function mediaURL(cid){return mediaCandidates(cid)[0]||'';}
+// Requests are made ONLY to reader-approved hosts. The signed claim changes
+// fallback ranking, never authorizes visiting a previously unknown URL.
+function applyMediaSource(el,cid,onFailure){
+  const urls=mediaCandidates(cid);
+  let attempt=0;
+  el.onerror=()=>{
+    if(++attempt>=urls.length){el.onerror=null;onFailure?.();return;}
+    el.src=urls[attempt];
+    if(el.tagName==='VIDEO')el.load();
+  };
+  if(urls.length)el.src=urls[0];else onFailure?.();
+}
+
 function trustedForMedia(author){
   return author===state.identity?.author||state.trust.includes(author)||
     (state.space==='demo'&&author===state.demoAuthor);
@@ -203,6 +229,7 @@ function signedDemoMedia(payload){
 // Rendering or closing an article never creates a second sound source or
 // interrupts playback. Both controls observe the same transport.
 const sharedAudio=new Audio();
+const audioBackupRoutes=new Map();
 sharedAudio.preload='none';
 let activeAudioURL='';
 const absoluteAudioURL=source=>new URL(source,document.baseURI).href;
@@ -228,8 +255,20 @@ function syncAudioPlayers(){
 }
 for(const type of ['play','pause','timeupdate','loadedmetadata','ended','seeked'])
   sharedAudio.addEventListener(type,syncAudioPlayers);
-function miniAudio(source,{compact=false}={}){
+sharedAudio.addEventListener('error',()=>{
+  const urls=audioBackupRoutes.get(activeAudioURL)||[];
+  const next=urls.indexOf(sharedAudio.src)+1;
+  if(next>0&&next<urls.length){
+    sharedAudio.src=urls[next];sharedAudio.load();
+    void sharedAudio.play().catch(()=>{});
+  }else if(activeAudioURL)toast('This audio is unavailable from your selected media peers.');
+});
+function miniAudio(source,{compact=false,cid=null}={}){
   const src=absoluteAudioURL(source);
+  if(cid){
+    if(audioBackupRoutes.size>=250)audioBackupRoutes.clear();
+    audioBackupRoutes.set(src,mediaCandidates(cid));
+  }
   const wrap=element('div','mini-audio'+(compact?' compact':''));
   wrap.dataset.audioSrc=src;
   const play=button('▶',e=>{
@@ -262,10 +301,11 @@ function miniAudio(source,{compact=false}={}){
   wrap.append(play,waveform,progress,clock);
   return wrap;
 }
-function miniVideo(source){
+function miniVideo(source,cid=null){
   const wrap=element('div','mini-video-player');
   const video=document.createElement('video');
-  video.src=source;video.preload='metadata';video.muted=true;video.playsInline=true;
+  video.preload='metadata';video.muted=true;video.playsInline=true;
+  if(cid)applyMediaSource(video,cid);else video.src=source;
   video.className='mini-video-frame';
   const controls=element('div','mini-video-controls');
   const play=button('▶',()=>video.paused?
@@ -361,11 +401,11 @@ function tile(item,i,replyCounts){
       const src=mediaURL(primary.cid);
       if(primary.kind==='audio'){
         card.classList.add('sound-tile');
-        card.append(miniAudio(src,{compact:true}));
+        card.append(miniAudio(src,{compact:true,cid:primary.cid}));
       }else if(primary.kind==='video'){
         const frame=document.createElement('video');
         frame.className='post-thumb media-video-tile';
-        frame.src=src;frame.playsInline=true;frame.muted=true;
+        applyMediaSource(frame,primary.cid);frame.playsInline=true;frame.muted=true;
         frame.loop=true;frame.preload='metadata';
         frame.setAttribute('aria-label','Video thumbnail from your selected media peer');
         frame.onmouseenter=()=>frame.play().catch(()=>{});
@@ -374,9 +414,8 @@ function tile(item,i,replyCounts){
       }else{
         const img=document.createElement('img');
         img.className='post-thumb';img.loading='lazy';img.alt=b.title||'Trusted image';
-        img.src=src;
-        img.onerror=()=>img.replaceWith(element('div','post-reveal',
-          'Media unavailable · open to inspect'));
+        applyMediaSource(img,primary.cid,()=>img.replaceWith(element('div','post-reveal',
+          'Media unavailable · open to inspect')));
         card.append(img);
       }
     } else {
@@ -621,6 +660,7 @@ async function store(){
     setItem(state.db,'classic-view',state.view),
     setItem(state.db,'classic-show-media',state.showMedia),
     setItem(state.db,'classic-media-url',state.mediaBase),
+    setItem(state.db,'classic-media-mirrors',state.mediaMirrors),
     setItem(state.db,'classic-mock-mode',state.mockMode),
     setItem(state.db,'classic-mock-scores',state.mockKarma?.snapshot()||{}),
     setItem(state.db,'classic-followed-spaces',state.followedSpaces),
@@ -861,8 +901,8 @@ function showMultiImageGallery(body,post){
       const img=document.createElement('img');
       img.alt='Image '+(index+1)+' of '+cids.length;
       img.loading='eager';
-      img.src=mediaURL(cid);
-      img.onerror=()=>img.replaceWith(element('div','gallery-placeholder','Image unavailable from this independent media peer.'));
+      applyMediaSource(img,cid,()=>img.replaceWith(element('div','gallery-placeholder',
+        'Image unavailable from approved media peers.')));
       stage.append(img);
     }else{
       const placeholder=element('div','gallery-placeholder',
@@ -884,7 +924,7 @@ function showMultiImageGallery(body,post){
         const preview=document.createElement('img');
         preview.className='gallery-thumb-image';
         preview.loading='lazy';
-        preview.src=mediaURL(cids[j]);
+        applyMediaSource(preview,cids[j]);
         preview.alt='';
         b.replaceChildren(preview);
       }
@@ -922,16 +962,16 @@ function showMixedMediaGallery(body,post){
       const src=mediaURL(item.cid);
       if(item.kind==='image'){
         const image=document.createElement('img');
-        image.src=src;image.loading='eager';
+        image.loading='eager';
         image.alt='Image '+(selected+1)+' of '+items.length;
-        image.onerror=()=>image.replaceWith(element('div','gallery-placeholder',
-          'Image unavailable from your selected peer.'));
+        applyMediaSource(image,item.cid,()=>image.replaceWith(element('div','gallery-placeholder',
+          'Image unavailable from approved media peers.')));
         stage.append(image);
       }else if(item.kind==='audio'){
         stage.append(element('div','mixed-media-kind','♪ AUDIO · '+(selected+1)+' / '+items.length));
-        stage.append(miniAudio(src));
+        stage.append(miniAudio(src,{cid:item.cid}));
       }else if(item.kind==='video'){
-        stage.append(miniVideo(src));
+        stage.append(miniVideo(src,item.cid));
       }
     }else{
       const box=element('div','gallery-placeholder',
@@ -951,7 +991,7 @@ function showMixedMediaGallery(body,post){
       chip.setAttribute('aria-label',chip.title);
       if(other.kind==='image'&&allowed.has(other.cid)){
         const thumb=document.createElement('img');
-        thumb.className='gallery-thumb-image';thumb.src=mediaURL(other.cid);
+        thumb.className='gallery-thumb-image';applyMediaSource(thumb,other.cid);
         thumb.alt='';thumb.loading='lazy';chip.append(thumb);
       }else chip.textContent=(other.kind==='audio'?'♪':other.kind==='video'?'▶':'▣')+
         ' '+(index+1);
@@ -987,8 +1027,9 @@ function showMedia(body,post){
       if(!url){toast('No independent IPFS media gateway configured. The signed CID can be copied to another gateway.');return;}
       const img=document.createElement('img');
       img.loading='eager';img.alt='Explicitly loaded IPFS attachment';
-      img.src=mediaURL(cid);
-      img.onerror=()=>{img.replaceWith(element('p','','Image unavailable at this peer. CID is still present.'));};
+      applyMediaSource(img,cid,()=>{
+        img.replaceWith(element('p','','Image unavailable from approved peers. CID remains signed.'));
+      });
       wrap.replaceChildren(img);
     });
     if(state.mediaBase&&trustedForMedia(post.payload.author)){
@@ -1941,7 +1982,7 @@ function bind(){
   };
   $('addComposeAttribute').onclick=addComposeAttributeRow;
   $('closeComposer').onclick=()=>close('postDialog');$('cancelPost').onclick=()=>close('postDialog');
-  $('joinNetwork').onclick=()=>modal('networkDialog');$('closeNetwork').onclick=()=>close('networkDialog');
+  $('joinNetwork').onclick=()=>{renderMediaProviderSuggestions();modal('networkDialog');};$('closeNetwork').onclick=()=>close('networkDialog');
   $('suggestPeers').onclick=loadSuggestions;
   $('connectPeers').onclick=connectPeers;
   $('disconnectPeers').onclick=async()=>{
@@ -1985,6 +2026,32 @@ function bind(){
   document.addEventListener('keydown',onKey);
   window.addEventListener('resize',()=>state.selected&&scheduleRender());
 }
+function renderMediaProviderSuggestions(){
+  const target=$('mediaProviderSuggestions');
+  if(!target)return;
+  target.replaceChildren();
+  const entries=claimsFromVerifiedEvents(allEvents()).slice(0,20);
+  if(!entries.length){
+    target.append(element('small','','No signed provider claims in your currently synchronized records.'));
+    return;
+  }
+  const unique=[...new Map(entries.map(e=>[e.gateway,e])).values()];
+  for(const entry of unique){
+    const row=element('div','fine');
+    const trusted=entry.author===state.identity?.author||state.trust.includes(entry.author);
+    row.append(element('span','',(trusted?'Trusted signer · ':'Unverified signer · ')+
+      entry.gateway+' · CID claim, not proof · '+new Date(entry.expiresAt).toLocaleDateString()+' '));
+    row.append(button('Add to backup list',()=>{
+      try{
+        const text=[$('mediaMirrorURLs').value,entry.gateway].filter(Boolean).join('\n');
+        $('mediaMirrorURLs').value=parseMediaGateways(text,{
+          securePage:location.protocol==='https:'}).join('\n');
+        toast('Backup added for review. Click Connect to approve its use.');
+      }catch(error){toast(error.message);}
+    }));
+    target.append(row);
+  }
+}
 async function loadSuggestions({silent=false}={}){
   try{
     const data=await(await fetch('./peers.json',{cache:'no-store'})).json();
@@ -2003,7 +2070,11 @@ async function connectPeers(){
   try{
     const urls=parsePeerUrls($('peerURLs').value,location.protocol==='https:');
     if(!urls.length)throw Error('Enter one or more peer addresses');
-    state.mediaBase=normalizeMediaBase($('mediaPeerUrl').value);
+    const mediaBase=normalizeMediaBase($('mediaPeerUrl').value);
+    const mediaMirrors=parseMediaGateways($('mediaMirrorURLs').value,{
+      securePage:location.protocol==='https:'});
+    state.mediaBase=mediaBase;
+    state.mediaMirrors=mediaMirrors.filter(url=>url!==mediaBase);
     state.peers=urls;
     state.autoDemoPeerDisabled=false;
     state.mesh.connect(urls,{spaces:['*']});
@@ -2158,6 +2229,11 @@ async function init(){
   state.view=await getItem(state.db,'classic-view')||'grid';
   state.showMedia=await getItem(state.db,'classic-show-media')===true;
   state.mediaBase=await getItem(state.db,'classic-media-url')||null;
+  try{
+    const savedMirrors=await getItem(state.db,'classic-media-mirrors');
+    state.mediaMirrors=parseMediaGateways(Array.isArray(savedMirrors)?savedMirrors.join('\n'):'',
+      {securePage:location.protocol==='https:'});
+  }catch{state.mediaMirrors=[];}
   state.mockKarma=new MockKarmaProvider(await getItem(state.db,'classic-mock-scores')||{});
   state.mockMode=await getItem(state.db,'classic-mock-mode')===true;
   state.followedSpaces=await getItem(state.db,'classic-followed-spaces')||['demo','commons'];
@@ -2202,6 +2278,7 @@ async function init(){
   $('respectWithdrawals').checked=state.respectWithdrawals;
   $('peerURLs').value=state.peers.join('\n');
   $('mediaPeerUrl').value=state.mediaBase||'';
+  $('mediaMirrorURLs').value=state.mediaMirrors.join('\n');
   bind();
   // Pre-fill independently replaceable peer suggestions, without connecting.
   // Consent is still required to open any WebSocket or upload images.
@@ -2217,6 +2294,8 @@ async function init(){
       const result=await ingest(e);
       if(result.accepted&&['group','proposal','vote','membership'].includes(e.payload.kind))
         void refreshGroups();
+      if(result.accepted&&e.payload.kind==='media-provider'&&$('networkDialog').open)
+        renderMediaProviderSuggestions();
       updateNetworkStatus();
     },
     onAck:(id,url)=>{
