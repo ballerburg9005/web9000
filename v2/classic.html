@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>WEB9000 — Commons image board</title>
+<link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="./classic.css"></head>
+<body>
+<header class="header" id="topHeader"><a class="logo" href="./">WEB9000</a>
+<nav class="menu" aria-label="Board navigation">
+<button type="button" data-sort="new" class="active">New</button><button type="button" data-sort="popular">Popular</button>
+<button type="button" data-sort="old">Old</button><button type="button" id="viewAudited">Audit</button>
+<input id="searchPosts" type="search" placeholder="Search posts, tags..." aria-label="Search posts">
+<button type="button" id="postNew" title="Create post">✎ Post</button>
+</nav>
+<button class="join-network" id="joinNetwork" type="button">Join Network</button>
+</header>
+<div class="classic-toolbar">
+<label>Space <input id="spaceName" type="text" value="commons" maxlength="180" placeholder="commons"></label>
+<button type="button" id="goSpace">Open</button>
+<label>View <select id="viewStyle"><option value="grid">Classic grid</option><option value="mixed">Mixed</option><option value="blog">Blog</option></select></label>
+<label><input type="checkbox" id="showUnverified"> Show unstaked / unverified (raw lane)</label>
+<span class="peer-state" id="peerStatus">Local, disconnected</span>
+<a href="./dashboard.html" class="subtle-link">Alternate dashboard</a>
+</div>
+<div class="board-notice" id="boardNotice">
+<strong>WEB9000 experimental board.</strong> The default view excludes unverified authors. There is no live Stake4Karma qualification service yet: to inspect actual test posts from other identities, deliberately enable <b>Show unstaked / unverified</b>. No website or namespace owner can invalidate the original signed records.
+</div>
+<div id="imageGrid" class="grid" aria-label="Posts"></div>
+<div id="feedStatus" class="feed-status"></div>
+
+<dialog id="networkDialog"><div class="dialog-inner">
+<div class="dialog-title"><strong>Choose independent peers</strong><button id="closeNetwork" type="button" aria-label="Close">×</button></div>
+<p>Peer listings are suggestions, never a mandatory registry or authority. Each peer may refuse to replicate content; anybody can run a different one. Browser WebSocket connections expose your IP to the chosen operator.</p>
+<label>Peer WebSocket addresses (one per line)<textarea id="peerURLs" rows="3" spellcheck="false" placeholder="wss://your-peer.example/ws/"></textarea></label>
+<div class="actions"><button id="suggestPeers" type="button">Load test peer list</button><button id="connectPeers" type="button" class="accent">Connect</button><button id="disconnectPeers" type="button">Disconnect</button></div>
+<p class="fine">Local-only posts queue until a willing peer acknowledges them. If an endpoint is offline, export and share signed records or try another peer.</p>
+</div></dialog>
+
+<dialog id="postDialog"><form id="postForm" class="dialog-inner">
+<div class="dialog-title"><strong>Make a post</strong><button id="closeComposer" type="button" aria-label="Close">×</button></div>
+<div class="two-cols"><label>Namespace <input id="composeSpace" maxlength="180" value="commons" required></label>
+<label>Presentation <select id="composePresentation"><option value="image">Image board</option><option value="text">Text / blog</option><option value="event">Event</option><option value="offer">Listing / offer</option><option value="job">Job / position</option></select></label></div>
+<label>Headline (optional) <input id="composeTitle" maxlength="160" placeholder="What is this about?"></label>
+<label>Text <textarea id="composeText" rows="4" maxlength="16000" placeholder="Write something. Plain text and paragraphs work."></textarea></label>
+<label>Images (optional) <input type="file" id="composeFiles" accept="image/jpeg,image/png,image/webp" multiple></label>
+<p class="fine">File uploads use the optional selected media peer, not a centralized website database. Images cannot be published as arbitrary inline code. If no upload peer is configured, publishing image files is refused with an explanation.</p>
+<label>Tags <input id="composeTags" placeholder="cats, memes, funny (comma separated)" maxlength="400"></label>
+<fieldset><legend>Schedule (optional)</legend><div class="two-cols"><label>Start <input type="datetime-local" id="composeStart"></label><label>End <input type="datetime-local" id="composeEnd"></label></div><label>Place <input id="composeLocation" maxlength="200" placeholder="Location / online"></label></fieldset>
+<fieldset><legend>Poll (optional)</legend><label>Question <input id="composePollQuestion" maxlength="180" placeholder="Choose one"></label><label>Options, one per line <textarea id="composePollOptions" rows="3" placeholder="Yes&#10;No"></textarea></label></fieldset>
+<fieldset><legend>Open positions (optional)</legend><label>Positions, one per line <textarea id="composePositions" rows="2" placeholder="Organizer&#10;Designer"></textarea></label></fieldset>
+<p id="composeError" role="alert" class="error" hidden></p>
+<div class="actions"><button class="accent" type="submit" id="submitPost">Sign & publish</button><button id="cancelPost" type="button">Cancel</button></div>
+</form></dialog>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<script type="module" src="./classic.js"></script>
+</body></html>
