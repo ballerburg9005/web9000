@@ -77,7 +77,7 @@ try{
  for(const [name,page] of [['a',a],['b',b]])page.on('pageerror',e=>errors.push(name+': '+e.message));
  await a.goto(originA,{waitUntil:'domcontentloaded'});await ready(a);
  console.log('CLASSIC checkpoint 1: initial page ready');
- assert.ok((await a.$('.post')).length>=20,'original visual demo board');
+ assert.ok((await a.$$('.post')).length>=20,'original visual demo board');
  console.log('CLASSIC checkpoint 2: demo tile grid rendered');
  await a.focus('.post[data-index="0"]');await a.keyboard.press('ArrowRight');
  assert.equal(await a.evaluate(()=>document.activeElement.dataset.index),'1','arrow navigates image tiles');
