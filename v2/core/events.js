@@ -36,7 +36,7 @@ export function validatePayload(p) {
     if (p.body.fields !== undefined && (!p.body.fields || typeof p.body.fields !== 'object' || Array.isArray(p.body.fields))) throw Error('Invalid custom fields');
   }
   if (p.kind === 'label') {
-    if (!/^sha256:[0-9a-f]{64}$/.test(p.body.target || '') ||
+    if (!(/^sha256:[0-9a-f]{64}$/.test(p.body.target || '') || /^ipfs:\/\/[A-Za-z0-9]{20,120}$/.test(p.body.target || '')) ||
         typeof p.body.tag !== 'string' || !/^[a-z0-9._:/-]{1,100}$/.test(p.body.tag) ||
         typeof p.body.reason !== 'string' || p.body.reason.length > 500) throw Error('Invalid moderation label');
   }

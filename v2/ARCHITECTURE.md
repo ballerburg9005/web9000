@@ -84,3 +84,5 @@ Use current `@orbitdb/core` 4.x, Helia 6.x and libp2p 3.x families, but **test t
 - https://github.com/orbitdb/orbitdb/blob/main/docs/GETTING_STARTED.md
 - https://libp2p.io/docs/browser-connectivity/
 - https://github.com/ballerburg9005/stake4karma
+
+Media-specific moderation may target a **signed post/event ID** or an **IPFS CID**, so known harmful bytes can be declined regardless of the number of posts referring to them. `core/media-policy.js` demonstrates locally chosen evidence thresholds, no implicit fetch and opt-in automatic **local** unpinning. It does not perform a remote takedown, magic detection of never-seen harmful media, or override another operator's storage decisions.

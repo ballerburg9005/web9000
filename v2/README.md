@@ -52,3 +52,7 @@ The exact OrbitDB index address is a discovery hint, **not** a globally protecte
 - Cross-browser testing, two-peer smoke tests, abusive peer/flood benchmarks, security audit
 
 More detail: [ARCHITECTURE.md](./ARCHITECTURE.md).
+
+## Opt-in media handling
+
+`core/media-policy.js` enforces a local-only preview/pinning decision: by default IPFS bytes do **not** automatically download, and independently trusted reviewer quorum is needed to quarantine by CID or source event. A node operator can choose `autoUnpin` with a local unpin handler; there is no protocol-wide deletion ability. This is policy code only: the UI does not fetch arbitrary IPFS content and a real node pin manager is not yet connected. Consult local legal counsel before operating a public media host.
