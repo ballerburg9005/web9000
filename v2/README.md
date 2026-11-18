@@ -119,3 +119,11 @@ The default `/v2/` is now the original WEB9000-style **classic image grid**: com
 ## Normative product requirements and future handoff
 
 **Important:** [Product requirements](../docs/PRODUCT-REQUIREMENTS.md) and [chat/decision ledger](../docs/CHAT-DECISIONS.md) govern direction, spam economics, namespace freedom, media safety and original UI acceptance criteria. Please read them before implementing changes. Features or design shortcuts in the prototype are not instructions to override the owner's words.
+
+## Classic UI test features and mock score provider
+
+The default board now uses original-style seven-column tiles, meaningful content badges, responsive full-width detail expansion and real-size preview media. Demo previews represent images, meetups, polls, videos, open positions, projects, marketplace offers and discussions; their preview votes, flags, tags and comments are **local-only** and do not count as signed network posts. Clicking the selected tile again collapses its detail; arrow keys and WASD navigate.
+
+To test a numeric karma provider without waiting for on-chain development, open **Test karma** from the classic toolbar, enable simulated scoring and assign a score to an ed25519 public identity. Scores of at least 10 affect this browser's local feed only. Nothing is broadcast, staked, checked on-chain or admitted into the separately curated qualified database. Disable mock mode to restore regular default trust behavior.
+
+The current main user-facing URL is https://syburg.my.to/web9000/v2/ and the alternate dashboard remains at /v2/dashboard.html. See the normative requirements and dated chat ledger linked above. UI regression tests now assert media dimensions and same-tile collapse rather than relying only on static element presence.
