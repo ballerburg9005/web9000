@@ -22,6 +22,7 @@ import {openPublicIndex} from './orbit-index.js';
 import {Replica} from '../core/replica.js';
 import {createBrowserBridge} from './browser-bridge.mjs';
 import {loadOrCreatePeerKey} from './peer-identity.mjs';
+import {createImageGateway} from './media-node.mjs';
 
 const dir=path.resolve(process.argv[2] || './.web9000-peer');
 const indexName=process.argv[3] || 'web9000-public-test';
@@ -41,7 +42,7 @@ const libp2p=await createLibp2p({
 });
 const ipfs=await createHelia({libp2p,blockstore:new LevelBlockstore(path.join(dir,'blocks'))});
 const orbitdb=await createOrbitDB({ipfs,directory:path.join(dir,'orbitdb')});
-let index,bridge;
+let index,bridge,media;
 try {
   if(remote) await libp2p.dial(multiaddr(remote));
   index=await openPublicIndex(orbitdb,indexName);
@@ -61,6 +62,13 @@ try {
   console.log('PEER ID',libp2p.peerId.toString(),'persisted at',path.join(dir,'peer-private-key.pb'));
   console.log('INDEX',index.address);
   console.log('BROWSER',bridge.url,'(WebSocket, optional; expose through WSS reverse proxy for HTTPS sites)');
+  if(process.env.WEB9000_MEDIA_SERVER==='1'){
+    media=await createImageGateway({ipfs,host:process.env.WEB9000_MEDIA_HOST||'127.0.0.1',
+      port:Number(process.env.WEB9000_MEDIA_PORT||8788),
+      manifestFile:path.join(dir,'media-manifest.json'),
+      uploadEnabled:process.env.WEB9000_MEDIA_UPLOAD==='1'});
+    console.log('MEDIA GATEWAY',media.host+':'+media.port,'uploads enabled:',media.uploadEnabled);
+  }
   console.log('WEB9000 bridge is not an authoritative registry or relay and does not serve media.');
   for(const addr of libp2p.getMultiaddrs())console.log('PEER',addr.toString());
   console.log('Initially ingested',initial.filter(x=>x.accepted).length,'signed events.');
@@ -81,6 +89,7 @@ try {
   }
 }catch(e){console.error('Peer error:',e);process.exitCode=1;}
 finally{
+  if(media)await media.close();
   if(bridge)await bridge.close();
   if(index)await index.close();
   await orbitdb.stop();

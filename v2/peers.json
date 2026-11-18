@@ -7,7 +7,8 @@
       "url": "wss://syburg.my.to/web9000/ws/",
       "scope": "Experimental public raw index",
       "operator": "Independent test infrastructure",
-      "notice": "Unaudited public test peer; do not upload sensitive or illegal media"
+      "notice": "Experimental public test peer: image upload opt-in, JPEG/PNG/WebP max 256 KiB, per-client daily rate limits. No automatic unknown-media downloads.",
+      "mediaUrl": "https://syburg.my.to/web9000/media/"
     }
   ]
 }
