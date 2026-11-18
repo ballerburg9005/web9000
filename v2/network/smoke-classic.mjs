@@ -44,7 +44,7 @@ async function eventually(fn,name,timeout=25000){
 }
 async function ready(page){
  try{
-   await page.waitForFunction(()=>document.documentElement.dataset.web9000ClassicReady==='1',{timeout:15000});
+   await page.waitForSelector('html[data-web9000-classic-ready="1"]',{timeout:15000});
  }catch(err){
    console.error('Classic readiness diagnostics',
      await page.evaluate(()=>({
@@ -89,7 +89,11 @@ try{
  await a.type('#composeTags','cats, memes');
  await a.type('#composePollQuestion','Is this a cat?');
  await a.type('#composePollOptions','Yes\nNo');
- await a.type('#composeStart','2030-04-05T15:30');
+ await a.evaluate(()=>{
+   const input=document.querySelector('#composeStart');
+   input.value='2030-04-05T15:30';
+   input.dispatchEvent(new Event('change',{bubbles:true}));
+ });
  await a.type('#composeLocation','A local meetup');
  await a.click('#submitPost');
  await a.waitForFunction(()=>[...document.querySelectorAll('.post-headline')].some(x=>x.textContent==='My first actual cats post'),{timeout:15000});
