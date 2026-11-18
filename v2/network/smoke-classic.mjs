@@ -43,7 +43,17 @@ async function eventually(fn,name,timeout=25000){
  throw Error('Timeout: '+name);
 }
 async function ready(page){
- await page.waitForFunction(()=>document.documentElement.dataset.web9000ClassicReady==='1',{timeout:30000});
+ try{
+   await page.waitForFunction(()=>document.documentElement.dataset.web9000ClassicReady==='1',{timeout:15000});
+ }catch(err){
+   console.error('Classic readiness diagnostics',
+     await page.evaluate(()=>({
+       url:location.href,html:document.documentElement.outerHTML.slice(0,600),
+       feed:document.querySelector('#feedStatus')?.textContent,
+       entryScript:document.querySelector('script[type=module]')?.src
+     })));
+   throw err;
+ }
 }
 async function connect(page,url){
  await page.click('#joinNetwork');await page.type('#peerURLs',url);
