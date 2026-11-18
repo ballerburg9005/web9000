@@ -143,6 +143,11 @@ try{
   await embedded.evaluate(()=>window.scrollTo(0,0));
   await sleep(250);
   await embedded.screenshot({path:path.join(artifacts,'embedded.png'),fullPage:true});
+  // A host-suggested custom namespace is also the default publication target.
+  await embedded.goto(thirdOrigin+'?space=arbitrary-other-websites-name&embed=1',{waitUntil:'domcontentloaded'});
+  await ready(embedded);
+  await embedded.click('#composeButton');
+  assert.equal(await embedded.$eval('#postSpace',el=>el.value),'arbitrary-other-websites-name');
 
   console.log('PASS three website origins publish, sync and override an owner-preferred view without granting a global veto');
 }finally{

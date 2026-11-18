@@ -250,6 +250,7 @@ function applySiteContext(){
   if(!ctx?.space)return;
   followSpace(ctx.space);
   state.space=ctx.space;
+  $('#postSpace').value=ctx.space;
   $('#siteSpaceName').textContent=ctx.space;
   $('#siteSpaceBanner').hidden=false;
   if(ctx.preferredAuthor){
@@ -465,7 +466,10 @@ function bindEvents(){
       refreshIdentityUI();render();newToast('New identity created; back it up now. Old endorsement is in your signed records.');
     }catch(error){newToast('Migration failed: '+error.message);}
   };
-  $('#composeButton').onclick=()=>$('#composer').showModal();
+  $('#composeButton').onclick=()=>{
+    $('#postSpace').value=state.space==='all'?'commons':state.space;
+    $('#composer').showModal();
+  };
   $('#closeCompose').onclick=()=>$('#composer').close();
   $('#closeDetail').onclick=()=>$('#detail').close();
   $('#noticeClose').onclick=()=>$('#notice').remove();
