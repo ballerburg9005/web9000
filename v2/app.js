@@ -33,7 +33,7 @@ const newToast = msg => {
 const nickname=author=>Object.entries(state.fixtureKeys).find(([,v])=>v.author===author)?.[0] || (author===state.identity?.author?'You':shortAuthor(author));
 function policy() {
   return {...DEFAULT_POLICY,followedSpaces:state.followedSpaces,showUnknown:state.showUnknown,
-    trustedAuthors:[...new Set([state.identity.author,...Object.values(state.fixtureKeys).filter(x=>x.name!=='outsider').map(x=>x.author),...(state.userTrusted || [])])],
+    trustedAuthors:[...new Set([state.identity.author,...Object.values(state.fixtureKeys).filter(x=>x.name!=='outsider').map(x=>x.author),...(state.userTrusted || []),...(state.honorSiteOwner&&state.siteContext?.preferredAuthor?[state.siteContext.preferredAuthor]:[])])],
     groups:state.compiledGroups,subscriptions:state.subscribed,
     reviewerWeights:{[state.identity.author]:1},
     ownerPreference:state.honorSiteOwner&&state.siteContext?.space&&state.siteContext?.preferredAuthor?

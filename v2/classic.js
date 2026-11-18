@@ -40,7 +40,7 @@ function button(label,handler,className=''){
 }
 const who=author=>author===state.identity?.author?'You':author==='demo'?'Demo fixture':shortAuthor(author);
 function choosePolicy(){
-  const known=[state.identity.author,...state.trust];
+  const known=[state.identity.author,...state.trust,...(state.ownerHint&&state.respectOwner?[state.ownerHint]:[])];
   const owner=state.ownerHint&&state.respectOwner?{[state.space]:state.ownerHint}:{};
   return {...DEFAULT_POLICY,followedSpaces:[state.space],trustedAuthors:known,
     showUnknown:state.showUnverified,ownerPreference:owner,
@@ -503,6 +503,17 @@ async function init(){
   const hint=readSiteContext(location.href);
   state.space=hint.space||await getItem(state.db,'classic-space')||'commons';
   state.ownerHint=hint.preferredAuthor;
+  // Owner-preferred views are a host suggestion, not a namespace write lock.
+  // The visitor can inspect suppressed records via Audit, and uncheck the
+  // owner view at any time from the compact board toolbar.
+  if(hint.preferredAuthor){
+    const label=element('label','','');
+    const checkbox=document.createElement('input');checkbox.type='checkbox';
+    checkbox.id='respectOwner';checkbox.checked=true;
+    label.append(checkbox,document.createTextNode(' Respect site owner’s presentation'));
+    $('peerStatus').before(label);
+    checkbox.onchange=()=>{state.respectOwner=checkbox.checked;render();};
+  }
   $('spaceName').value=state.space;
   $('showUnverified').checked=state.showUnverified;
   $('viewStyle').value=state.view;
