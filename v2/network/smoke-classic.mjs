@@ -164,6 +164,8 @@ try{
  assert.equal(await a.evaluate(()=>document.querySelectorAll('.comments-section').length),1);
  await b.goto(originB,{waitUntil:'domcontentloaded'});await ready(b);
  console.log('CLASSIC checkpoint 8: second browser ready');
+ await connect(b,bridge.url);
+ await eventually(()=>bridge.replica.list().some(e=>e.payload.body.title==='My first actual cats post'),'second origin connected to raw peer');
  const publishedAuthor=bridge.replica.list().find(e=>e.payload.body.title==='My first actual cats post').payload.author;
  await b.evaluate(author=>{
    document.getElementById('mockKarmaButton').click();
@@ -184,7 +186,6 @@ try{
    .some(e=>e.textContent==='My first actual cats post')),'mock mode disabled restores default unknown-author suppression');
  await b.evaluate(()=>document.getElementById('showUnverified').click());
  console.log('CLASSIC checkpoint 9: second browser opted into raw lane');
- await connect(b,bridge.url);
  await eventually(()=>b.evaluate(()=>[...document.querySelectorAll('.post-headline')].some(x=>x.textContent==='My first actual cats post')),'remote signed classic post rendered');
  console.log('CLASSIC checkpoint 10: second browser received real post');
  await b.evaluate(()=>document.querySelector('.post[data-index="0"]').click());
