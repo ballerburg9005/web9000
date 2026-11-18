@@ -28,7 +28,7 @@ const allow = (session,event) => session.spaces?.has('*') || session.spaces?.has
  */
 export async function createBrowserBridge({
   index,replica=new Replica({maxEvents:30000}),
-  host='127.0.0.1',port=8787,maxClients=64,allowedOrigins=null
+  host='127.0.0.1',port=8787,maxClients=64,allowedOrigins=null,publicTestLimits=false
 }={}) {
   if (!index?.publish || !index?.loadInto || !index?.onUpdate) throw Error('Active OrbitDB index required');
   if(!Number.isSafeInteger(port)||port<0||port>65535)throw Error('Invalid browser bridge port');
@@ -46,6 +46,27 @@ export async function createBrowserBridge({
     server.once('error',reject);
   });
   const sessions=new Set();
+  // RAM-only, operator-defined caps protect the unaudited *test peer*.
+  // These are not global publication rules. Any user can host another peer.
+  const budgets=new Map();
+  function allowTestPublication(event,request){
+    if(!publicTestLimits)return {allowed:true};
+    const now=Date.now(),day=Math.floor(now/86400000);
+    // Since the bridge may be behind a reverse proxy, it receives a trusted
+    // visitor IP only if the operator configured X-Real-IP at that proxy.
+    const ip=request.headers['x-real-ip'] || request.socket.remoteAddress || 'unknown';
+    const author=event.payload.author,kind=event.payload.kind;
+    const actor=author+'|'+day,client='client:'+ip+'|'+day;
+    const entry=budgets.get(actor)||{post:0,reply:0,other:0};
+    const user=budgets.get(client)||{post:0,reply:0,other:0};
+    const key=kind==='post'?'post':kind==='reply'?'reply':'other';
+    const caps={post:5,reply:80,other:120};
+    if(entry[key]>=caps[key]||user.post+user.reply+user.other>=120)
+      return {allowed:false,reason:'This test mirror has reached its local daily rate cap'};
+    entry[key]++;user[key]++;budgets.set(actor,entry);budgets.set(client,user);
+    if(budgets.size>10000)for(const [key] of budgets){if(!key.endsWith('|'+day))budgets.delete(key);if(budgets.size<=8000)break;}
+    return {allowed:true};
+  }
   function announce(event) {
     for(const session of sessions)if(allow(session,event))wire(session.ws,{type:'event',event});
   }
@@ -102,6 +123,8 @@ export async function createBrowserBridge({
           }
           // A node may refuse to store any publication. That cannot revoke
           // an independently stored record or prevent another peer accepting it.
+          const budget=allowTestPublication(msg.event,request);
+          if(!budget.allowed){wire(ws,{type:'reject',reason:budget.reason,id:msg.event.id});return;}
           try{
             await index.publish(msg.event);
             await receive(msg.event);

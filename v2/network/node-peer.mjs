@@ -51,7 +51,8 @@ try {
   bridge=await createBrowserBridge({index,replica,
     host:process.env.WEB9000_WS_HOST||'127.0.0.1',
     port:process.env.WEB9000_WS_PORT===undefined?8787:Number(process.env.WEB9000_WS_PORT),
-    allowedOrigins:origins
+    allowedOrigins:origins,
+    publicTestLimits:process.env.WEB9000_PUBLIC_TEST==='1'
   });
   index.onUpdate(async ev=>{
     const result=await replica.ingest(ev);

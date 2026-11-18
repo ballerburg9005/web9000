@@ -12,7 +12,7 @@ const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const spaces={commons:'Commons',art:'Creative works',organize:'Organize',exchange:'Exchange',projects:'Projects'};
 const types=['All','Discussion','Art','Event','Offer','Project','Job'];
-const state={replica:new Replica(),identity:null,db:null,space:'all',type:'All',layout:'grid',sort:'new',search:'',showFiltered:false,showUnknown:true,subscribed:[],policy:null,selected:null,fixtureKeys:{},localIds:[],groupIds:{},compiledGroups:{},groupViews:[],userTrusted:[],followedSpaces:Object.keys(spaces),mesh:null,peerUrls:[],replicationScopes:Object.keys(spaces),pending:[],lastConnected:0,autoMirror:false,siteContext:null,honorSiteOwner:true,groupHeadChoices:{}};
+const state={replica:new Replica(),identity:null,db:null,space:'all',type:'All',layout:'grid',sort:'new',search:'',showFiltered:false,showUnknown:false,subscribed:[],policy:null,selected:null,fixtureKeys:{},localIds:[],groupIds:{},compiledGroups:{},groupViews:[],userTrusted:[],followedSpaces:Object.keys(spaces),mesh:null,peerUrls:[],replicationScopes:Object.keys(spaces),pending:[],lastConnected:0,autoMirror:false,siteContext:null,honorSiteOwner:true,groupHeadChoices:{}};
 // Moderation authority derives from signed group checkpoints, not hard-coded group objects.
 const previewContent=[
  {space:'art',type:'Art',title:'Some interesting visual experiments',text:'A small collection of sketches and procedural compositions. What should be explored next?',image:'../thumb/thumb11.jpg',fields:{media:'Image gallery',count:4},author:'maker'},
