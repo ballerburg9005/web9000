@@ -28,6 +28,9 @@ jobs:
           node --check v2/network/smoke.mjs
           node --check v2/core/media-policy.js
           node --check v2/test/media-policy.test.js
+          node --check v2/network/browser-mesh.js
+          node --check v2/network/browser-bridge.mjs
+          node --check v2/network/smoke-browser.mjs
       - name: Protocol and view tests
         working-directory: v2
         run: npm test
@@ -47,3 +50,7 @@ jobs:
         working-directory: v2/network
         timeout-minutes: 3
         run: npm run test:peers
+      - name: Browser WebSocket clients replicate through separate libp2p peers
+        working-directory: v2/network
+        timeout-minutes: 3
+        run: npm run test:browser-bridge
