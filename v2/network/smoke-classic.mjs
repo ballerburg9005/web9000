@@ -412,16 +412,16 @@ try{
  assert.equal(await b.$eval('.reactions .social-relation-action[data-social-relation="foe"]',
    el=>el.textContent),'Add foe');
  await b.click('.reactions .social-relation-action[data-social-relation="friend"]');
- assert.equal(await b.$eval('.reactions .social-relation-action[data-social-relation="friend"]',
-   el=>el.textContent),'Remove friend');
+ await eventually(()=>b.$eval('.reactions .social-relation-action[data-social-relation="friend"]',
+   el=>el.textContent==='Remove friend'),'local friend label applied before asserting');
  await b.click('.reactions .social-relation-action[data-social-relation="foe"]');
- assert.equal(await b.$eval('.reactions .social-relation-action[data-social-relation="foe"]',
-   el=>el.textContent),'Remove foe');
+ await eventually(()=>b.$eval('.reactions .social-relation-action[data-social-relation="foe"]',
+   el=>el.textContent==='Remove foe'),'local foe label applied before asserting');
  assert.equal(await b.$eval('.reactions .social-relation-action[data-social-relation="friend"]',
    el=>el.textContent),'Add friend','friend and foe must be mutually exclusive');
  await b.click('.reactions .social-relation-action[data-social-relation="foe"]');
- assert.equal(await b.$eval('.reactions .social-relation-action[data-social-relation="foe"]',
-   el=>el.textContent),'Add foe');
+ await eventually(()=>b.$eval('.reactions .social-relation-action[data-social-relation="foe"]',
+   el=>el.textContent==='Add foe'),'local foe label removed before asserting');
  assert.equal(bridge.replica.list().filter(e=>e.payload.kind==='endorse').length,0,
    'local friend/foe preferences must not leak a public social graph');
 
