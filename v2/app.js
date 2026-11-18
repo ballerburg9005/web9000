@@ -298,6 +298,7 @@ function card({event,decision}){
     else media.append(textEl('span','art-icon',({Event:'◷',Offer:'◇',Project:'⬡',Job:'✧',Art:'▦'}[kind]||'⌘')));
   }
   const typeBadge=textEl('span','badge-type',filtered?'FILTERED':kind.toUpperCase());media.append(typeBadge);
+  if(!filtered && p.body.media?.length)media.append(textEl('span','media-count',p.body.media.length+' IPFS reference(s)'));
   const body=textEl('div','post-body',''),meta=textEl('div','post-meta','');
   meta.append(textEl('span','space-chip',(spaces[p.space]||p.space)),textEl('span','post-time',howLong(p.time)));
   body.append(meta,textEl('h3','',filtered?'Record filtered by your rules':p.body.title),textEl('p','post-description',filtered?decision.reason:p.body.text));
@@ -333,7 +334,7 @@ function openDetail(event) {
   $('#detailTitle').textContent=decision?.visible?p.body.title:'Filtered record';
   $('#detailBody').textContent=decision?.visible?p.body.text:'Your subscribed rules filter this record. Its signed metadata remains available and the underlying event is not deleted.';
   const info=$('#detailInfo');info.replaceChildren();
-  for(const [key,val] of [['Event ID',event.id],['Author',p.author],['Space',p.space],['Type',p.kind],['Visibility',decision?.reason||'Unknown'],['Fields',decision?.visible?JSON.stringify(p.body.fields||{}):'(suppressed in filtered preview)']]){
+  for(const [key,val] of [['Event ID',event.id],['Author',p.author],['Space',p.space],['Type',p.kind],['Visibility',decision?.reason||'Unknown'],['Fields',decision?.visible?JSON.stringify(p.body.fields||{}):'(suppressed in filtered preview)'],['IPFS CIDs',decision?.visible?(p.body.media||[]).join(', ')||'None':'(suppressed)']]){
     const line=document.createElement('div');line.append(textEl('strong','',key+': '),textEl('code','',val));info.append(line);
   }
   $('#trustAuthor').textContent=state.policy.trustedAuthors.includes(p.author)?'Author already trusted':'Trust author';
@@ -486,7 +487,10 @@ function bindEvents(){
       const fieldsText=$('#postFields').value.trim(),fields=fieldsText?JSON.parse(fieldsText):{};
       if(!fields || typeof fields!=='object' || Array.isArray(fields))throw Error('Fields must be a JSON object');
       fields.uiType=({discussion:'Discussion',art:'Art',event:'Event',offer:'Offer',project:'Project',job:'Job'})[$('#postKind').value];
-      const event=await signEvent(state.identity,{space:$('#postSpace').value.trim(),body:{title:$('#postTitle').value,text:$('#postText').value,fields}});
+      const media=$('#postMedia').value.trim().split(/[\s,]+/).filter(Boolean);
+      const event=await signEvent(state.identity,{space:$('#postSpace').value.trim(),body:{
+        title:$('#postTitle').value,text:$('#postText').value,media,fields
+      }});
       await publishLocal(event);
       followSpace(event.payload.space);
       $('#composer').close();$('#composeForm').reset();state.space='all';state.type='All';render();newToast('Signed and saved locally. Export to share with independent peers.');

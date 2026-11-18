@@ -64,3 +64,12 @@ test('a claimed dictator view can hide even trusted outsiders, never revoke thei
  assert.equal(decide(post,[post],{...preferred,ownerAllowedAuthors:{'their-site':[other.author]}}).visible,true);
  assert.equal(await verifyEvent(post),true);
 });
+
+test('signed IPFS media attachments are references, not raw bytes',async()=>{
+ const author=await generateIdentity();
+ const ref='ipfs://bafybeigdyrzt3cu5z4z4bz3hyjipfxzabfqb4zl3nkrhuxuu7pn7efq3aa';
+ const p=await signEvent(author,{body:{title:'image',text:'Safe metadata only',media:[ref]}});
+ assert.equal(await verifyEvent(p),true);
+ assert.deepEqual(p.payload.body.media,[ref]);
+ await assert.rejects(signEvent(author,{body:{title:'bad',text:'x',media:['javascript:alert(1)']}}),/Media must be IPFS CIDs/);
+});

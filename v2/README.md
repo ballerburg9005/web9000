@@ -107,3 +107,7 @@ If an `owner=` key is supplied, the embedded board exposes a toggle to **ignore 
 ## Signed group forks and explicit reader choice
 
 Two simultaneously ratified amendments to the same signed charter are **separate branches**, not a database conflict that a privileged node can resolve. The frontend now exposes a branch selector for imported groups with multiple ratified heads, persists which head the reader chooses, and preserves subscriptions while a group temporarily disappears from discovery. The **View my rules** dialog displays the selected charters. In a conflicting state, the safest default is the founding rules until the reader explicitly selects a branch.
+
+## Image-board IPFS references
+
+Posts now accept up to 12 signed `ipfs://` CID references in the composer. The interface displays reference counts and CIDs, but intentionally does not download arbitrary media when opening a feed. Uploading and pinning actual bytes through an independently operated IPFS node is the next media milestone.
