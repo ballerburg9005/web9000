@@ -1,6 +1,6 @@
 // Browser-level test of the original classic imageboard interaction model.
 // Two unrelated web origins publish into one voluntary test peer.
-import {mkdtemp,rm,readFile,mkdir} from 'node:fs/promises';
+import {mkdtemp,rm,readFile,mkdir,writeFile} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,6 +23,7 @@ import {createBrowserBridge} from './browser-bridge.mjs';
 import {createImageGateway} from './media-node.mjs';
 import {Replica} from '../core/replica.js';
 import {generateIdentity,signEvent} from '../core/events.js';
+import {createGroupProof,verifyGroupProof} from '../core/group-proof.js';
 import {DEMO_CATALOG} from '../demo-catalog.js';
 import {CID} from 'multiformats/cid';
 import * as raw from 'multiformats/codecs/raw';
@@ -491,6 +492,59 @@ try{
     e.payload.body.name==='Chromium test cooperative'),'new signed group charter reaches raw peer');
  await eventually(()=>b.evaluate(()=>document.querySelector('#groupList')?.textContent.includes('Chromium test cooperative')),
     'new voluntary group appears in its creator UI');
+ const groupRecord=bridge.replica.list().find(e=>e.payload.kind==='group'&&
+   e.payload.body.name==='Chromium test cooperative');
+ assert.equal(groupRecord.payload.body.decisionPolicy?.mode,'timed-v1',
+   'new groups explicitly choose versioned timed governance, not mutable server settings');
+ await b.evaluate(()=>{
+   const section=[...document.querySelectorAll('.group-entry')].find(el=>
+     el.querySelector('.group-heading strong')?.textContent==='Chromium test cooperative');
+   const edit=section.querySelector('.group-edit');edit.open=true;
+   const fields=edit.querySelectorAll('input,textarea');
+   fields[0].value='Cooperative approved by signer';
+   fields[1].value='Signed members decide this description';
+   fields[2].value='demo, cats, makerspace, verified-space';
+   edit.querySelector('form').requestSubmit();
+ });
+ await eventually(()=>bridge.replica.list().some(e=>e.payload.kind==='proposal'&&
+   e.payload.body.group===groupRecord.id&&
+   e.payload.body.change.type==='set-group-info'),'signed group-info amendment reaches OrbitDB');
+ await eventually(()=>b.evaluate(()=>
+   document.querySelector('#groupList')?.textContent.includes('Cooperative approved by signer')),
+   'signed quorum-backed group info reaches the real browser',18000);
+ await eventually(async()=>{
+   const events=bridge.replica.list();
+   const update=events.find(e=>e.payload.kind==='proposal'&&
+     e.payload.body.group===groupRecord.id&&e.payload.body.change.type==='set-group-info');
+   return !!update&&events.some(e=>e.payload.kind==='vote'&&
+     e.payload.body.proposal===update.id&&e.payload.body.choice==='approve');
+ },'signed approval reaches the independently operated peer');
+ const groupProof=await createGroupProof(bridge.replica.list(),groupRecord.id);
+ assert.equal((await verifyGroupProof(groupProof)).information.name,
+   'Cooperative approved by signer');
+ const proofFile=path.join(base,'integration-group-proof.json');
+ await writeFile(proofFile,JSON.stringify(groupProof));
+ await b.$('#verifyGroupFile').then(input=>input.uploadFile(proofFile));
+ await b.evaluate(()=>document.querySelector('#verifyGroupButton').click());
+ await eventually(()=>b.evaluate(()=>
+   document.querySelector('#groupProofStatus')?.textContent.includes('VALID SIGNATURE CHAIN')),
+   'browser independently verifies a quorum-backed group proof',15000);
+ await b.evaluate(()=>{
+   const section=[...document.querySelectorAll('.group-entry')].find(el=>
+     el.querySelector('.group-heading strong')?.textContent==='Cooperative approved by signer');
+   const motion=section.querySelector('.group-motions');
+   motion.open=true;
+   motion.querySelector('input').value='Should we publish more public tutorials?';
+   motion.querySelector('textarea').value='Advisory only, 7-day signed voting window';
+   motion.querySelector('form').requestSubmit();
+ });
+ await eventually(()=>bridge.replica.list().some(e=>e.payload.kind==='proposal'&&
+   e.payload.body.group===groupRecord.id&&e.payload.body.change.type==='resolution'),
+   'independently signed time-boxed advisory motion crosses OrbitDB');
+ await eventually(()=>b.evaluate(()=>
+   document.querySelector('#groupList')?.textContent.includes('Should we publish more public tutorials?')),
+   'ordinary timed yes/no motion visible in browser UI',15000);
+ console.log('CLASSIC checkpoint 15a: signed group metadata ratification, offline JSON proof verification and 7-day motions');
  await b.evaluate(()=>document.getElementById('closeClans').click());
  console.log('CLASSIC checkpoint 15: group creation publishes an independent signed charter');
  await eventually(()=>b.evaluate(()=>document.querySelector('#recommendedSpaceLinks')?.textContent.includes('/makerspace')),

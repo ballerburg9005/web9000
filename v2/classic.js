@@ -10,6 +10,7 @@ import {MockKarmaProvider} from './core/mock-karma.js';
 import {exportIdentityBackup,importIdentityBackup} from './core/identity-backup.js';
 import {searchPosts,tagCloud,availableSpaces,postKind} from './core/search.js';
 import {deriveGroup} from './core/governance.js';
+import {createGroupProof,verifyGroupProof} from './core/group-proof.js';
 import {buildPostLifecycles} from './core/lifecycle.js';
 import {mediaItems,primaryMedia,choosePrimaryMediaIndex,categoryForType,
   validateLocalUploads} from './core/media.js';
@@ -23,7 +24,7 @@ const state={
   ownerHint:null,respectOwner:true,respectWithdrawals:true,selected:null,trust:[],ignoredLabels:[],audit:false,showMedia:false,
   demo:[],demoVotes:new Map(),demoPollChoices:new Map(),demoReplies:new Map(),demoFlags:new Map(),demoTagVotes:new Map(),
   mockKarma:null,mockMode:false,demoAuthor:null,demoAutoConnect:false,autoDemoPeerDisabled:false,
-  followedSpaces:['demo','commons'],showGroupSpaces:true,groupSubscriptions:[],groupViews:[],
+  followedSpaces:['demo','commons'],showGroupSpaces:true,groupSubscriptions:[],groupViews:[],groupHeads:{},
   searchFilters:{attribute:'all',includeTags:[],excludeTags:[],excludeKinds:[],minScore:0,customField:''},
   replyDrafts:new Map(),expandedTags:new Set(),editingPostId:null,editingMedia:[],editingFields:null,lastError:'',renderPending:false
 };
@@ -665,6 +666,7 @@ async function store(){
     setItem(state.db,'classic-mock-scores',state.mockKarma?.snapshot()||{}),
     setItem(state.db,'classic-followed-spaces',state.followedSpaces),
     setItem(state.db,'classic-group-subscriptions',state.groupSubscriptions),
+    setItem(state.db,'classic-group-heads',state.groupHeads),
     setItem(state.db,'classic-show-group-spaces',state.showGroupSpaces),
     setItem(state.db,'classic-auto-demo-peer-disabled',state.autoDemoPeerDisabled)
   ]);
@@ -1436,11 +1438,11 @@ function renderRecommendedSpaces(){
   const names=new Map();
   for(const group of state.groupViews){
     if(!state.groupSubscriptions.includes(group.id))continue;
-    const recommended=group.event.payload.body.recommendedSpaces||[];
+    const recommended=group.result.state.recommendedSpaces||[];
     for(const name of recommended){
       if(!safeSpace(name))continue;
       const sponsors=names.get(name)||[];
-      sponsors.push(group.event.payload.body.name);
+      sponsors.push(group.result.state.name);
       names.set(name,sponsors);
     }
   }
@@ -1509,32 +1511,79 @@ async function refreshGroups(){
     for(const event of charters){
       try{
         const result=await deriveGroup(events.filter(e=>['group','proposal','vote'].includes(e.payload.kind)),
-          event.id,{maxEvents:5000});
+          event.id,{maxEvents:5000,selectedHead:state.groupHeads[event.id]||null});
         if(result.found)next.push({id:event.id,event,result});
       }catch(error){console.warn('Invalid group charter',error);}
     }
-    state.groupViews=next.sort((a,b)=>a.event.payload.body.name.localeCompare(b.event.payload.body.name));
+    state.groupViews=next.sort((a,b)=>a.result.state.name.localeCompare(b.result.state.name));
     renderGroupList();renderRecommendedSpaces();
   }finally{groupRefreshPending=false;}
+}
+function downloadGroupProof(bundle,groupId){
+  const body=JSON.stringify(bundle,null,2)+'\n';
+  if(new TextEncoder().encode(body).byteLength>2*1024*1024)
+    throw Error('Proof is too large for the bounded local verifier (2 MiB)');
+  const blob=new Blob([body],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  try{
+    const link=document.createElement('a');
+    link.href=url;link.download='web9000-group-proof-'+groupId.slice(7,21)+'.json';
+    document.body.append(link);link.click();link.remove();
+  }finally{setTimeout(()=>URL.revokeObjectURL(url),60000);}
 }
 function renderGroupList(){
   const box=$('groupList');if(!box)return;
   box.replaceChildren();
-  if(!state.groupViews.length)box.append(element('p','groups-empty','No signed groups discovered at connected peers yet. Create one to start a voluntary group.'));
+  if(!state.groupViews.length)
+    box.append(element('p','groups-empty','No signed groups discovered at connected peers yet. Create one to start a voluntary group.'));
   for(const {id,event,result} of state.groupViews){
     const section=element('section','group-entry');
     const head=element('div','group-heading');
-    head.append(element('strong','',event.payload.body.name),
-      element('small','',result.state.members.length+' voting members · '+(event.payload.body.governance||'member democracy')));
+    head.append(element('strong','',result.state.name),
+      element('small','',result.state.members.length+' voting members · '+
+        (result.state.decisionPolicy?.mode==='timed-v1'?'7-day motions / safeguarded amendments':
+          'legacy signed-member quorum')));
     section.append(head);
-    if(event.payload.body.description)section.append(element('p','',event.payload.body.description));
-    section.append(element('small','group-key',id.slice(0,24)+'… · '+(result.heads.length>1?'multiple governance branches':'signed charter')));
+    if(result.state.description)section.append(element('p','',result.state.description));
+    section.append(element('small','group-key',id.slice(0,24)+'… · '+
+      (result.heads.length>1?'competing ratified branches':'independently signed governance')));
+    if(result.heads.length>1||state.groupHeads[id]){
+      const choice=element('select','group-branch');
+      choice.setAttribute('aria-label','Select ratified group history for '+result.state.name);
+      for(const candidate of [id,...result.heads.filter(head=>head!==id)]){
+        const stateFor=result.states.find(item=>item.head===candidate);
+        if(!stateFor)continue;
+        const option=document.createElement('option');
+        option.value=candidate;
+        option.textContent=(candidate===id?'Founding charter':'Revision '+stateFor.revision)+
+          ' · '+stateFor.name+' · '+candidate.slice(7,19);
+        option.selected=candidate===result.selectedHead;
+        choice.append(option);
+      }
+      choice.onchange=async()=>{
+        state.groupHeads[id]=choice.value;
+        await store();await refreshGroups();
+      };
+      section.append(element('small','','Reader-selected governance branch:'),choice);
+    }
     const controls=element('div','group-actions');
     const followed=state.groupSubscriptions.includes(id);
     controls.append(button(followed?'Following ✓':'+ Follow policy',async()=>{
       state.groupSubscriptions=followed?state.groupSubscriptions.filter(x=>x!==id):
         [...new Set([...state.groupSubscriptions,id])];
       await store();renderGroupList();renderRecommendedSpaces();
+    }));
+    controls.append(button('Export signed proof',async()=>{
+      try{
+        const records=allEvents().filter(e=>['group','proposal','vote'].includes(e.payload.kind));
+        const proof=await createGroupProof(records,id,{
+          head:result.ambiguous?null:result.selectedHead});
+        const report=await verifyGroupProof(proof);
+        if(!report.valid)throw Error(report.reason);
+        downloadGroupProof(proof,id);
+        toast('Exported '+report.includedEventCount+
+          ' signed records. Proof verifies the selected history, not a globally latest head.');
+      }catch(error){toast('Proof export: '+error.message);}
     }));
     const member=result.state.members.includes(state.identity?.author);
     const requested=allEvents().some(e=>e.payload.kind==='membership'&&
@@ -1545,6 +1594,81 @@ function renderGroupList(){
       try{await publish('membership',{group:id,action:'request'},{space:'groups'});await refreshGroups();}
       catch(error){toast('Could not request membership: '+error.message);}
     }));
+    section.append(controls);
+    if(result.ambiguous)section.append(element('p','',
+      'Different branches have quorum-backed signatures. This browser shows the founding charter until you choose a branch; no universal winner exists.'));
+    if(result.ratifications.length){
+      const ratified=element('details','group-certificates');
+      ratified.append(element('summary','','Signed approval evidence · '+result.ratifications.length));
+      for(const proof of result.ratifications.slice(-20)){
+        const row=element('p','',proof.changeType+' · '+proof.approved+'/'+
+          proof.required+' eligible member approvals · '+proof.proposal.slice(7,20));
+        row.title='Independent signatures included in exported branch proof; only members at the parent snapshot count';
+        ratified.append(row);
+      }
+      section.append(ratified);
+    }
+    if(member&&!result.ambiguous){
+      const edit=element('details','group-edit');
+      edit.append(element('summary','','Propose updated group information'));
+      const form=element('form','group-creator');
+      const nameLabel=element('label','','Group name');
+      const name=document.createElement('input');name.required=true;name.maxLength=80;name.value=result.state.name;
+      const descLabel=element('label','','Description');
+      const desc=document.createElement('textarea');desc.maxLength=2000;desc.rows=3;desc.value=result.state.description;
+      const spacesLabel=element('label','','Recommended spaces (comma separated)');
+      const spaces=document.createElement('input');spaces.maxLength=600;
+      spaces.value=result.state.recommendedSpaces.join(', ');
+      nameLabel.append(name);descLabel.append(desc);spacesLabel.append(spaces);
+      const submit=element('button','','Propose and sign approval');submit.type='submit';
+      form.append(nameLabel,descLabel,spacesLabel,submit);
+      form.onsubmit=async e=>{
+        e.preventDefault();submit.disabled=true;
+        try{
+          const proposal=await publish('proposal',{group:id,parent:result.selectedHead,
+            change:{type:'set-group-info',name:name.value.trim(),description:desc.value,
+              recommendedSpaces:parseCSV(spaces.value).slice(0,20)}},{space:'groups'});
+          await publish('vote',{proposal:proposal.id,choice:'approve'},{space:'groups'});
+          await refreshGroups();
+          toast('Signed group-information proposal published. Approval must reach member quorum.');
+        }catch(error){toast('Group amendment: '+error.message);}
+        finally{submit.disabled=false;}
+      };
+      edit.append(form);section.append(edit);
+      if(result.state.decisionPolicy?.mode==='timed-v1'){
+        const motionBox=element('details','group-motions');
+        motionBox.append(element('summary','','Propose a 7-day ordinary vote'));
+        const form=element('form','group-creator');
+        const titleLabel=element('label','','Question / decision');
+        const title=document.createElement('input');title.required=true;title.maxLength=160;
+        const textLabel=element('label','','Context');
+        const text=document.createElement('textarea');text.maxLength=2000;text.rows=3;
+        titleLabel.append(title);textLabel.append(text);
+        const submit=element('button','','Sign proposal');submit.type='submit';
+        form.append(titleLabel,textLabel,submit);
+        form.onsubmit=async e=>{
+          e.preventDefault();submit.disabled=true;
+          try{
+            const proposal=await publish('proposal',{group:id,parent:result.selectedHead,
+              change:{type:'resolution',title:title.value.trim(),text:text.value}},{space:'groups'});
+            await refreshGroups();
+            toast('7-day signed vote published. It does not change group authority.');
+          }catch(error){toast('Proposal failed: '+error.message);}
+          finally{submit.disabled=false;}
+        };
+        motionBox.append(form);section.append(motionBox);
+      }else{
+        section.append(button('Propose timed voting policy',async()=>{
+          try{
+            const proposal=await publish('proposal',{group:id,parent:result.selectedHead,
+              change:{type:'set-decision-policy',mode:'timed-v1'}},{space:'groups'});
+            await publish('vote',{proposal:proposal.id,choice:'approve'},{space:'groups'});
+            await refreshGroups();
+            toast('Policy change proposed. Existing charter remains until independently ratified.');
+          }catch(error){toast('Policy proposal: '+error.message);}
+        }));
+      }
+    }
     if(member){
       for(const req of allEvents().filter(e=>e.payload.kind==='membership'&&
         e.payload.body.group===id&&e.payload.body.action==='request'&&
@@ -1552,32 +1676,70 @@ function renderGroupList(){
         const row=element('div','group-request',shortAuthor(req.payload.author)+' requests membership');
         row.append(button('Propose admission',async()=>{
           try{
+            if(result.ambiguous)throw Error('Select one governance branch first');
             const proposal=await publish('proposal',{group:id,parent:result.selectedHead,
               change:{type:'add-member',author:req.payload.author}},{space:'groups'});
             await publish('vote',{proposal:proposal.id,choice:'approve'},{space:'groups'});
             await refreshGroups();
-          }catch(error){toast(error.message);}
+          }catch(error){toast('Admission failed: '+error.message);}
         }));
         section.append(row);
       }
-      for(const pending of result.pending.slice(0,12)){
+      for(const pending of result.pending.slice(0,20)){
         const proposal=allEvents().find(e=>e.id===pending.id);
-        if(!proposal||proposal.payload.body.change.type!=='add-member')continue;
+        if(!proposal||proposal.payload.body.change.type==='resolution')continue;
+        const snapshot=result.states.find(item=>item.head===proposal.payload.body.parent);
+        if(!snapshot?.members.includes(state.identity.author))continue;
         const already=allEvents().some(e=>e.payload.kind==='vote'&&
-          e.payload.body.proposal===pending.id&&e.payload.author===state.identity.author);
-        if(!already){
-          const row=element('div','group-request','Admission ballot for '+shortAuthor(proposal.payload.body.change.author));
-          for(const choice of ['approve','reject'])row.append(button(choice,async()=>{
+          e.payload.body.proposal===pending.id&&e.payload.author===state.identity.author&&
+          e.payload.body.choice==='approve');
+        const change=proposal.payload.body.change;
+        const description=change.type==='set-group-info'?'Group information: '+change.name:
+          change.type==='add-member'?'Admission: '+shortAuthor(change.author):
+          change.type.replaceAll('-',' ');
+        const progress=Number.isInteger(pending.required)?
+          ' · signatures '+pending.approved+'/'+pending.required:'';
+        const timeout=pending.closesAt?' · declared deadline '+
+          new Date(pending.closesAt).toLocaleDateString():'';
+        const row=element('div','group-request',description+progress+timeout+' · '+pending.reason);
+        if(!already)for(const choice of ['approve','reject'])row.append(button(choice,async()=>{
+          try{
             await publish('vote',{proposal:pending.id,choice},{space:'groups'});
             await refreshGroups();
-          }));
-          section.append(row);
-        }
+          }catch(error){toast('Ballot failed: '+error.message);}
+        }));
+        section.append(row);
       }
     }
-    section.append(controls);box.append(section);
+    for(const motion of (result.motions||[]).slice(-12)){
+      const row=element('div','group-motion');
+      row.append(element('strong','',motion.title));
+      if(motion.text)row.append(element('p','',motion.text));
+      const meaning=motion.status==='supported'?'Locally supported (advisory)':
+        motion.status==='insufficient-turnout'?'No valid turnout':
+        motion.status==='open'?'Voting open (local clock)':motion.status;
+      const meta=element('small','',meaning+' · For '+motion.yes+' · Against '+motion.no+
+        ' · turnout '+motion.participation+'/'+motion.required+' minimum · closes '+
+        new Date(motion.closesAt).toLocaleString());
+      meta.title='Signed timestamps do not establish independently witnessed real-world time. A different replica may have additional ballots.';
+      row.append(meta);
+      if(motion.status==='open'&&motion.eligibleAuthors.includes(state.identity?.author)){
+        const actions=element('div','group-actions');
+        for(const [choice,label] of [['approve','For'],['reject','Against']])
+          actions.append(button(label,async()=>{
+            try{
+              await publish('vote',{proposal:motion.proposal,choice},{space:'groups'});
+              await refreshGroups();
+            }catch(error){toast('Ballot failed: '+error.message);}
+          }));
+        row.append(actions);
+      }
+      section.append(row);
+    }
+    box.append(section);
   }
 }
+
 function resetComposition(){
   state.editingPostId=null;
   state.editingMedia=[];
@@ -1856,6 +2018,22 @@ function bind(){
     await connectPeers();
   };
   $('clansButton').onclick=()=>{renderGroupList();$('clansDialog').showModal();};
+  $('verifyGroupButton').onclick=async()=>{
+    const output=$('groupProofStatus'),file=$('verifyGroupFile').files?.[0];
+    if(!file){output.textContent='Choose a signed proof JSON file first.';return;}
+    output.textContent='Verifying independently signed records…';
+    try{
+      if(file.size>2*1024*1024)throw Error('Proof file exceeds 2 MiB verification limit');
+      const bundle=JSON.parse(await file.text());
+      const verified=await verifyGroupProof(bundle);
+      if(!verified.valid)throw Error(verified.reason);
+      output.textContent='VALID SIGNATURE CHAIN · '+verified.information.name+
+        ' · '+verified.votingMembers.length+' eligible members · '+
+        verified.ratifications.length+' ratified amendments · '+
+        verified.head.slice(0,25)+'… · Historical branch inclusion only; competing heads may exist.';
+    }catch(error){output.textContent='Verification failed: '+error.message;}
+  };
+
   $('closeClans').onclick=()=>$('clansDialog').close();
   $('createGroupForm').onsubmit=async e=>{
     e.preventDefault();
@@ -1863,8 +2041,10 @@ function bind(){
       const governance=$('groupGovernance').value;
       const name=$('groupName').value.trim();
       const q=Number($('groupQuorum').value);
+      const decisionPolicy=$('groupDecisionPolicy').value;
       const charter=await publish('group',{
         name,description:$('groupDescription').value.trim(),governance,
+        ...(decisionPolicy==='timed-v1'?{decisionPolicy:{mode:'timed-v1'}}:{}),
         quorum:{numerator:q,denominator:100},
         recommendedSpaces:parseCSV($('groupRecommendedSpaces').value)
       },{space:'groups'});
@@ -2238,6 +2418,11 @@ async function init(){
   state.mockMode=await getItem(state.db,'classic-mock-mode')===true;
   state.followedSpaces=await getItem(state.db,'classic-followed-spaces')||['demo','commons'];
   state.groupSubscriptions=await getItem(state.db,'classic-group-subscriptions')||[];
+  const groupHeads=await getItem(state.db,'classic-group-heads');
+  state.groupHeads=groupHeads&&typeof groupHeads==='object'&&!Array.isArray(groupHeads)?
+    Object.fromEntries(Object.entries(groupHeads).filter(([group,head])=>
+      /^sha256:[0-9a-f]{64}$/.test(group)&&/^sha256:[0-9a-f]{64}$/.test(head)).slice(0,100)):{};
+
   state.showGroupSpaces=await getItem(state.db,'classic-show-group-spaces')!==false;
   state.autoDemoPeerDisabled=await getItem(state.db,'classic-auto-demo-peer-disabled')===true;
   try{

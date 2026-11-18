@@ -94,6 +94,12 @@
   <div class="dialog-title"><strong>Clans & groups</strong><button id="closeClans" type="button" aria-label="Close">×</button></div>
   <p>Independent signed groups with their own democracies, moderators and local trust preferences. Following a group does not grant its members control over public spaces. Joining as a voting member requires the group's charter process.</p>
   <div id="groupList" class="group-list"></div>
+  <details><summary>Verify independently signed group proof</summary>
+    <p class="fine">Open an exported JSON bundle and verify its founding key, member approvals, quorum, and charter revision locally. A valid proof describes one ratified branch, not a global latest state.</p>
+    <input type="file" id="verifyGroupFile" accept=".json,application/json">
+    <button type="button" id="verifyGroupButton">Verify proof</button>
+    <p id="groupProofStatus" class="fine" aria-live="polite"></p>
+  </details>
   <details id="createGroupDetails"><summary>Create a group</summary>
     <form id="createGroupForm" class="group-creator">
       <label>Group name <input id="groupName" required maxlength="80" placeholder="e.g. Free cats cooperative"></label>
@@ -108,6 +114,11 @@
 <label>Approval threshold <select id="groupQuorum">
         <option value="50">Simple majority</option><option value="67">Two-thirds</option><option value="100">Unanimous</option>
       </select></label>
+<label>Decision rules <select id="groupDecisionPolicy">
+  <option value="timed-v1" selected>Timed motions · 7 days; safeguarded charter changes · 7–14 days</option>
+  <option value="legacy">Legacy permanent member-quorum approvals</option>
+</select></label>
+<p class="fine">Motions are advisory and need minimum turnout plus a majority of participating signers. Group information, membership and moderation authority require an absolute eligible-member signature threshold. No fake karma grants governance votes.</p>
       <button type="submit" class="primary-mini">Publish signed founding charter</button>
     </form>
   </details>

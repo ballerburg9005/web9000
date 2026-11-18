@@ -91,6 +91,16 @@ Media-specific moderation may target a **signed post/event ID** or an **IPFS CID
 
 - **Cryptographic data integrity:** signature-verified content-addressed Ed25519 publication into any string namespace. No signer can claim an exclusive database address.
 - **Independent group interpretation:** signed founder charter, signed member proposals and yes/no votes, quorum against a parent snapshot, no imposed canonical winner for ratified forks. Rejections cannot retroactively invalidate already approved changes. Local subscription activates selected reviewer appointments.
+  A versioned `timed-v1` charter mode has 7-day **advisory** For/Against motions
+  with minimum participant turnout, 7-day authenticated group-information changes,
+  and 14-day constitutional approvals requiring high absolute member thresholds.
+  Portable JSON group-state proofs let others check eligible Ed25519 ballots and
+  ratification without trusting the website. Browser readers independently choose
+  a valid fork. Legacy charters retain their original threshold rules.
+  **Signed timestamps are not independently witnessed time**, and mock karma has
+  no governance voting weight. The future dual democratic + capped independently
+  proven credibility tally is a design requirement, not an available verifier.
+  See [docs/GROUP-GOVERNANCE.md](../docs/GROUP-GOVERNANCE.md).
 - **Sponsorship anti-Sybil evidence:** signer-issued invitation + separately signed acceptance, bounded promotion, dampened multi-hop inherited trust, and viewer-chosen reviewer sanctions with local sponsor liability. This is not a blockchain stake verification and confers no publication gate.
 - **Media safety evidence:** label event or CID, distinct weighted reviewers, default no automatic byte fetch, optional local automatic unpin. Nothing unpins another operator's blocks.
 - **Portable identity:** password-encrypted backup and import using PBKDF2-SHA256/AES-256-GCM; extractable key must be protected from malicious hosting scripts.

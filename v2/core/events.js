@@ -106,6 +106,12 @@ export function validatePayload(p) {
         p.body.recommendedSpaces.some(space=>typeof space!=='string'||space.length<1||
           space.length>180||/[\x00-\x1f]/.test(space))))
       throw Error('Invalid group space recommendations');
+    if(p.body.decisionPolicy!==undefined&&(
+      !p.body.decisionPolicy||typeof p.body.decisionPolicy!=='object'||
+      Array.isArray(p.body.decisionPolicy)||
+      p.body.decisionPolicy.mode!=='timed-v1'||
+      Object.keys(p.body.decisionPolicy).some(key=>key!=='mode')
+    ))throw Error('Invalid versioned group decision policy');
     if (typeof p.body.name !== 'string' || !p.body.name.trim() || p.body.name.length > 80 ||
         !q || !Number.isInteger(q.numerator) || !Number.isInteger(q.denominator) ||
         q.denominator < 1 || q.denominator > 100 || q.numerator < 1 || q.numerator > q.denominator) throw Error('Invalid group charter');
@@ -113,12 +119,27 @@ export function validatePayload(p) {
   if (p.kind === 'proposal') {
     const b=p.body,c=b.change;
     if (!digest(b.group) || !digest(b.parent) || !c || typeof c !== 'object' || Array.isArray(c) ||
-      !['add-member','remove-member','set-quorum','appoint-reviewer','remove-reviewer','delegate','undelegate','set-label-rules'].includes(c.type)) throw Error('Invalid governance proposal');
+      !['add-member','remove-member','set-quorum','appoint-reviewer','remove-reviewer','delegate','undelegate','set-label-rules','set-group-info','resolution','set-decision-policy'].includes(c.type)) throw Error('Invalid governance proposal');
     if (['add-member','remove-member','appoint-reviewer','remove-reviewer'].includes(c.type) && !identity(c.author)) throw Error('Invalid member/reviewer identity');
     if (c.type==='appoint-reviewer' && (!Number.isFinite(c.weight) || c.weight <= 0 || c.weight > 100)) throw Error('Invalid reviewer weight');
     if (['delegate','undelegate'].includes(c.type) && (!digest(c.group) || c.group===b.group)) throw Error('Invalid delegation');
     if (c.type==='set-quorum' && (!Number.isInteger(c.numerator) || !Number.isInteger(c.denominator) || c.numerator < 1 || c.denominator > 100 || c.numerator > c.denominator)) throw Error('Invalid quorum');
     if (c.type==='set-label-rules' && (!Array.isArray(c.hideTags) || c.hideTags.length > 64 || c.hideTags.some(t=>typeof t!=='string' || !/^[a-z0-9._:/-]{1,100}$/.test(t)))) throw Error('Invalid label rules');
+    if (c.type==='resolution' && (
+      typeof c.title!=='string'||!c.title.trim()||c.title.length>160||
+      typeof c.text!=='string'||c.text.length>2000
+    ))throw Error('Invalid ordinary group resolution');
+    if (c.type==='set-decision-policy' && (
+      c.mode!=='timed-v1'||Object.keys(c).some(key=>!['type','mode'].includes(key))
+    ))throw Error('Invalid group decision policy transition');
+    if (c.type==='set-group-info' && (
+      typeof c.name!=='string'||!c.name.trim()||c.name.length>80||
+      typeof c.description!=='string'||c.description.length>2000||
+      !Array.isArray(c.recommendedSpaces)||c.recommendedSpaces.length>20||
+      c.recommendedSpaces.some(space=>typeof space!=='string'||space.length<1||
+        space.length>180||/[\x00-\x1f]/.test(space))||
+      new Set(c.recommendedSpaces).size!==c.recommendedSpaces.length
+    )) throw Error('Invalid group information amendment');
   }
   if (p.kind==='vote' && (!digest(p.body.proposal) || !['approve','reject'].includes(p.body.choice))) throw Error('Invalid governance vote');
   if (p.kind==='invitation' && (!identity(p.body.invitee) || typeof p.body.scope!=='string' || !p.body.scope || p.body.scope.length > 180 ||
