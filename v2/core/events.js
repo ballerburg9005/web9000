@@ -1,7 +1,7 @@
 // WEB9000/2 portable signed events. No transport, server, namespace owner or gatekeeper.
 export const DOMAIN = 'WEB9000/event/v1';
 const utf8 = new TextEncoder();
-const kinds = new Set(['post','reply','label','endorse','group','policy','membership','invitation','retraction']);
+const kinds = new Set(['post','reply','label','endorse','group','policy','membership','invitation','retraction','proposal','vote']);
 const toB64 = a => typeof Buffer !== 'undefined' ? Buffer.from(a).toString('base64url') : btoa(String.fromCharCode(...a)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 const fromB64 = s => {
   if (typeof s !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(s)) throw Error('Invalid encoding');
@@ -40,6 +40,28 @@ export function validatePayload(p) {
         typeof p.body.tag !== 'string' || !/^[a-z0-9._:/-]{1,100}$/.test(p.body.tag) ||
         typeof p.body.reason !== 'string' || p.body.reason.length > 500) throw Error('Invalid moderation label');
   }
+  // Governance identifiers reference immutable signed events, not claimable names.
+  const digest = x => typeof x === 'string' && /^sha256:[0-9a-f]{64}$/.test(x);
+  const identity = x => typeof x === 'string' && /^ed25519:[a-zA-Z0-9_-]{43}$/.test(x);
+  if (p.kind === 'group') {
+    const q=p.body.quorum;
+    if (typeof p.body.name !== 'string' || !p.body.name.trim() || p.body.name.length > 80 ||
+        !q || !Number.isInteger(q.numerator) || !Number.isInteger(q.denominator) ||
+        q.denominator < 1 || q.denominator > 100 || q.numerator < 1 || q.numerator > q.denominator) throw Error('Invalid group charter');
+  }
+  if (p.kind === 'proposal') {
+    const b=p.body,c=b.change;
+    if (!digest(b.group) || !digest(b.parent) || !c || typeof c !== 'object' || Array.isArray(c) ||
+      !['add-member','remove-member','set-quorum','appoint-reviewer','remove-reviewer','delegate','undelegate','set-label-rules'].includes(c.type)) throw Error('Invalid governance proposal');
+    if (['add-member','remove-member','appoint-reviewer','remove-reviewer'].includes(c.type) && !identity(c.author)) throw Error('Invalid member/reviewer identity');
+    if (c.type==='appoint-reviewer' && (!Number.isFinite(c.weight) || c.weight <= 0 || c.weight > 100)) throw Error('Invalid reviewer weight');
+    if (['delegate','undelegate'].includes(c.type) && (!digest(c.group) || c.group===b.group)) throw Error('Invalid delegation');
+    if (c.type==='set-quorum' && (!Number.isInteger(c.numerator) || !Number.isInteger(c.denominator) || c.numerator < 1 || c.denominator > 100 || c.numerator > c.denominator)) throw Error('Invalid quorum');
+    if (c.type==='set-label-rules' && (!Array.isArray(c.hideTags) || c.hideTags.length > 64 || c.hideTags.some(t=>typeof t!=='string' || !/^[a-z0-9._:/-]{1,100}$/.test(t)))) throw Error('Invalid label rules');
+  }
+  if (p.kind==='vote' && (!digest(p.body.proposal) || !['approve','reject'].includes(p.body.choice))) throw Error('Invalid governance vote');
+  if (p.kind==='invitation' && (!identity(p.body.invitee) || typeof p.body.scope!=='string' || !p.body.scope || p.body.scope.length > 180 ||
+      (p.body.expiresAt!==undefined && (!Number.isSafeInteger(p.body.expiresAt) || p.body.expiresAt < p.time)))) throw Error('Invalid invitation');
   if (p.kind === 'endorse' && (typeof p.body.subject !== 'string' || !/^ed25519:[a-zA-Z0-9_-]{43}$/.test(p.body.subject) || !['trust','distrust'].includes(p.body.action))) throw Error('Invalid endorsement');
   return p;
 }
