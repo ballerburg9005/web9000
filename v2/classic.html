@@ -74,6 +74,7 @@
 <label><input type="checkbox" id="showUnverified"> Show unstaked / unverified (raw lane)</label>
 <button id="identityButton" type="button" title="Your profile and portable signing identity">My account</button>
 <button id="mockKarmaButton" type="button">Test karma</button>
+<button id="debugConsoleButton" type="button" title="Inspect signed events, peer packets and personal relationships">Debug</button>
 <span id="mockModeLabel" class="mock-active" hidden></span>
 <span class="peer-state" id="peerStatus">Local, disconnected</span>
 <a href="./dashboard.html" class="subtle-link">Developer dashboard (experimental)</a>
@@ -123,6 +124,34 @@
     </form>
   </details>
   <div id="groupStatus" aria-live="polite"></div>
+</div></dialog>
+<dialog id="debugDialog" class="debug-dialog" aria-labelledby="debugTitle"><div class="dialog-inner">
+  <div class="dialog-title"><strong id="debugTitle">Decentralized debug console</strong><button id="closeDebug" type="button" aria-label="Close debug console">×</button></div>
+  <p>Local signed records, peer protocol packets and debug dumps. Signed content is shown exactly as received; transport frames may be truncated for memory safety. This console contains no private signing keys.</p>
+  <div id="debugSummary" class="debug-summary" aria-live="polite"></div>
+  <div class="debug-filters">
+    <label>Source <select id="debugSource">
+      <option value="events">Signed events</option><option value="network">Network packets</option>
+      <option value="dump">Post / comment dump</option><option value="social">Friends / foes</option>
+      <option value="system">Peers, IPFS, replica & policy</option>
+    </select></label>
+    <label>Kind / packet type <select id="debugKind"><option value="">All kinds</option></select></label>
+    <label>Space <input id="debugSpace" placeholder="Any namespace"></label>
+    <label>Author <input id="debugAuthor" placeholder="ed25519:…"></label>
+    <label>Search raw JSON <input id="debugSearch" placeholder="CID, event ID, text…"></label>
+    <label>Limit <select id="debugLimit"><option>50</option><option selected>150</option><option>300</option><option>500</option></select></label>
+  </div>
+  <div class="debug-actions">
+    <button type="button" id="debugRefresh">Refresh</button>
+    <button type="button" id="debugCopy">Copy selected JSON</button>
+    <button type="button" id="debugExport">Download filtered JSON</button>
+    <button type="button" id="debugClear">Clear network trace</button>
+  </div>
+  <div class="debug-layout">
+    <div id="debugEntries" class="debug-entries" role="list" aria-label="Inspectible signed and network records"></div>
+    <pre id="debugRaw" class="debug-raw" tabindex="0" aria-label="Selected raw JSON"></pre>
+  </div>
+  <p id="debugStatus" class="fine" aria-live="polite"></p>
 </div></dialog>
 <dialog id="networkDialog"><div class="dialog-inner">
 <div class="dialog-title"><strong>Choose independent peers</strong><button id="closeNetwork" type="button" aria-label="Close">×</button></div>

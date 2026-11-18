@@ -23,15 +23,25 @@ export class BrowserPeerMesh{
   #connections=new Map();
   #generation=0;
   constructor({WebSocketImpl=globalThis.WebSocket,onEvent=async()=>{},onAck=()=>{},onStatus=()=>{},onError=()=>{},
-      getPending=()=>[],securePage=false}={}){
+      getPending=()=>[],securePage=false,onPacket=()=>{}}={}){
     if(!WebSocketImpl)throw Error('WebSocket implementation missing');
     this.WS=WebSocketImpl;
     this.onEvent=onEvent;this.onAck=onAck;this.onStatus=onStatus;this.onError=onError;
-    this.getPending=getPending;this.securePage=securePage;
+    this.getPending=getPending;this.securePage=securePage;this.onPacket=onPacket;
     this.scopes=['*'];this.urls=[];this.syncedCount=0;
   }
   get connected(){return [...this.#connections.values()].filter(s=>s.ws.readyState===this.WS.OPEN).length;}
   #status(){this.onStatus({connected:this.connected,total:this.urls.length,synced:this.syncedCount});}
+  #trace(direction,url,payload){
+    // An optional passive inspection callback. Never let debugging alter
+    // publication, verification or peer-reconnect behavior.
+    try{this.onPacket({direction,url,payload});}catch{}
+  }
+  #send(ws,url,packet){
+    const raw=JSON.stringify(packet);
+    this.#trace('out',url,raw);
+    ws.send(raw);
+  }
   connect(urls,{spaces=['*']}={}){
     if(!Array.isArray(urls)||urls.length>8||!Array.isArray(spaces)||!spaces.length||spaces.length>64 ||
       spaces.some(s=>s!=='*'&&!allowedSpace(s)))throw Error('Invalid peer configuration');
@@ -58,24 +68,31 @@ export class BrowserPeerMesh{
     const s={ws,timer:null,chain:Promise.resolve(),pages:0,lastCursor:null};
     this.#connections.set(url,s);
     ws.onopen=()=>{if(generation!==this.#generation)return;
+      this.#trace('status',url,'WebSocket open');
       this.#status();
       // Subscribe all namespaces by default. Per-scope replication is optional.
-      ws.send(JSON.stringify({type:'subscribe',spaces:this.scopes}));
-      ws.send(JSON.stringify({type:'sync',cursor:null,limit:32}));
+      this.#send(ws,url,{type:'subscribe',spaces:this.scopes});
+      this.#send(ws,url,{type:'sync',cursor:null,limit:32});
       for(const event of this.getPending())this.publish(event,[url]);
     };
     ws.onmessage=e=>{
       s.chain=s.chain.then(async()=>{
         if(generation!==this.#generation)return;
         let msg;
-        try{if(typeof e.data!=='string'||e.data.length>2*1024*1024)return;msg=JSON.parse(e.data);}
+        try{
+          if(typeof e.data!=='string'||e.data.length>2*1024*1024){
+            this.#trace('error',url,'Rejected oversize or nontext WebSocket frame');return;
+          }
+          this.#trace('in',url,e.data);
+          msg=JSON.parse(e.data);
+        }
         catch{return;}
         if(msg.type==='batch'){
           if(!Array.isArray(msg.events)||msg.events.length>32)return;
           for(const event of msg.events)await this.#accept(event,url);
           if(typeof msg.next==='string'&&ID.test(msg.next)&&msg.next!==s.lastCursor&&s.pages<1000){
             s.pages++;s.lastCursor=msg.next;
-            ws.send(JSON.stringify({type:'sync',cursor:msg.next,limit:32}));
+            this.#send(ws,url,{type:'sync',cursor:msg.next,limit:32});
           }
         }else if(msg.type==='event'){
           await this.#accept(msg.event,url);
@@ -87,7 +104,7 @@ export class BrowserPeerMesh{
       }).catch(err=>this.onError(url,String(err)));
     };
     ws.onerror=()=>{};
-    ws.onclose=()=>{if(generation!==this.#generation)return;
+    ws.onclose=()=>{this.#trace('status',url,'WebSocket closed');if(generation!==this.#generation)return;
       if(this.#connections.get(url)!==s)return;
       this.#connections.delete(url);this.#status();
       const delay=Math.min(30000,1000*Math.pow(2,Math.min(attempt,5)));
@@ -106,7 +123,7 @@ export class BrowserPeerMesh{
     for(const [url,s] of this.#connections){
       if(onlyUrls&&!onlyUrls.includes(url))continue;
       if(s.ws.readyState===this.WS.OPEN){
-        s.ws.send(JSON.stringify({type:'publish',event}));sent++;
+        this.#send(s.ws,url,{type:'publish',event});sent++;
       }
     }
     return sent;

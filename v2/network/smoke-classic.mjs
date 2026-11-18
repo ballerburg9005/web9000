@@ -404,7 +404,70 @@ try{
    'clicking a signed reaction must not scroll the page: '+
      JSON.stringify({reactionScrollBefore,reactionScrollAfter}));
  console.log('CLASSIC checkpoint 13: signed reaction received without scrolling');
+
+ // Personal social labeling never changes remote record authorship,
+ // grants raw-lane admission or publishes a public relationship.
+ assert.equal(await b.$eval('.reactions .social-relation-action[data-social-relation="friend"]',
+   el=>el.textContent),'Add friend');
+ assert.equal(await b.$eval('.reactions .social-relation-action[data-social-relation="foe"]',
+   el=>el.textContent),'Add foe');
+ await b.click('.reactions .social-relation-action[data-social-relation="friend"]');
+ assert.equal(await b.$eval('.reactions .social-relation-action[data-social-relation="friend"]',
+   el=>el.textContent),'Remove friend');
+ await b.click('.reactions .social-relation-action[data-social-relation="foe"]');
+ assert.equal(await b.$eval('.reactions .social-relation-action[data-social-relation="foe"]',
+   el=>el.textContent),'Remove foe');
+ assert.equal(await b.$eval('.reactions .social-relation-action[data-social-relation="friend"]',
+   el=>el.textContent),'Add friend','friend and foe must be mutually exclusive');
+ await b.click('.reactions .social-relation-action[data-social-relation="foe"]');
+ assert.equal(await b.$eval('.reactions .social-relation-action[data-social-relation="foe"]',
+   el=>el.textContent),'Add foe');
+ assert.equal(bridge.replica.list().filter(e=>e.payload.kind==='endorse').length,0,
+   'local friend/foe preferences must not leak a public social graph');
+
+ // The post's source actions go to one raw console rather than clipboard.
+ assert.equal(await b.$$eval('.reactions button',items=>
+   items.filter(e=>e.textContent.includes('Copy signed record')||
+     e.textContent.includes('Trust author')).length),0);
+ await b.evaluate(()=>[...document.querySelectorAll('.reactions button')]
+   .find(x=>x.textContent==='Dump post').click());
+ assert.equal(await b.$eval('#debugDialog',el=>el.open),true);
+ assert.equal(await b.$eval('#debugSource',el=>el.value),'dump');
+ assert.ok((await b.$eval('#debugRaw',el=>el.textContent)).includes('"signature"'),
+   'post dump must contain full signed event envelope');
+ await b.evaluate(()=>document.getElementById('debugKind').value='post');
+ await b.evaluate(()=>document.getElementById('debugKind').dispatchEvent(new Event('input')));
+ assert.ok(await b.$$eval('#debugEntries .debug-record',items=>items.length)>=1);
+ await b.click('#closeDebug');
+ await b.evaluate(()=>[...document.querySelectorAll('.reactions button')]
+   .find(x=>x.textContent==='Dump comments').click());
+ assert.equal(await b.$eval('#debugSource',el=>el.value),'dump');
+ assert.ok((await b.$eval('#debugRaw',el=>el.textContent))
+   .includes('A separate, real signed comment'),'comments dump must expose the signed discussion tree');
+ await b.evaluate(()=>{
+   document.getElementById('debugSource').value='network';
+   document.getElementById('debugSource').dispatchEvent(new Event('change'));
+ });
+ assert.ok((await b.$eval('#debugEntries',el=>el.textContent)).includes('batch')||
+    (await b.$eval('#debugEntries',el=>el.textContent)).includes('subscribe'),
+   'network packet trace should show real WebSocket traffic');
+ await b.evaluate(()=>{
+   document.getElementById('debugSource').value='social';
+   document.getElementById('debugSource').dispatchEvent(new Event('change'));
+ });
+ assert.ok((await b.$eval('#debugRaw',el=>el.textContent)).includes('origin')||
+   (await b.$eval('#debugStatus',el=>el.textContent)).includes('Friend/foe'));
+ await b.evaluate(()=>{
+   document.getElementById('debugSource').value='system';
+   document.getElementById('debugSource').dispatchEvent(new Event('change'));
+ });
+ assert.ok((await b.$eval('#debugRaw',el=>el.textContent))
+   .includes('verifiedRecords'),'system diagnostics inspect local signed event inventory');
+ assert.ok((await b.$eval('#debugEntries',el=>el.textContent))
+   .includes('ipfs-media'),'system diagnostics expose selected independent media peer');
+ await b.click('#closeDebug');
  assert.deepEqual(errors,[]);
+ console.log('CLASSIC checkpoint 13a: friend/foe local preferences, raw post/comment dumps, filters and network packet debug console');
  const artifacts=path.join(path.dirname(fileURLToPath(import.meta.url)),'test-artifacts');
  await mkdir(artifacts,{recursive:true});
  await b.setViewport({width:1440,height:900});

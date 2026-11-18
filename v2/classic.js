@@ -15,6 +15,8 @@ import {buildPostLifecycles} from './core/lifecycle.js';
 import {mediaItems,primaryMedia,choosePrimaryMediaIndex,categoryForType,
   validateLocalUploads} from './core/media.js';
 import {parseMediaGateways,claimsFromVerifiedEvents,chooseMediaGateways} from './core/media-discovery.js';
+import {normalizeRelations,setRelation,relationFor} from './core/social-relations.js';
+import {discussionRecords,filterDebugEntries,summarizeSignedEvents,DebugTrace} from './core/debug-console.js';
 
 const $=id=>document.getElementById(id);
 const state={
@@ -26,6 +28,7 @@ const state={
   mockKarma:null,mockMode:false,demoAuthor:null,demoAutoConnect:false,autoDemoPeerDisabled:false,
   followedSpaces:['demo','commons'],showGroupSpaces:true,groupSubscriptions:[],groupViews:[],groupHeads:{},
   searchFilters:{attribute:'all',includeTags:[],excludeTags:[],excludeKinds:[],minScore:0,customField:''},
+  relations:Object.create(null),debugTrace:new DebugTrace(),debugDump:null,debugItems:[],debugSelected:null,
   replyDrafts:new Map(),expandedTags:new Set(),editingPostId:null,editingMedia:[],editingFields:null,lastError:'',renderPending:false
 };
 const safeSpace=s=>typeof s==='string'&&s.length>0&&s.length<=180&&!/[\x00-\x1f]/.test(s);
@@ -82,6 +85,230 @@ function element(tag,className='',text=''){
 function button(label,handler,className=''){
   const b=element('button',className,label);b.type='button';b.addEventListener('click',handler);return b;
 }
+function debugRecordEntries(source){
+  if(source==='system'){
+    const stats=summarizeSignedEvents(allEvents());
+    return [
+      {kind:'local-replica',space:state.space,raw:{
+        kind:'local-replica',publicSigningKey:state.identity?.author,
+        selectedSpace:state.space,verifiedRecords:stats.total,
+        replicatedByKind:stats.kinds,replicatedByNamespace:stats.spaces,
+        signedPosts:stats.kinds.post||0,queuedPublications:state.outbox.length,
+        // A local replica is NOT proof of complete network-wide history.
+        completeness:'Local signed record set only; any peer may hold additional records'}},
+      {kind:'websocket-peers',space:'network',raw:{
+        kind:'websocket-peers',approvedAddresses:[...state.peers],
+        connected:state.mesh?.connected||0,sessionSubscriptions:state.mesh?.scopes||[],
+        syncedThisSession:state.mesh?.syncedCount||0,
+        outbox:state.outbox.map(item=>({
+          id:item.event?.id,kind:item.event?.payload?.kind,
+          acknowledgedBy:item.ackedBy||[]
+        }))}},
+      {kind:'ipfs-media',space:'media',raw:{
+        kind:'ipfs-media',preferredGateway:state.mediaBase,
+        voluntarilyApprovedBackups:[...state.mediaMirrors],
+        automaticBrowserPinning:false,operatorIndependentStorage:true,
+        note:'Viewing CID media does not make this browser a persistent IPFS mirror.'}},
+      {kind:'group-governance',space:'groups',raw:{
+        kind:'group-governance',
+        voluntarilySubscribedGroups:[...state.groupSubscriptions],
+        selectedGroupHeads:{...state.groupHeads},
+        observedGroups:state.groupViews.map(g=>({
+          id:g.id,heads:g.result.heads,
+          selectedHead:g.result.selectedHead,
+          groupName:g.result.state?.name,
+          members:g.result.state?.members?.length||0,
+          quorum:g.result.state?.quorum,
+          decisionPolicy:g.result.state?.decisionPolicy||'legacy',
+          delegatedChildGroups:g.result.state?.delegates||[],
+          reviewerAssignments:g.result.state?.reviewers||{},
+          ratifiedAmendments:g.result.ratifications?.length||0,
+          pending:g.result.pending||[],
+          advisoryMotions:(g.result.motions||[]).map(x=>({
+            id:x.proposal,status:x.status,for:x.yes,against:x.no
+          }))
+        }))}},
+      {kind:'presentation-policy',space:'local',raw:{
+        kind:'presentation-policy',showUnverified:state.showUnverified,
+        respectWithdrawals:state.respectWithdrawals,
+        trustedAuthorKeysFromLegacy:[...state.trust],
+        localFriends:Object.values(state.relations).filter(v=>v==='friend').length,
+        localFoes:Object.values(state.relations).filter(v=>v==='foe').length,
+        mockScoreMode:state.mockMode,
+        note:'Personal friendship is separate from legacy media/curation trust.'}}
+    ];
+  }
+  if(source==='network')return [...state.debugTrace.entries].reverse()
+    .map((trace,i)=>({kind:trace.type,space:'',author:'',type:trace.direction,
+      at:trace.at,peer:trace.peer,raw:trace,entryId:'net-'+i}));
+  if(source==='dump')return (state.debugDump?.events||[]).map(event=>({
+    kind:event.payload.kind,space:event.payload.space,author:event.payload.author,
+    at:new Date(event.payload.time).toISOString(),id:event.id,event}));
+  if(source==='social'){
+    const current=Object.entries(state.relations).map(([author,relation])=>({
+      kind:relation,space:'local',author,relation,origin:'personal, local-only (not signed or broadcast)'
+    }));
+    const legacy=state.trust.map(author=>({
+      kind:'legacy-trust',space:'local',author,
+      origin:'previously authorized media/feed trust, not a friend/foe label'
+    }));
+    return [...current,...legacy];
+  }
+  return [...allEvents()].reverse().map(event=>({
+    kind:event.payload.kind,space:event.payload.space,author:event.payload.author,
+    at:new Date(event.payload.time).toISOString(),id:event.id,event}));
+}
+function renderDebugConsole(){
+  const dialog=$('debugDialog');if(!dialog?.open)return;
+  const source=$('debugSource').value;
+  const all=debugRecordEntries(source);
+  const kind=$('debugKind'),oldKind=kind.value;
+  kind.replaceChildren(new Option('All kinds',''));
+  for(const type of [...new Set(all.map(x=>x.kind).filter(Boolean))].sort())
+    kind.append(new Option(type,type));
+  kind.value=[...kind.options].some(o=>o.value===oldKind)?oldKind:'';
+  const filtered=filterDebugEntries(all,{
+    kind:kind.value,space:$('debugSpace').value,author:$('debugAuthor').value,
+    query:$('debugSearch').value,limit:Number($('debugLimit').value)
+  });
+  state.debugItems=filtered;
+  $('debugSummary').textContent='Signed '+summarizeSignedEvents(allEvents()).total+
+    ' records · '+state.mesh?.connected+' connected peer(s) · '+
+    state.outbox.length+' queued · '+state.debugTrace.entries.length+
+    ' buffered network packets · '+Object.values(state.relations).filter(v=>v==='friend').length+
+    ' friends / '+Object.values(state.relations).filter(v=>v==='foe').length+' foes';
+  const target=$('debugEntries');target.replaceChildren();
+  if(source==='dump'&&state.debugDump)
+    target.append(element('div','debug-dump-label',state.debugDump.label));
+  for(const [i,item] of filtered.entries()){
+    const caption=(item.kind||item.type||'record')+' · '+
+      (item.at||'local')+' · '+(item.author||item.peer||item.id||'').slice(0,55);
+    const b=button(caption,()=>selectDebugItem(i),'debug-record');
+    b.setAttribute('role','listitem');
+    b.dataset.debugIndex=String(i);
+    if(item.id)b.title=item.id;
+    if(source==='social'&&item.kind==='legacy-trust'){
+      const row=element('div','debug-social-row');
+      row.append(b,button('Revoke legacy trust',async()=>{
+        state.trust=state.trust.filter(x=>x!==item.author);
+        await store();render();renderDebugConsole();
+        toast('Previous trusted-media/curation permission revoked locally.');
+      }));
+      target.append(row);
+    }else target.append(b);
+  }
+  if(!filtered.length)target.append(element('div','fine',
+    source==='dump'?'No matching records in this post/comment dump.':'No matching local data.'));
+  const next=filtered.findIndex(item=>item.id&&item.id===state.debugSelected);
+  selectDebugItem(next>=0?next:0);
+  $('debugStatus').textContent=filtered.length+' shown of '+all.length+
+    ' · '+(source==='network'?'Raw packet logging starts with this browser session; oversized frames are truncated.' :
+      source==='social'?'Friend/foe labels are local only; no reputational score or moderation authority yet.':
+      source==='dump'?'Only records already replicated into this browser can be dumped.':'Verified signed event envelopes already stored by this browser.');
+}
+function selectDebugItem(index){
+  const item=state.debugItems[index]||null;
+  state.debugSelected=item?.id||null;
+  const raw=$('debugRaw');
+  raw.textContent=item?JSON.stringify(item.event||item.raw||item,null,2):
+    'Select a record on the left to inspect its raw JSON.';
+  for(const button of $('debugEntries').querySelectorAll('[data-debug-index]'))
+    button.classList.toggle('selected',Number(button.dataset.debugIndex)===index);
+}
+function openDebugConsole(source='events'){
+  $('debugSource').value=source;
+  for(const id of ['debugKind','debugSpace','debugAuthor','debugSearch'])$(id).value='';
+  state.debugSelected=null;
+  if(!$('debugDialog').open)$('debugDialog').showModal();
+  renderDebugConsole();
+}
+function showDebugDump(label,events){
+  state.debugDump={label,events:[...new Map(events.map(e=>[e.id,e])).values()]};
+  openDebugConsole('dump');
+}
+function dumpSignedPost(item){
+  const base=item.event,life=item.lifecycle;
+  const main=life?[...life.revisions,...life.actions]:[base];
+  const ids=new Set(main.map(e=>e.id));
+  const metadata=allEvents().filter(e=>['reaction','tag-vote','poll-choice','label'].includes(e.payload.kind)&&
+    ids.has(e.payload.body?.target));
+  showDebugDump('Post and signed history · '+base.id,[...main,...metadata]);
+}
+function dumpSignedComments(postId){
+  const bundle=discussionRecords(allEvents(),postId);
+  showDebugDump('Signed comment tree · '+bundle.replyCount+' replies · '+postId,bundle.events);
+}
+function appendRelationButtons(container,author){
+  if(author===state.identity?.author)return;
+  for(const relation of ['friend','foe']){
+    const b=button('',async()=>{
+      try{
+        const current=relationFor(state.relations,author);
+        state.relations=setRelation(state.relations,state.identity.author,author,
+          current===relation?null:relation);
+        if(relation==='foe')state.trust=state.trust.filter(x=>x!==author);
+        updateRelationControls(author);
+        await store();
+        if($('debugDialog')?.open)renderDebugConsole();
+        toast('Personal '+(relationFor(state.relations,author)||'relationship removed')+
+          ' label saved locally. No credibility score, broadcast or governance authority changed.');
+      }catch(error){toast(error.message);}
+    },'social-relation-action');
+    b.dataset.socialAuthor=author;
+    b.dataset.socialRelation=relation;
+    const active=relationFor(state.relations,author)===relation;
+    b.textContent=(active?'Remove ':'Add ')+relation;
+    b.setAttribute('aria-pressed',String(active));
+    b.classList.toggle('selected',active);
+    b.title=relation==='friend'?
+      'Local social label; no automatic media trust, governance power or credibility score':
+      'Local foe label; no global block or credibility penalty';
+    container.append(b);
+  }
+  updateRelationControls(author);
+}
+function updateRelationControls(author){
+  const status=relationFor(state.relations,author);
+  for(const el of document.querySelectorAll('[data-social-author]')){
+    if(el.dataset.socialAuthor!==author)continue;
+    const relation=el.dataset.socialRelation,active=status===relation;
+    el.textContent=(active?'Remove ':'Add ')+relation;
+    el.setAttribute('aria-pressed',String(active));
+    el.classList.toggle('selected',active);
+    el.title=relation==='friend'?
+      'Personal friend label only: no automatic trusted media fetch, moderation authority or voting weight':
+      'Personal foe label only: no global block, penalty or reputation change';
+  }
+  for(const el of document.querySelectorAll('.post[data-author]')){
+    if(el.dataset.author!==author)continue;
+    el.dataset.socialLabel=status||'';
+  }
+}
+function tracePeer({direction,url,payload}){
+  let type='frame';
+  if(direction==='status')type='connection';
+  else if(direction==='error')type='error';
+  else try{type=JSON.parse(payload).type||'frame';}catch{type='malformed';}
+  state.debugTrace.push({direction,peer:url,type,
+    packet:direction==='in'||direction==='out'?payload:undefined,
+    message:direction==='status'||direction==='error'?payload:''});
+  if($('debugDialog')?.open&&$('debugSource').value==='network')
+    renderDebugConsole();
+}
+function downloadDebugJSON(){
+  const source=$('debugSource').value,body=JSON.stringify({
+    format:'web9000-local-debug-export-v1',source,
+    exportedAt:new Date().toISOString(),dumpLabel:source==='dump'?state.debugDump?.label:null,
+    entries:state.debugItems.map(item=>item.event||item.raw||item)
+  },null,2)+'\n';
+  const url=URL.createObjectURL(new Blob([body],{type:'application/json'}));
+  try{
+    const link=document.createElement('a');link.href=url;
+    link.download='web9000-debug-'+source+'-'+Date.now()+'.json';
+    document.body.append(link);link.click();link.remove();
+  }finally{setTimeout(()=>URL.revokeObjectURL(url),2000);}
+}
+
 function latestProfile(author){
   return allEvents().filter(event=>event.payload.kind==='profile'&&event.payload.author===author)
     .sort((a,b)=>b.payload.time-a.payload.time||b.id.localeCompare(a.id))[0]?.payload.body||null;
@@ -378,6 +605,7 @@ function tile(item,i,replyCounts){
   const card=element('div','post'+(item.decision?.visible?'':' filtered')+
     (proseOnly?' text-only':''));
   card.dataset.index=String(i);card.dataset.id=item.event.id;card.dataset.kind=postKind(item);
+  card.dataset.author=p.author;card.dataset.socialLabel=relationFor(state.relations,p.author)||'';
   card.tabIndex=0;card.setAttribute('role','button');card.setAttribute('aria-label',b.title||'Post');
   const demoMedia=signedDemoMedia(p);
   if(demoMedia?.type==='audio'){
@@ -525,6 +753,7 @@ function renderProfileHeader(){
   }
   const actions=element('div','profile-actions');
   actions.append(button('← Back to board',()=>selectSpace(state.space)));
+  appendRelationButtons(actions,author);
   if(author===state.identity.author)
     actions.append(button('Edit my profile / identity',()=>{openIdentitySettings();$('profileEditor').open=true;}));
   if(!state.mockMode)actions.append(element('span','profile-status',
@@ -655,6 +884,7 @@ async function store(){
     setItem(state.db,'peer-urls',state.peers),
     setItem(state.db,'classic-space',state.space),
     setItem(state.db,'classic-trust',state.trust),
+    setItem(state.db,'classic-social-relations',state.relations),
     setItem(state.db,'classic-ignored-labels',state.ignoredLabels),
     setItem(state.db,'classic-show-unknown',state.showUnverified),
     setItem(state.db,'classic-respect-withdrawals',state.respectWithdrawals),
@@ -1261,11 +1491,9 @@ function expand(id,{focus=true}={}){
       state.audit=!state.audit;expand(id,{focus:false});
     },'audit-action'));
     if(state.mockMode)votes.append(button('Test karma…',()=>openMockKarma(p.author)));
-    votes.append(button('Trust author',async()=>{
-      if(!state.trust.includes(p.author))state.trust.push(p.author);
-      await store();scheduleRender();toast('You locally trust this author. No global rule changed.');
-    },'trust-action'));
-    votes.append(button('Copy signed record',()=>navigator.clipboard?.writeText(JSON.stringify(current.event,null,2)).then(()=>toast('Signed record copied')),'source-action'));
+    appendRelationButtons(votes,p.author);
+    votes.append(button('Dump post',()=>dumpSignedPost(current),'source-action'));
+    votes.append(button('Dump comments',()=>dumpSignedComments(current.event.id),'source-action'));
     body.append(votes);
     if(current.lifecycle){
       const life=current.lifecycle;
@@ -1296,8 +1524,8 @@ function expand(id,{focus=true}={}){
           attachments.length+' originally attached IPFS reference(s) remain part of the signed event. '+
           'Media may no longer be hosted by the peer you selected.'));
         row.append(read);
-        row.append(button('Copy signed event',()=>navigator.clipboard?.writeText(JSON.stringify(e,null,2))
-          .then(()=>toast('Immutable event copied')),'history-copy'));
+        row.append(button('Inspect signed event',()=>showDebugDump(
+          'Historical signed event '+e.id.slice(0,20),[e]),'history-copy'));
         history.append(row);
       }
       for(const e of life.actions){
@@ -2162,6 +2390,27 @@ function bind(){
   };
   $('addComposeAttribute').onclick=addComposeAttributeRow;
   $('closeComposer').onclick=()=>close('postDialog');$('cancelPost').onclick=()=>close('postDialog');
+  $('debugConsoleButton').onclick=()=>openDebugConsole('events');
+  $('closeDebug').onclick=()=>close('debugDialog');
+  $('debugSource').onchange=()=>{
+    $('debugKind').value='';renderDebugConsole();
+  };
+  for(const id of ['debugKind','debugSpace','debugAuthor','debugSearch','debugLimit']){
+    $(id).addEventListener('input',renderDebugConsole);
+    $(id).addEventListener('change',renderDebugConsole);
+  }
+  $('debugRefresh').onclick=renderDebugConsole;
+  $('debugClear').onclick=()=>{
+    state.debugTrace.clear();renderDebugConsole();
+    toast('This browser session’s network trace cleared. Signed records unchanged.');
+  };
+  $('debugCopy').onclick=async()=>{
+    const raw=$('debugRaw').textContent;
+    if(!state.debugItems.length)return toast('Select a record first');
+    try{await navigator.clipboard.writeText(raw);toast('Selected raw JSON copied.');}
+    catch(error){toast('Clipboard unavailable: '+error.message);}
+  };
+  $('debugExport').onclick=downloadDebugJSON;
   $('joinNetwork').onclick=()=>{renderMediaProviderSuggestions();modal('networkDialog');};$('closeNetwork').onclick=()=>close('networkDialog');
   $('suggestPeers').onclick=loadSuggestions;
   $('connectPeers').onclick=connectPeers;
@@ -2402,6 +2651,7 @@ async function init(){
   state.outbox=await getItem(state.db,'outbox')||[];
   state.peers=await getItem(state.db,'peer-urls')||[];
   state.trust=await getItem(state.db,'classic-trust')||[];
+  state.relations=normalizeRelations(await getItem(state.db,'classic-social-relations'),state.identity.author);
   state.ignoredLabels=(await getItem(state.db,'classic-ignored-labels')||[])
     .filter(id=>typeof id==='string'&&/^sha256:[0-9a-f]{64}$/.test(id)).slice(0,2000);
   state.showUnverified=await getItem(state.db,'classic-show-unknown')===true;
@@ -2475,6 +2725,7 @@ async function init(){
     // element. Previously each batch and ACK replaced every post node,
     // causing lost keyboard focus and detached click targets.
     onStatus:()=>updateNetworkStatus(),
+    onPacket:tracePeer,
     onEvent:async e=>{
       const result=await ingest(e);
       if(result.accepted&&['group','proposal','vote','membership'].includes(e.payload.kind))
@@ -2493,7 +2744,11 @@ async function init(){
         await store();updateNetworkStatus();
       })().catch(console.error);
     },
-    onError:(url,message)=>{state.lastError=String(message);toast('Peer rejected/failed: '+message);}
+    onError:(url,message)=>{
+      state.lastError=String(message);
+      tracePeer({direction:'error',url,payload:String(message)});
+      toast('Peer rejected/failed: '+message);
+    }
   });
   render();
   await refreshGroups();
