@@ -14,7 +14,8 @@ const state={
   peers:[],mesh:null,suggested:[],mediaBase:null,
   space:'commons',sort:'new',view:'grid',search:'',showUnverified:false,
   ownerHint:null,respectOwner:true,selected:null,trust:[],audit:false,showMedia:false,
-  demo:[],mockKarma:null,mockMode:false,lastError:'',renderPending:false
+  demo:[],demoVotes:new Map(),demoPollChoices:new Map(),demoReplies:new Map(),demoFlags:new Map(),demoTagVotes:new Map(),
+  mockKarma:null,mockMode:false,lastError:'',renderPending:false
 };
 const safeSpace=s=>typeof s==='string'&&s.length>0&&s.length<=180&&!/[\x00-\x1f]/.test(s);
 const validTag=s=>/^[a-z0-9][a-z0-9._:-]{0,47}$/.test(s);
@@ -34,14 +35,33 @@ function trustedForMedia(author){
   return author===state.identity?.author||state.trust.includes(author);
 }
 const demoImages=[1,2,3,5,6,7,8,9,11,12,14,15,16,18,19,20,22,23,24,25,26,27,28,31];
-const sampleTitles=[
-  'Cats enjoy cardboard boxes','Small image experiment','An unexpected visitor','Photographic archive',
-  'Something found on the internet','Simple collage','Look at this thing','Creative commons',
-  'Walking around town','Old computers','A pattern worth sharing','Beautiful sky',
-  'Strange architecture','An internet memory','Underground art','Useful electronics',
-  'Open source project','What is your favorite design?','A tiny meetup',
-  'Listen to this audio idea','A public domain illustration','Weekend discussion',
-  'Freely shared research','Something worth remembering'
+// Distinct *illustrative* content types, using the original prototype media.
+// Never publish these fixtures to peers or represent them as signed content.
+const demoSpecs=[
+  {type:'image',title:'The cardboard-box expert',text:'Cats can turn almost any box into a favorite hiding place.',tags:['cats','photo','funny']},
+  {type:'event',title:'Neighborhood photo walk and meetup',text:'Come share pictures and compare lenses. The event format demonstrates native dates and locations.',tags:['meetup','photography'],schedule:{start:'2027-05-14T15:30',end:'2027-05-14T17:30',location:'Community park'}},
+  {type:'poll',title:'Which picture should we feature?',text:'An example of a poll attached to an ordinary image post.',tags:['poll','photography'],poll:{question:'Choose a picture',options:['First image','Second image','Third image']}},
+  {type:'video',title:'A tiny motion study',text:'An example media-rich post. The original prototype includes a short clip.',tags:['video','animation'],video:'../thumb/thumb04.mp4'},
+  {type:'job',title:'Illustrator wanted for an open project',text:'People can volunteer to help with designs and graphics.',tags:['help-wanted','art'],positions:['Illustrator','Layout designer']},
+  {type:'project',title:'Build a little community gallery',text:'A project can describe its goals and ask for collaborators without inventing a separate site database.',tags:['open-source','project'],positions:['Tester','Developer']},
+  {type:'offer',title:'Second-hand camera and accessories',text:'Example of a marketplace listing. Listings use the same portable record format.',tags:['marketplace','photography'],price:'$25, negotiable'},
+  {type:'discussion',title:'What makes a small internet community work?',text:'A longer written discussion can use a full-row preview in Mixed or Blog view. Members should choose their own moderation and presentation preferences while every signed publication remains independently portable.',tags:['discussion','community'],noThumb:true},
+  {type:'image',title:'A strange found object',text:'An interesting shape worth sharing.',tags:['image','found']},
+  {type:'event',title:'Weekend art swap',text:'Bring a piece you made and trade with someone.',tags:['art','event'],schedule:{start:'2027-06-02T11:00',location:'Open-air market'}},
+  {type:'poll',title:'Favorite color palette?',text:'A simple poll that can coexist with the image gallery.',tags:['design','poll'],poll:{question:'Which mood?',options:['Warm','Cold','Chaotic']}},
+  {type:'image',title:'Big sky, small city',text:'A media post with normal captions and tags.',tags:['landscape','photo']},
+  {type:'offer',title:'Swap a box of old computer parts',text:'Example of an informal trade listing.',tags:['electronics','marketplace'],price:'Swap'},
+  {type:'project',title:'Archive a tiny piece of internet history',text:'Document the history without claiming exclusive ownership of a shared namespace.',tags:['archive','community']},
+  {type:'job',title:'Looking for organizers',text:'Use structured positions for small voluntary groups.',tags:['organize','help-wanted'],positions:['Organizer','Writer','Moderator candidate']},
+  {type:'image',title:'Unexpected design detail',text:'An image-first example with a short explanation.',tags:['architecture','details']},
+  {type:'discussion',title:'How should open moderation be audited?',text:'Anyone can inspect the signed reasoning, refuse to follow a steward, and still independently retrieve the underlying post from willing mirrors.',tags:['discussion','transparency'],noThumb:true},
+  {type:'event',title:'Electronics workshop',text:'Share ideas and bring a prototype.',tags:['workshop','electronics'],schedule:{start:'2027-07-22T14:00',location:'Local makerspace'}},
+  {type:'poll',title:'What should we build next?',text:'Groups can suggest what to prioritize.',tags:['poll','planning'],poll:{question:'Pick a project',options:['Music player','Gallery','Board game','Documentation']}},
+  {type:'image',title:'An old illustration',text:'Post format supports illustrations and multiple images.',tags:['illustration','art']},
+  {type:'project',title:'Open music collaboration',text:'A community project can have open roles and supporting files.',tags:['music','collaboration'],positions:['Musician','Editor']},
+  {type:'discussion',title:'A long-form note, not another thumbnail',text:'The Mixed layout uses a wider text preview for discussion and blog-like posts, while the original compact picture grid remains the default.',tags:['blog','ideas'],noThumb:true},
+  {type:'offer',title:'Giving away unused art supplies',text:'A sample offer; no checkout, price feed or buyer verification is implied.',tags:['free','marketplace'],price:'Free'},
+  {type:'image',title:'One final photo for the gallery',text:'Illustrative example. Real contributions are cryptographically signed and propagated only by the peers users choose.',tags:['cats','gallery']}
 ];
 const toast=(msg)=>{
   const el=$('toast');el.textContent=String(msg).slice(0,280);el.classList.add('visible');
@@ -84,11 +104,18 @@ const currentPosts=()=>{
 };
 function makeDemo(){
   state.demo=demoImages.map((n,i)=>{
-    const title=sampleTitles[i]||'Example image';
-    const p={kind:'post',author:'demo',space:'commons',time:Date.now()-i*86400000,
-      body:{title,text:i%5===0?'This is an illustrative tile from the original prototype layout. It is not a publication on the shared network.':'Visual demo content, not published.',fields:{tags:['demo','image','classic'],presentation:'image'}}};
-    return {event:{id:'demo:'+i,payload:p},demo:true,thumb:'../thumb/thumb'+String(n).padStart(2,'0')+'.jpg',
-      decision:{visible:true,reason:'visual fixture'}};
+    const spec=demoSpecs[i];
+    const fields={tags:spec.tags,presentation:spec.type};
+    if(spec.schedule)fields.schedule=spec.schedule;
+    if(spec.poll)fields.poll=spec.poll;
+    if(spec.positions)fields.positions=spec.positions;
+    if(spec.price)fields.price=spec.price;
+    const payload={kind:'post',author:'demo',space:'commons',
+      time:Date.now()-i*7200000,
+      body:{title:spec.title,text:spec.text,fields}};
+    return {event:{id:'demo:'+i,payload},demo:true,
+      thumb:spec.noThumb?null:'../thumb/thumb'+String(n).padStart(2,'0')+'.jpg',
+      video:spec.video||null,decision:{visible:true,reason:'illustrative local-only preview'}};
   });
 }
 function effectiveFeed(){
@@ -119,6 +146,8 @@ function recognizedTags(post,records=allEvents()){
   }
   for(const e of latestVotes('tag-vote',post.id,records))
     total.set(e.payload.body.tag,(total.get(e.payload.body.tag)||0)+e.payload.body.value);
+  for(const [tag,value] of state.demoTagVotes.get(post.id)||[])
+    total.set(tag,(total.get(tag)||0)+value);
   return [...total.entries()].filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
 }
 function columns(){
@@ -149,13 +178,23 @@ function tile(item,i,replyCounts){
     card.append(element('div','post-text-preview',b.text||b.title||'Text post'));
   }
   if(b.title)card.append(element('div','post-headline',b.title));
-  const icons=[];if(item.demo)icons.push('DEMO');if(b.media?.length)icons.push('▣ '+b.media.length);
-  if(b.fields?.poll)icons.push('▤');if(b.fields?.schedule)icons.push('▣');
-  if(b.fields?.positions?.length)icons.push('◈');
-  const replyCount=replyCounts.get(item.event.id)||0;
-  if(replyCount)icons.push('☰ '+replyCount);
-  if(icons.length)card.append(element('div','post-icons',icons.join(' ')));
-  if(!item.decision?.visible)card.append(element('div','post-small','FILTERED · AUDIT'));
+  const icons=[];
+  const kind=b.fields?.presentation||'image';
+  if(item.video)icons.push('▶ Video');
+  else if(b.media?.length>1)icons.push('▣ '+b.media.length+' images');
+  else if(kind==='offer')icons.push('◇ Offer');
+  else if(kind==='project')icons.push('◆ Project');
+  else if(kind==='job')icons.push('◈ Jobs');
+  else if(kind==='discussion'||kind==='text')icons.push('☰ Text');
+  else if(item.thumb||b.media?.length)icons.push('▣ Image');
+  if(b.fields?.schedule)icons.push('▦ Meetup');
+  if(b.fields?.poll)icons.push('◉ Poll');
+  if(b.fields?.positions?.length&&kind!=='job')icons.push('◈ '+b.fields.positions.length+' roles');
+  const replyCount=item.demo?(state.demoReplies.get(item.event.id)?.length||0):(replyCounts.get(item.event.id)||0);
+  if(replyCount)icons.push('☏ '+replyCount);
+  if(icons.length)card.append(element('div','post-icons',icons.join(' · ')));
+  if(item.demo)card.append(element('div','post-small demo-label','PREVIEW'));
+  else if(!item.decision?.visible)card.append(element('div','post-small','FILTERED · AUDIT'));
   card.addEventListener('click',()=>{ if(state.selected===item.event.id){state.selected=null;render();}else expand(item.event.id); });
   return card;
 }
@@ -270,6 +309,29 @@ function formatDate(t){
   return Number.isNaN(time.getTime())?'Unknown date':time.toLocaleString();
 }
 function renderReplies(body,post){
+  if(post.id.startsWith('demo:')){
+    const section=element('section','comments-section');
+    const comments=state.demoReplies.get(post.id)||[];
+    section.append(element('h3','','Comments ('+comments.length+')'));
+    for(const item of comments){
+      const box=element('div','comment');
+      box.append(element('div','comment-head','You · local preview'));
+      box.append(element('div','comment-text',item));
+      section.append(box);
+    }
+    const form=element('div','comment-form');
+    const ta=document.createElement('textarea');
+    ta.placeholder='Write a preview comment...';
+    form.append(ta,button('Post preview comment',()=>{
+      if(!ta.value.trim())return;
+      const old=state.demoReplies.get(post.id)||[];
+      if(old.length>=25)return toast('Preview comment limit reached');
+      state.demoReplies.set(post.id,[...old,ta.value.trim().slice(0,1000)]);
+      expand(post.id,{focus:false});
+      toast('Comment shown locally. Demo preview only — not signed or broadcast.');
+    }));
+    section.append(form);body.append(section);return;
+  }
   const replies=allEvents().filter(e=>e.payload.kind==='reply');
   const byParent=new Map();
   for(const e of replies){
@@ -353,16 +415,26 @@ function expand(id,{focus=true}={}){
   left.tabIndex=0;right.tabIndex=0;
   left.addEventListener('click',()=>navigate(-1));right.addEventListener('click',()=>navigate(1));
   const body=element('div','expanded-body');
-  body.append(element('h2','',b.title||'Untitled post'));
+  const heading=element('div','post-detail-heading');
+  heading.append(element('h2','',b.title||'Untitled post'));
+  heading.append(button('× Close',()=>{state.selected=null;render();},'detail-close'));
+  body.append(heading);
   const metadata=element('div','details-line');
   metadata.append(element('span','','From '+who(p.author)),
     element('span','','Space: '+p.space),element('span','',formatDate(p.time)));
-  if(current.demo)metadata.append(element('span','','Unpublished local visual example'));
+  if(current.demo)metadata.append(element('span','demo-note','PREVIEW — examples are not on the network'));
+  if(b.fields?.presentation)metadata.append(element('span','',b.fields.presentation.toUpperCase()));
   body.append(metadata);
   if(current.thumb){
     const region=element('div','attachments'),img=document.createElement('img');
     img.src=current.thumb;img.alt=b.title||'Demo image';img.loading='lazy';region.append(img);body.append(region);
   }else showMedia(body,current.event);
+  if(current.video){
+    const video=document.createElement('video');
+    video.controls=true;video.preload='metadata';video.playsInline=true;video.src=current.video;
+    video.className='post-preview-video';video.setAttribute('aria-label','Example video attachment');
+    const region=element('div','attachments');region.append(video);body.append(region);
+  }
   if(b.text)body.append(element('p','',b.text));
   const field=b.fields||{};
   if(field.schedule){
@@ -372,6 +444,7 @@ function expand(id,{focus=true}={}){
       if(value)date.append(element('p','',label+': '+(label==='Place'?value:formatDate(value))));
     }body.append(date);
   }
+  if(field.price)body.append(element('div','listing-price','Listed price: '+field.price));
   if(field.positions?.length){
     const block=element('div','positions');block.append(element('strong','','Open positions'));
     for(const position of field.positions)block.append(element('p','',position));
@@ -381,13 +454,27 @@ function expand(id,{focus=true}={}){
     const choices=latestVotes('poll-choice',id);
     const poll=element('div','poll');poll.append(element('strong','',field.poll.question));
     for(const [i,opt] of field.poll.options.entries()){
-      const tally=choices.filter(x=>x.payload.body.option===i).length;
-      poll.append(button(opt+' · '+tally+' vote(s)',()=>current.demo?toast('Demo poll is not networked'):pollVote(id,i)));
+      const tally=current.demo?(state.demoPollChoices.get(id)===i?1:0):
+        choices.filter(x=>x.payload.body.option===i).length;
+      poll.append(button(opt+' · '+tally+' vote(s)',()=>{
+        if(current.demo){
+          state.demoPollChoices.set(id,i);
+          expand(id,{focus:false});
+          toast('Preview vote recorded locally (not published).');
+        }else pollVote(id,i);
+      }));
     }body.append(poll);
   }
   const tags=element('div','label-row');
   for(const [name,count] of recognizedTags(current.event)){
-    tags.append(button('#'+name+' '+count+' +',()=>current.demo?toast('Demo tags are illustrative'):tagVote(id,name,1),'tag'));
+    tags.append(button('#'+name+' '+count+' +',()=>{
+      if(current.demo){
+        const votes=state.demoTagVotes.get(id)||new Map();
+        votes.set(name,(votes.get(name)||0)+1);state.demoTagVotes.set(id,votes);
+        expand(id,{focus:false});
+        toast('Tag vote simulated locally (not published).');
+      }else tagVote(id,name,1);
+    },'tag'));
     if(!current.demo)tags.append(button('−',()=>tagVote(id,name,-1),'tag'));
   }
   if(!current.demo)tags.append(button('+ Add tag',()=>{
@@ -397,8 +484,31 @@ function expand(id,{focus=true}={}){
     tagVote(id,tag,1);
   }));
   body.append(tags);
-  if(!current.demo){
-    const votes=element('div','reactions');
+  const votes=element('div','reactions');
+  if(current.demo){
+    votes.append(element('span','score',String(state.demoVotes.get(id)||0)));
+    for(const [label,v] of [['++',2],['+',1],['−',-1],['−−',-2]]){
+      votes.append(button(label,()=>{
+        state.demoVotes.set(id,v);
+        expand(id,{focus:false});
+        toast('Preview reaction only — no signed publication.');
+      }));
+    }
+    votes.append(button('Flag / Report',()=>{
+      const reason=window.prompt('Preview report reason (local only)');
+      if(reason){
+        state.demoFlags.set(id,reason.slice(0,500));
+        expand(id,{focus:false});
+        toast('Preview flag recorded locally — no moderation action broadcast.');
+      }
+    }));
+    body.append(votes);
+    const explanation=element('div','demo-notice',
+      'Interactive local preview. Votes, reports and comments here are not broadcast, staked or saved to the public network.');
+    if(state.demoFlags.has(id))explanation.append(element('div','','Your preview report: '+state.demoFlags.get(id)));
+    body.append(explanation);
+    renderReplies(body,current.event);
+  }else{
     votes.append(element('span','score',String(reactionScore(id))));
     for(const [label,v] of [['++',2],['+',1],['−',-1],['−−',-2]])
       votes.append(button(label,()=>react(id,v)));
