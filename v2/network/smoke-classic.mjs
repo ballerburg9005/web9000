@@ -785,6 +785,19 @@ try{
  assert.ok(bridge.replica.list().some(e=>e.id===originalPost.id)&&
    bridge.replica.list().some(e=>e.id===correction.id),
    'both signed versions remain independently retrievable');
+ // Another static website with the same portable key sees the correction
+ // through peer synchronization, not a centralized account or HTTP post.
+ await b.evaluate(()=>{
+   document.querySelector('.post.selected')?.click();
+   document.getElementById('searchCustomField').value='';
+   document.getElementById('searchCustomField').dispatchEvent(new Event('input',{bubbles:true}));
+   document.getElementById('searchPosts').value='';
+   document.getElementById('searchPosts').dispatchEvent(new Event('input',{bubbles:true}));
+ });
+ await eventually(()=>b.evaluate(id=>
+   document.querySelector('.post[data-id="'+id+'"] .post-headline')?.textContent===
+    'Portable idea corrected by its actual author',originalPost.id),
+   'another independent website shows the signed correction while retaining original ID');
 
  // Withdrawal is an author-signed request, NOT deletion. The requesting
  // reader sees the original in Trash, but both signed events still exist.
@@ -807,6 +820,8 @@ try{
    bridge.replica.list().some(e=>e.id===correction.id)&&
    bridge.replica.list().some(e=>e.id===withdraw.id),
    'withdrawal did not delete or rewrite any prior signed event');
+ await eventually(()=>b.evaluate(id=>!document.querySelector('.post[data-id="'+id+'"]'),
+   originalPost.id),'an independent viewer honors the signed withdrawal by default');
  // A different client is free to disregard the author's latest preference.
  await c.evaluate(()=>{
    document.querySelector('.post.selected')?.click();
@@ -828,6 +843,8 @@ try{
    e.payload.body.target===originalPost.id&&e.payload.body.action==='restore');
  assert.ok(restoration.payload.author===originalSigner);
  assert.ok(bridge.replica.list().some(e=>e.id===withdraw.id));
+ await eventually(()=>b.evaluate(id=>!!document.querySelector('.post[data-id="'+id+'"]'),
+   originalPost.id),'a signed restore request returns content to another independent viewer');
  console.log('CLASSIC checkpoint 20: authenticated corrections and reversible author withdrawal, every signed version retained');
  console.log('PASS classic board, threads, audit, attributes, identity portability and append-only revision/withdrawal');
 }finally{
