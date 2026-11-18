@@ -1199,7 +1199,7 @@ function renderGroupList(){
     controls.append(button(followed?'Following ✓':'+ Follow policy',async()=>{
       state.groupSubscriptions=followed?state.groupSubscriptions.filter(x=>x!==id):
         [...new Set([...state.groupSubscriptions,id])];
-      await store();renderGroupList();
+      await store();renderGroupList();renderRecommendedSpaces();
     }));
     const member=result.state.members.includes(state.identity?.author);
     const requested=allEvents().some(e=>e.payload.kind==='membership'&&
