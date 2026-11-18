@@ -42,7 +42,11 @@ const libp2p=await createLibp2p({
   services:{identify:identify(),pubsub:gossipsub({allowPublishToZeroTopicPeers:true})}
 });
 const ipfs=await createHelia({libp2p,blockstore:new LevelBlockstore(path.join(dir,'blocks'))});
-const orbitdb=await createOrbitDB({ipfs,directory:path.join(dir,'orbitdb')});
+// An OrbitDB identity created with a random id would silently change the
+// qualified index's address after every restart. Bind the index-curator
+// identity to this peer's persisted libp2p identity instead.
+const curatorIdentityId='web9000-curator:'+libp2p.peerId.toString();
+const orbitdb=await createOrbitDB({ipfs,id:curatorIdentityId,directory:path.join(dir,'orbitdb')});
 let index,bridge,media,qualified,qualifiedBridge;
 try {
   if(remote) await libp2p.dial(multiaddr(remote));
