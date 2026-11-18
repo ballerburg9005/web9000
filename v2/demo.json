@@ -4,5 +4,6 @@
   "author": "ed25519:pqstGobWYkSpJhAeYDlPF2CZRFRZh3FOZ2uOvFhgrxg",
   "expected": 24,
   "description": "Operator-signed demonstration posts in the raw decentralized test index. This author is locally suggested for the demo space only; it has no namespace ownership or global moderation rights.",
-  "galleryPeer": "https://syburg.my.to/web9000/media/"
+  "galleryPeer": "https://syburg.my.to/web9000/media/",
+  "autoConnectSameOrigin": true
 }

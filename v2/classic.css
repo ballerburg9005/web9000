@@ -233,3 +233,15 @@ dialog::backdrop{background:#000b}
  .two-cols{grid-template-columns:1fr}.logo{font-size:17px}
  .classic-toolbar{gap:6px}.post .post-headline{font-size:10px}
 }
+/* Multi-photo media navigates within one expanded post, without overlapping it. */
+.media-gallery{display:flex;flex-direction:column;align-items:center;gap:6px;width:100%}
+.media-gallery .gallery-stage{width:100%;max-width:720px;min-height:130px;display:flex;align-items:center;justify-content:center;background:#161417}
+.media-gallery .gallery-stage img{display:block;max-width:100%;max-height:70vh;width:auto;height:auto;object-fit:contain}
+.media-gallery .gallery-navigation{display:flex;align-items:center;justify-content:space-between;gap:20px;width:min(100%,720px)}
+.media-gallery .gallery-navigation button,.media-gallery .gallery-copy{border:0;background:transparent;padding:5px 8px;color:#d8bfaa;font-size:11px}
+.media-gallery .gallery-count{color:#aaa;font-size:10px}
+.media-gallery .gallery-thumbnails{display:flex;gap:4px;flex-wrap:wrap;justify-content:center}
+.media-gallery .gallery-thumb{padding:3px 10px;background:#342c38;border:0;font-size:10px;color:#eee}
+.media-gallery .gallery-thumb.active{background:#deae68;color:#20161b}
+.media-gallery .gallery-placeholder{display:flex;flex-direction:column;gap:11px;align-items:center;justify-content:center;min-height:240px;width:100%;color:#aaa;font-size:11px}
+.media-gallery .gallery-load{border:0;background:#6c4c6b;color:#fff;padding:6px 11px}

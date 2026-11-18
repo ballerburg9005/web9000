@@ -17,10 +17,10 @@ const state={
   space:'commons',sort:'new',view:'grid',search:'',showUnverified:false,
   ownerHint:null,respectOwner:true,selected:null,trust:[],audit:false,showMedia:false,
   demo:[],demoVotes:new Map(),demoPollChoices:new Map(),demoReplies:new Map(),demoFlags:new Map(),demoTagVotes:new Map(),
-  mockKarma:null,mockMode:false,demoAuthor:null,
+  mockKarma:null,mockMode:false,demoAuthor:null,demoAutoConnect:false,autoDemoPeerDisabled:false,
   followedSpaces:['demo','commons'],groupSubscriptions:[],groupViews:[],
   searchFilters:{attribute:'all',includeTags:[],excludeTags:[],excludeKinds:[],minScore:0,customField:''},
-  lastError:'',renderPending:false
+  replyDrafts:new Map(),lastError:'',renderPending:false
 };
 const safeSpace=s=>typeof s==='string'&&s.length>0&&s.length<=180&&!/[\x00-\x1f]/.test(s);
 const validTag=s=>/^[a-z0-9][a-z0-9._:-]{0,47}$/.test(s);
@@ -179,6 +179,13 @@ function updateNetworkStatus(){
 }
 function render(){
   if(!state.identity)return;
+  // Never replace a textarea node while the user is composing a reply.
+  // Network batches and group updates can arrive between individual
+  // keystrokes; deferring the visual redraw protects the active draft.
+  if(document.activeElement?.closest?.('.comment-form')){
+    state.deferredDuringComment=true;
+    updateNetworkStatus();return;
+  }
   const feed=effectiveFeed(),grid=$('imageGrid');
   const prev=state.selected;
   grid.className='grid '+state.view;
@@ -232,7 +239,8 @@ async function store(){
     setItem(state.db,'classic-mock-mode',state.mockMode),
     setItem(state.db,'classic-mock-scores',state.mockKarma?.snapshot()||{}),
     setItem(state.db,'classic-followed-spaces',state.followedSpaces),
-    setItem(state.db,'classic-group-subscriptions',state.groupSubscriptions)
+    setItem(state.db,'classic-group-subscriptions',state.groupSubscriptions),
+    setItem(state.db,'classic-auto-demo-peer-disabled',state.autoDemoPeerDisabled)
   ]);
 }
 async function ingest(e,{outgoing=false}={}){
@@ -273,6 +281,7 @@ async function appendReply(post,textarea,parent=post.id){
   const content=textarea.value.trim();if(!content)return;
   try{
     const message=await publish('reply',{parent,title:'',text:content});
+    state.replyDrafts.delete(post.id+'|'+parent);
     textarea.value='';
     expand(post.id,{focus:false});
     toast('Signed reply '+message.id.slice(0,18)+'…');
@@ -281,6 +290,12 @@ async function appendReply(post,textarea,parent=post.id){
 function addCommentForm(area,post,parent=post.id){
   const box=element('div','comment-form');
   const ta=document.createElement('textarea');ta.placeholder=parent===post.id?'Write a comment...':'Reply to comment...';
+  const draftKey=post.id+'|'+parent;
+  ta.value=state.replyDrafts.get(draftKey)||'';
+  ta.addEventListener('input',()=>{
+    if(ta.value)state.replyDrafts.set(draftKey,ta.value);
+    else state.replyDrafts.delete(draftKey);
+  });
   box.append(ta,button('Send signed reply',()=>appendReply(post,ta,parent)));
   area.append(box);return box;
 }
@@ -314,8 +329,9 @@ function renderReplies(body,post){
   }
   const replies=allEvents().filter(e=>e.payload.kind==='reply');
   const byParent=new Map();
+  const trustedAuthors=new Set(choosePolicy().trustedAuthors);
   for(const e of replies){
-    if(!state.showUnverified&&e.payload.author!==state.identity.author&&!state.trust.includes(e.payload.author))continue;
+    if(!state.showUnverified&&!trustedAuthors.has(e.payload.author))continue;
     if(!byParent.has(e.payload.body.parent))byParent.set(e.payload.body.parent,[]);
     byParent.get(e.payload.body.parent).push(e);
   }
@@ -353,8 +369,59 @@ function markAudit(body,item){
   section.append(element('small','','Rule decisions are local, and any steward’s action is a signed claim, not universal deletion.'));
   body.append(section);
 }
+function showMultiImageGallery(body,post){
+  const cids=post.payload.body.media.slice(0,12);
+  const area=element('div','attachments media-gallery');
+  const stage=element('div','gallery-stage');
+  const navigation=element('div','gallery-navigation');
+  const thumbs=element('div','gallery-thumbnails');
+  const counter=element('span','gallery-count');
+  const allowed=new Set(state.mediaBase&&trustedForMedia(post.payload.author)?cids:[]);
+  let index=0;
+  function draw(){
+    const cid=cids[index];
+    stage.replaceChildren();
+    if(allowed.has(cid)){
+      const img=document.createElement('img');
+      img.alt='Image '+(index+1)+' of '+cids.length;
+      img.loading='eager';
+      img.src=mediaURL(cid);
+      img.onerror=()=>img.replaceWith(element('div','gallery-placeholder','Image unavailable from this independent media peer.'));
+      stage.append(img);
+    }else{
+      const placeholder=element('div','gallery-placeholder',
+        'Image '+(index+1)+' · no automatic download from unknown authors');
+      placeholder.append(button('Load this image',()=>{
+        if(!state.mediaBase)return toast('Choose an independent media peer before loading this attachment.');
+        allowed.add(cid);draw();
+      },'gallery-load'));
+      stage.append(placeholder);
+    }
+    counter.textContent=(index+1)+' / '+cids.length;
+    thumbs.replaceChildren();
+    for(let j=0;j<cids.length;j++){
+      const b=button(String(j+1),()=>{index=j;draw();},
+        'gallery-thumb'+(j===index?' active':''));
+      b.title='View image '+(j+1);
+      b.setAttribute('aria-label','View image '+(j+1));
+      thumbs.append(b);
+    }
+  }
+  navigation.append(button('‹ Previous',()=>{index=(index+cids.length-1)%cids.length;draw();},'gallery-prev'),
+    counter,
+    button('Next ›',()=>{index=(index+1)%cids.length;draw();},'gallery-next'));
+  area.append(stage,navigation,thumbs);
+  area.append(button('Copy current CID',()=>{
+    navigator.clipboard?.writeText(cids[index]).then(()=>toast('CID copied'));
+  },'gallery-copy'));
+  draw();body.append(area);
+}
 function showMedia(body,post){
   if(!post.payload.body.media?.length)return;
+  if(post.payload.body.media.length>1){
+    showMultiImageGallery(body,post);
+    return;
+  }
   const area=element('div','attachments');
   for(const cid of post.payload.body.media){
     const wrap=element('div','media-ref');
@@ -805,7 +872,7 @@ function bind(){
   $('suggestPeers').onclick=loadSuggestions;
   $('connectPeers').onclick=connectPeers;
   $('disconnectPeers').onclick=async()=>{
-    state.mesh.disconnect();state.peers=[];await store();$('peerURLs').value='';render();toast('Disconnected; local posts and backups remain.');
+    state.mesh.disconnect();state.peers=[];state.autoDemoPeerDisabled=true;await store();$('peerURLs').value='';render();toast('Disconnected; local posts and backups remain.');
   };
   $('postForm').onsubmit=compose;
   document.addEventListener('focusout',event=>{
@@ -837,6 +904,7 @@ async function connectPeers(){
     if(!urls.length)throw Error('Enter one or more peer addresses');
     state.mediaBase=normalizeMediaBase($('mediaPeerUrl').value);
     state.peers=urls;
+    state.autoDemoPeerDisabled=false;
     state.mesh.connect(urls,{spaces:['*']});
     await store();close('networkDialog');render();
     toast('Connecting to '+urls.length+' independent peer(s); unverified content remains hidden by default.');
@@ -909,10 +977,13 @@ async function init(){
   state.mockMode=await getItem(state.db,'classic-mock-mode')===true;
   state.followedSpaces=await getItem(state.db,'classic-followed-spaces')||['demo','commons'];
   state.groupSubscriptions=await getItem(state.db,'classic-group-subscriptions')||[];
+  state.autoDemoPeerDisabled=await getItem(state.db,'classic-auto-demo-peer-disabled')===true;
   try{
     const demo=await (await fetch('./demo.json',{cache:'no-store'})).json();
-    if(demo.space==='demo'&&/^ed25519:[A-Za-z0-9_-]{43}$/.test(demo.author))
+    if(demo.space==='demo'&&/^ed25519:[A-Za-z0-9_-]{43}$/.test(demo.author)){
       state.demoAuthor=demo.author;
+      state.demoAutoConnect=demo.autoConnectSameOrigin===true;
+    }
   }catch{}
   const hint=readSiteContext(location.href);
   state.space=hint.space||await getItem(state.db,'classic-space')||'demo';
@@ -966,6 +1037,24 @@ async function init(){
   });
   render();
   await refreshGroups();
+  // A self-hosted demo website may explicitly opt in to loading its
+  // *own* volunteer peer on first visit. Never silently dial an unrelated
+  // remote host just because somebody suggested one in peers.json.
+  // Readers may disconnect once and that opt-out is remembered.
+  if(state.space==='demo'&&state.demoAutoConnect&&!state.autoDemoPeerDisabled&&!state.peers.length){
+    try{
+      const urls=parsePeerUrls($('peerURLs').value,location.protocol==='https:');
+      const ownPeer=urls.find(value=>{
+        const url=new URL(value);
+        return url.hostname===location.hostname&&
+          (location.protocol==='https:'?url.protocol==='wss:':url.protocol==='ws:');
+      });
+      if(ownPeer){
+        state.peers=[ownPeer];
+        await store();
+      }
+    }catch(error){console.warn('Optional same-origin demo peer unavailable:',error.message);}
+  }
   if(state.peers.length){
     try{state.mesh.connect(state.peers,{spaces:['*']});}
     catch(error){toast(error.message);}

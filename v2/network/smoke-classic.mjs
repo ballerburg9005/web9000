@@ -277,6 +277,42 @@ try{
  assert.ok(overflow<=2,'classic mobile layout has no horizontal overflow '+overflow);
  await b.evaluate(()=>scrollTo(0,0));
  await b.screenshot({path:path.join(artifacts,'classic-mobile.png'),fullPage:true});
+ // One independent record may refer to a whole image gallery. Navigation
+ // changes only the selected attachment and never requires raw-CID input.
+ const galleryRecord=await signEvent(demoIdentity,{
+   kind:'post',space:'demo',
+   body:{title:'Multi-image signed gallery test',text:'Two signed CID references.',
+     fields:{presentation:'image',tags:['gallery']},
+     media:['ipfs://'+demoCid,'ipfs://'+demoCid]}
+ });
+ await index.publish(galleryRecord);
+ await eventually(()=>b.evaluate(id=>
+   !!document.querySelector('.post[data-id="'+id+'"]'),galleryRecord.id),
+   'independent gallery record displayed');
+ await b.evaluate(id=>document.querySelector('.post[data-id="'+id+'"]').click(),galleryRecord.id);
+ assert.equal(await b.$$eval('.gallery-thumb',items=>items.length),2,
+   'two CID references should produce gallery navigation thumbnails');
+ assert.equal(await b.$eval('.gallery-count',el=>el.textContent),'1 / 2');
+ await b.evaluate(()=>document.querySelector('.gallery-next').click());
+ assert.equal(await b.$eval('.gallery-count',el=>el.textContent),'2 / 2');
+ await b.evaluate(()=>document.querySelector('.gallery-prev').click());
+ assert.equal(await b.$eval('.gallery-count',el=>el.textContent),'1 / 2');
+ console.log('CLASSIC checkpoint 14: real multi-image gallery navigation');
+
+ // The compact Clans panel must actually publish a signed founding charter.
+ await b.evaluate(()=>{
+   document.getElementById('clansButton').click();
+   document.getElementById('createGroupDetails').open=true;
+   document.getElementById('groupName').value='Chromium test cooperative';
+   document.getElementById('groupDescription').value='Test signed charter from a web browser';
+   document.getElementById('createGroupForm').requestSubmit();
+ });
+ await eventually(()=>bridge.replica.list().some(e=>e.payload.kind==='group'&&
+    e.payload.body.name==='Chromium test cooperative'),'new signed group charter reaches raw peer');
+ await eventually(()=>b.evaluate(()=>document.querySelector('#groupList')?.textContent.includes('Chromium test cooperative')),
+    'new voluntary group appears in its creator UI');
+ await b.evaluate(()=>document.getElementById('closeClans').click());
+ console.log('CLASSIC checkpoint 15: group creation publishes an independent signed charter');
  console.log('PASS classic seven-column board navigation, post composition, schedule, poll, comments, reactions and two-origin signed replication');
 }finally{
  try{await browser?.close();}catch{}
