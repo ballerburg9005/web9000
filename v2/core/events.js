@@ -1,7 +1,7 @@
 // WEB9000/2 portable signed events. No transport, server, namespace owner or gatekeeper.
 export const DOMAIN = 'WEB9000/event/v1';
 const utf8 = new TextEncoder();
-const kinds = new Set(['post','reply','label','endorse','group','policy','membership','invitation','retraction','proposal','vote','accept']);
+const kinds = new Set(['post','reply','label','endorse','group','policy','membership','invitation','retraction','proposal','vote','accept','reaction','tag-vote','poll-choice']);
 const toB64 = a => typeof Buffer !== 'undefined' ? Buffer.from(a).toString('base64url') : btoa(String.fromCharCode(...a)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 const fromB64 = s => {
   if (typeof s !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(s)) throw Error('Invalid encoding');
@@ -35,6 +35,13 @@ export function validatePayload(p) {
     // body.fields is an arbitrary JSON object: market listings, event dates, job positions etc.
     if (p.body.fields !== undefined && (!p.body.fields || typeof p.body.fields !== 'object' || Array.isArray(p.body.fields))) throw Error('Invalid custom fields');
   }
+  if (p.kind === 'reaction' && (!/^sha256:[0-9a-f]{64}$/.test(p.body.target||'') ||
+      ![-2,-1,1,2].includes(p.body.value))) throw Error('Invalid reaction');
+  if (p.kind === 'tag-vote' && (!/^sha256:[0-9a-f]{64}$/.test(p.body.target||'') ||
+      typeof p.body.tag!=='string' || !/^[a-z0-9][a-z0-9._:-]{0,47}$/.test(p.body.tag) ||
+      ![-1,1].includes(p.body.value))) throw Error('Invalid tag vote');
+  if (p.kind === 'poll-choice' && (!/^sha256:[0-9a-f]{64}$/.test(p.body.target||'') ||
+      !Number.isInteger(p.body.option) || p.body.option<0 || p.body.option>31)) throw Error('Invalid poll choice');
   if (p.kind === 'label') {
     if (!(/^sha256:[0-9a-f]{64}$/.test(p.body.target || '') || /^ipfs:\/\/[A-Za-z0-9]{20,120}$/.test(p.body.target || '')) ||
         typeof p.body.tag !== 'string' || !/^[a-z0-9._:/-]{1,100}$/.test(p.body.tag) ||

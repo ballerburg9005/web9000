@@ -73,3 +73,14 @@ test('signed IPFS media attachments are references, not raw bytes',async()=>{
  assert.deepEqual(p.payload.body.media,[ref]);
  await assert.rejects(signEvent(author,{body:{title:'bad',text:'x',media:['javascript:alert(1)']}}),/Media must be IPFS CIDs/);
 });
+
+test('signed reactions, tags and poll choices are portable independent events',async()=>{
+ const a=await generateIdentity();
+ const post=await signEvent(a,{body:{title:'one',text:'two',fields:{tags:['cats'],poll:{question:'yes?',options:['yes','no']}}}});
+ for(const [kind,body] of [['reaction',{target:post.id,value:2}],['tag-vote',{target:post.id,tag:'cats',value:1}],['poll-choice',{target:post.id,option:0}]]){
+  const e=await signEvent(a,{kind,body});
+  assert.equal(await verifyEvent(e),true);
+ }
+ await assert.rejects(signEvent(a,{kind:'reaction',body:{target:post.id,value:100}}),/reaction/);
+ await assert.rejects(signEvent(a,{kind:'tag-vote',body:{target:post.id,tag:'spam!!!',value:1}}),/tag vote/);
+});
