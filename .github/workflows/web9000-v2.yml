@@ -39,6 +39,8 @@ jobs:
           node --check v2/classic.js
           node --check v2/network/smoke-classic.mjs
           node --check v2/network/media-node.mjs
+          node --check v2/network/qualified-index.js
+          node --check v2/network/smoke-qualified.mjs
       - name: Protocol and view tests
         working-directory: v2
         run: npm test
@@ -69,6 +71,10 @@ jobs:
         working-directory: v2/network
         timeout-minutes: 3
         run: npm run test:independent-indexes
+      - name: Physically separate raw and curator-qualified OrbitDB indexes
+        working-directory: v2/network
+        timeout-minutes: 3
+        run: npm run test:qualified
       - name: Real headless Chromium browser across independent HTTP origins
         working-directory: v2/network
         timeout-minutes: 3

@@ -28,7 +28,8 @@
     "test:peer-identity": "node --test peer-identity.test.mjs",
     "test:browser-ui": "node smoke-ui.mjs",
     "test:classic-ui": "node smoke-classic.mjs",
-    "test:media": "node --test media-node.test.mjs"
+    "test:media": "node --test media-node.test.mjs",
+    "test:qualified": "node smoke-qualified.mjs"
   },
   "devDependencies": {
     "puppeteer-core": "^24.23.0"

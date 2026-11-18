@@ -23,6 +23,7 @@ import {Replica} from '../core/replica.js';
 import {createBrowserBridge} from './browser-bridge.mjs';
 import {loadOrCreatePeerKey} from './peer-identity.mjs';
 import {createImageGateway} from './media-node.mjs';
+import {openQualifiedIndex} from './qualified-index.js';
 
 const dir=path.resolve(process.argv[2] || './.web9000-peer');
 const indexName=process.argv[3] || 'web9000-public-test';
@@ -42,7 +43,7 @@ const libp2p=await createLibp2p({
 });
 const ipfs=await createHelia({libp2p,blockstore:new LevelBlockstore(path.join(dir,'blocks'))});
 const orbitdb=await createOrbitDB({ipfs,directory:path.join(dir,'orbitdb')});
-let index,bridge,media;
+let index,bridge,media,qualified,qualifiedBridge;
 try {
   if(remote) await libp2p.dial(multiaddr(remote));
   index=await openPublicIndex(orbitdb,indexName);
@@ -60,7 +61,21 @@ try {
     if(result.accepted&&!result.duplicate)console.log('RECEIVED',ev.id,'space',ev.payload.space,'local records',replica.size);
   });
   console.log('PEER ID',libp2p.peerId.toString(),'persisted at',path.join(dir,'peer-private-key.pb'));
-  console.log('INDEX',index.address);
+  console.log('INDEX',index.address,'(permissionless RAW lane)');
+  if(process.env.WEB9000_QUALIFIED_INDEX==='1'){
+    qualified=await openQualifiedIndex(orbitdb,process.env.WEB9000_QUALIFIED_NAME||'web9000-qualified-v1');
+    // A qualified index is a separate, opt-in operator CURATION. This peer
+    // has no stake proof verifier, so it must accept ZERO qualifications.
+    // Publishing unverified raw records into the curated index is prohibited.
+    qualifiedBridge=await createBrowserBridge({index:{
+       ...qualified,
+       publish:async()=>{throw Error('Qualified publishing disabled until independent stake verifier is configured');}
+      },replica:new Replica({maxEvents:30000}),
+      host:process.env.WEB9000_WS_HOST||'127.0.0.1',
+      port:Number(process.env.WEB9000_QUALIFIED_PORT||8789),
+      allowedOrigins:origins});
+    console.log('QUALIFIED INDEX',qualified.address,'(no verified admissions configured)');
+  }
   console.log('BROWSER',bridge.url,'(WebSocket, optional; expose through WSS reverse proxy for HTTPS sites)');
   if(process.env.WEB9000_MEDIA_SERVER==='1'){
     media=await createImageGateway({ipfs,host:process.env.WEB9000_MEDIA_HOST||'127.0.0.1',
@@ -89,6 +104,8 @@ try {
   }
 }catch(e){console.error('Peer error:',e);process.exitCode=1;}
 finally{
+  if(qualifiedBridge)await qualifiedBridge.close();
+  if(qualified)await qualified.close();
   if(media)await media.close();
   if(bridge)await bridge.close();
   if(index)await index.close();
