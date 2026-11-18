@@ -10,6 +10,7 @@ import {CID} from 'multiformats/cid';
 import * as raw from 'multiformats/codecs/raw';
 import {sha256} from 'multiformats/hashes/sha2';
 import {unixfs} from '@helia/unixfs';
+import {readOperatorQuarantine} from './media-quarantine.mjs';
 
 const IMAGE_MAX=256*1024,RICH_MAX=10*1024*1024;
 const AUDIO_MAX=RICH_MAX,VIDEO_MAX=RICH_MAX;
@@ -63,9 +64,12 @@ function parseRange(value,length){
 }
 export async function createImageGateway({
  ipfs,host='127.0.0.1',port=8788,manifestFile,uploadEnabled=false,
- richMediaEnabled=false,maxTotal=MAX_TOTAL,trustedProxyAddress=null
+ richMediaEnabled=false,maxTotal=MAX_TOTAL,trustedProxyAddress=null,quarantineFile=null
 }={}){
  if(!ipfs||typeof manifestFile!=='string')throw Error('Helia and manifest required');
+ const localQuarantineFile=quarantineFile||manifestFile+'.quarantine.json';
+ // Read the operator's own policy per request so additions and reversals
+ // work without a restart. Invalid policy fails closed, not open.
  if(trustedProxyAddress!==null&&!isIP(trustedProxyAddress))
   throw Error('trustedProxyAddress must be a literal IPv4/IPv6 address');
  // Keep old entrypoint name for operator scripts and existing image CIDs.
@@ -156,13 +160,19 @@ export async function createImageGateway({
    daily.set(key,(daily.get(key)||0)+1);
    reserved+=size;
    try{
+    await readOperatorQuarantine(localQuarantineFile);
     await persistQuotas();
     const bytes=await readLimited(req,cap);
     if(bytes.length!==size||!checks[type](bytes))
      return send(res,415,{error:'Bytes do not match declared media type'});
     const cid=rich?await fs.addBytes(bytes):CID.createV1(raw.code,await sha256.digest(bytes));
-    if(!rich)await ipfs.blockstore.put(cid,bytes);
     const id=cid.toString();
+    // Operators can refuse to retain/serve any specific CID. For UnixFS the
+    // DAG is constructed before its CID is known; an unpublished rejected DAG
+    // might require subsequent local blockstore GC. No remote copy is touched.
+    if((await readOperatorQuarantine(localQuarantineFile)).has(id))
+     return send(res,403,{error:'Operator locally quarantines this CID'});
+    if(!rich)await ipfs.blockstore.put(cid,bytes);
     if(manifest[id]&&manifest[id].type!==type)
      return send(res,409,{error:'Existing CID is already retained with a different MIME type'});
     if(!manifest[id]){
@@ -180,6 +190,15 @@ export async function createImageGateway({
   if(['GET','HEAD'].includes(req.method)&&match){
    const entry=manifest[match[1]];
    if(!entry)return send(res,404,{error:'Peer does not retain this CID'});
+   // Serving quarantine is entirely local and revocable, unlike network-wide
+   // deletion. GET and HEAD both follow the same operator policy.
+   try{
+    if((await readOperatorQuarantine(localQuarantineFile)).has(match[1]))
+      return send(res,403,{error:'This media peer locally quarantines the CID'});
+   }catch(error){
+    console.error('Local media quarantine configuration:',error.message);
+    return send(res,503,{error:'Media peer policy unavailable'});
+   }
    if(!Object.hasOwn(checks,entry.type)||!Number.isSafeInteger(entry.bytes)||
     entry.bytes<1||entry.bytes>MEDIA_LIMITS[entry.type])
     return send(res,503,{error:'Invalid stored media metadata'});

@@ -12,6 +12,8 @@ import {gossipsub} from '@libp2p/gossipsub';
 import {createHelia} from 'helia';
 import {LevelBlockstore} from 'blockstore-level';
 import {createImageGateway,MEDIA_LIMITS} from './media-node.mjs';
+import {changeOperatorQuarantine,readOperatorQuarantine} from './media-quarantine.mjs';
+import {importMediaCID} from './mirror-media.mjs';
 test('opt-in image peer stores genuine content-addressed raw IPFS blocks and refuses unsafe files',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'web9000-media-'));
  let peer,ipfs,gateway;
@@ -77,6 +79,18 @@ test('explicit opt-in UnixFS media accepts 10 MiB bounded audio/video and suppor
   assert.equal(soundBytes.status,200);
   assert.equal(soundBytes.headers.get('content-type'),'audio/mpeg');
   assert.deepEqual(Buffer.from(await soundBytes.arrayBuffer()),audio);
+  // Local CID quarantine stops this operator's media delivery immediately,
+  // while keeping the signed database, CID, and independent peers untouched.
+  const quarantines=manifestFile+'.quarantine.json';
+  await changeOperatorQuarantine({file:quarantines,action:'add',cid:sound.cid,
+    reason:'Local operator review (test)'});
+  assert.equal((await fetch(origin+'/ipfs/'+sound.cid.slice(7))).status,403);
+  assert.equal((await fetch(origin+'/ipfs/'+sound.cid.slice(7),{method:'HEAD'})).status,403);
+  assert.equal((await readOperatorQuarantine(quarantines)).size,1);
+  await changeOperatorQuarantine({file:quarantines,action:'remove',cid:sound.cid});
+  assert.equal((await fetch(origin+'/ipfs/'+sound.cid.slice(7))).status,200,
+    'local reversal restores media access without recreating any signed event');
+
   // Test a UnixFS DAG larger than one normal IPFS raw block, with media
   // format header intact, and verify byte-addressable seeking.
   const large=Buffer.concat([video,Buffer.alloc(2*1024*1024,3)]);
@@ -118,6 +132,12 @@ test('explicit opt-in UnixFS media accepts 10 MiB bounded audio/video and suppor
    manifestFile,uploadEnabled:true,richMediaEnabled:true,
    trustedProxyAddress:'127.0.0.1',maxTotal:20*1024*1024});
   const restarted='http://127.0.0.1:'+gateway.port;
+  await changeOperatorQuarantine({file:quarantines,action:'add',cid:vm.cid,
+    reason:'Revocable local review across restart'});
+  assert.equal((await fetch(restarted+'/ipfs/'+vm.cid.slice(7))).status,403);
+  await changeOperatorQuarantine({file:quarantines,action:'remove',cid:vm.cid});
+  assert.equal((await fetch(restarted+'/ipfs/'+vm.cid.slice(7),{headers:{range:'bytes=0-1'}})).status,206);
+
   assert.equal((await fetch(restarted+'/upload',{method:'POST',
    headers:{'content-type':'audio/mpeg','x-real-ip':'203.0.113.5'},body:audio})).status,429,
    'per-client daily quota survives a media peer restart');
@@ -136,5 +156,49 @@ test('explicit opt-in UnixFS media accepts 10 MiB bounded audio/video and suppor
   try{await ipfs?.stop();}catch{}
   try{await peer?.stop();}catch{}
   await rm(dir,{recursive:true,force:true});
+ }
+});
+test('an independent media operator explicitly mirrors a CID and decides local serving',async()=>{
+ const dirs=[await mkdtemp(join(tmpdir(),'web9000-source-media-')),
+             await mkdtemp(join(tmpdir(),'web9000-mirror-media-'))];
+ const nodes=[],ipfsNodes=[],gateways=[];
+ try{
+  for(const dir of dirs){
+   const peer=await createLibp2p({addresses:{listen:['/ip4/127.0.0.1/tcp/0']},
+    transports:[tcp()],connectionEncrypters:[noise()],streamMuxers:[yamux()],
+    services:{identify:identify(),pubsub:gossipsub({allowPublishToZeroTopicPeers:true})}});
+   nodes.push(peer);
+   const ipfs=await createHelia({libp2p:peer,blockstore:new LevelBlockstore(join(dir,'blocks'))});
+   ipfsNodes.push(ipfs);
+   gateways.push(await createImageGateway({ipfs,port:0,host:'127.0.0.1',
+    manifestFile:join(dir,'media.json'),uploadEnabled:true,richMediaEnabled:true}));
+  }
+  const original='http://127.0.0.1:'+gateways[0].port;
+  const independent='http://127.0.0.1:'+gateways[1].port;
+  const video=await readFile(new URL('../../thumb/thumb10.mp4',import.meta.url));
+  const upload=await fetch(original+'/upload',{
+   method:'POST',headers:{'content-type':'video/mp4'},body:video
+  });
+  assert.equal(upload.status,201);
+  const {cid}=await upload.json();
+  assert.equal((await fetch(independent+'/ipfs/'+cid.slice(7))).status,404,
+    'mere signed CID knowledge does not cause binary replication');
+  const copied=await importMediaCID({cid,sourceBase:original,targetBase:independent});
+  assert.equal(copied.cid,cid,'separately importing must retain identical IPFS CID');
+  assert.deepEqual(Buffer.from(await(await fetch(independent+'/ipfs/'+cid.slice(7))).arrayBuffer()),video);
+  // Operator refusal affects only the selected peer. The original still
+  // serves the same CID, and local removal is reversible without republication.
+  const file=join(dirs[1],'media.json.quarantine.json');
+  await changeOperatorQuarantine({file,action:'add',cid,reason:'Operator test review'});
+  assert.equal((await fetch(independent+'/ipfs/'+cid.slice(7))).status,403);
+  assert.equal((await fetch(original+'/ipfs/'+cid.slice(7))).status,200);
+  await changeOperatorQuarantine({file,action:'remove',cid});
+  assert.equal((await fetch(independent+'/ipfs/'+cid.slice(7))).status,200);
+  console.log('PASS opt-in independent IPFS CID mirroring and peer-local refusal');
+ }finally{
+  for(const gateway of gateways.reverse())try{await gateway.close();}catch{}
+  for(const ipfs of ipfsNodes.reverse())try{await ipfs.stop();}catch{}
+  for(const peer of nodes.reverse())try{await peer.stop();}catch{}
+  for(const dir of dirs)await rm(dir,{recursive:true,force:true});
  }
 });

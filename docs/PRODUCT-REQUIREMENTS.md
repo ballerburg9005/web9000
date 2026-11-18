@@ -94,3 +94,9 @@
 - [ ] Live experimental site updated without destroying persistent peer identity/data. No merge to main until the owner approves.
 
 See [CHAT-DECISIONS.md](./CHAT-DECISIONS.md) for dated user corrections and open design questions.
+
+### Media replication is opt-in and independent of text-event replication
+
+The ordinary web client **defaults to mirroring only signed text/events and media metadata/CID references** in its chosen scopes. It may fetch an image, video or audio file for viewing, but viewing does not enroll it as a persistent IPFS pinning/serving peer (normal browser caching remains possible). Media bytes live on **voluntary specialized IPFS nodes and explicitly opted-in client mirrors**. Neither the uploader nor a particular gateway owns the permanent copy, and the metadata remains meaningful if no media peer is currently online.
+
+A future, explicit **Mirror media** opt-in must offer storage limits, bandwidth limits, scope selection, safety review, refusal/unpin controls and clear operating responsibility. Do not present it as already active in the current browser: the prototype has one selectable media HTTP gateway, not decentralized multi-gateway discovery or browser IPFS pinning. The 10 MiB per audio/video file limit applies to this pilot uploader, not to the universal signed text schema.
