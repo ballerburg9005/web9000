@@ -118,6 +118,19 @@ async function setupNetwork(){
   $('#autoMirror').checked=state.autoMirror;
   for(const name of state.followedSpaces)ensureSpace(name);
   $('#networkEndpoints').value=state.peerUrls.join('\n');
+  $('#suggestedPeers').onclick=async()=>{
+    try{
+      const response=await fetch('./peers.json',{cache:'no-store'});
+      if(!response.ok)throw Error('No published peer suggestions on this host');
+      const data=await response.json();
+      if(data.format!=='web9000-peer-suggestions-v1'||!Array.isArray(data.peers)||data.peers.length>8)
+        throw Error('Invalid suggested peer list');
+      const addresses=data.peers.map(p=>p.url);
+      const urls=parsePeerUrls(addresses.join('\n'),location.protocol==='https:');
+      $('#networkEndpoints').value=urls.join('\n');
+      $('#networkLastError').textContent='Suggested peers are independent operators, not trusted authorities. Review before connecting.';
+    }catch(error){newToast('No peer suggestions: '+error.message);}
+  };
   $('#networkScopes').value=state.replicationScopes.join(', ');
   state.mesh=new BrowserPeerMesh({
     securePage:location.protocol==='https:',

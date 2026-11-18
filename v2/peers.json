@@ -1,0 +1,13 @@
+{
+  "format": "web9000-peer-suggestions-v1",
+  "description": "Voluntary testing transports, NOT a global index or publishing permission. Clients must validate every signed record.",
+  "peers": [
+    {
+      "name": "syburg.my.to experimental WEB9000 mirror",
+      "url": "wss://syburg.my.to/web9000/ws/",
+      "scope": "Experimental public raw index",
+      "operator": "Independent test infrastructure",
+      "notice": "Unaudited public test peer; do not upload sensitive or illegal media"
+    }
+  ]
+}

@@ -64,6 +64,10 @@ try {
   for(const addr of libp2p.getMultiaddrs())console.log('PEER',addr.toString());
   console.log('Initially ingested',initial.filter(x=>x.accepted).length,'signed events.');
   console.log('Paste one signed event JSON per line to append to this public index.');
+  if(process.env.WEB9000_DAEMON==='1') {
+    console.log('Peer running in headless daemon mode; termination is managed by the container.');
+    await new Promise(()=>{});
+  }
   const lines=readline.createInterface({input:process.stdin,crlfDelay:Infinity});
   for await(const line of lines){
     if(!line.trim())continue;
