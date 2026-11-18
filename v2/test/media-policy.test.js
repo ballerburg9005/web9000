@@ -7,7 +7,7 @@ const CID='ipfs://bafybeigdyrzt3cu5z4z4bz3hyjipfxzabfqb4zl3nkrhuxuu7pn7efq3aa';
 const second='ipfs://bafybeihgi6j7ehnwqwasc2n6gccodvz3ga4jfdtfwhknj7uckoar7oysv4';
 const fake='sha256:'+'f'.repeat(64);
 const post=async actor=>signEvent(actor,{body:{title:'image',text:'x',media:[CID]}});
-const label=async actor,tag,target=CID=>signEvent(actor,{kind:'label',body:{tag,target,reason:'safety reviewer assertion'}});
+const label=async (actor,tag,target=CID)=>signEvent(actor,{kind:'label',body:{tag,target,reason:'safety reviewer assertion'}});
 test('media CID can be individually labeled without changing any post',async()=>{
   const reviewer=await generateIdentity();
   const e=await label(reviewer,'malware');assert.equal(e.payload.body.target,CID);
