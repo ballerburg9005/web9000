@@ -113,7 +113,7 @@ try{
  // Open the origin author's own post so incoming comments have a displayed
  // thread to appear in. The earlier test mistakenly inspected a closed row.
  await a.evaluate(()=>document.querySelector('.post[data-index="0"]').click());
- assert.equal(await a.$('.comments-section').then(rows=>rows.length),1);
+ assert.equal(await a.evaluate(()=>document.querySelectorAll('.comments-section').length),1);
  await b.goto(originB,{waitUntil:'domcontentloaded'});await ready(b);
  console.log('CLASSIC checkpoint 8: second browser ready');
  await b.evaluate(()=>document.getElementById('showUnverified').click());
