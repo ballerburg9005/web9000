@@ -153,7 +153,10 @@ function render(){
 function scheduleRender(){
   if(state.renderPending)return;
   state.renderPending=true;
-  requestAnimationFrame(()=>{state.renderPending=false;render();});
+  // Browser tabs without focus may suspend requestAnimationFrame indefinitely.
+  // Network replies must still update their stored and displayed threads.
+  // A microtask coalesces same-turn updates without depending on paint frames.
+  queueMicrotask(()=>{state.renderPending=false;render();});
 }
 function getSelected(){return effectiveFeed().find(x=>x.event.id===state.selected);}
 async function store(){
