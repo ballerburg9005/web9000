@@ -71,3 +71,18 @@ test('tampered endorsement can never apply a penalty',async()=>{
  const r=await evaluateReputation([flag],{roots:[root.author],reviewerWeights:{[reviewer.author]:1},now:3000});
  assert.equal(score(r,root.author),100);
 });
+
+test('expired invitation does not erase a timely signed sponsor acceptance',async()=>{
+ const a=await generateIdentity(),b=await generateIdentity();
+ const i=await mk(a,'invitation',{invitee:b.author,scope:'commons',expiresAt:2500},1000);
+ const accepted=await mk(b,'accept',{invitation:i.id},2000);
+ const afterExpiry=await evaluateReputation([i,accepted],{roots:[a.author],now:4000});
+ assert.ok(score(afterExpiry,b.author)>0);
+});
+test('acceptance after expiry cannot bootstrap trust',async()=>{
+ const a=await generateIdentity(),b=await generateIdentity();
+ const i=await mk(a,'invitation',{invitee:b.author,scope:'commons',expiresAt:1500},1000);
+ const late=await mk(b,'accept',{invitation:i.id},2000);
+ const r=await evaluateReputation([i,late],{roots:[a.author],now:3000});
+ assert.equal(score(r,b.author),0);
+});

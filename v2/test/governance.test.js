@@ -58,12 +58,21 @@ test('conflicting ratified branches are exposed, never resolved by invented glob
   assert.equal(fork.ambiguous,false);assert.equal(fork.state.reviewers[y.author],3);
   assert.equal(fork.state.reviewers[x.author],undefined);
 });
-test('a conflicting approve+reject signer cannot count twice',async()=>{
-  const founder=await generateIdentity(),reviewer=await generateIdentity(),gen=await charter(founder);
-  const p=await proposal(founder,gen.id,gen.id,{type:'appoint-reviewer',author:reviewer.author,weight:1});
-  const a=await vote(founder,p.id,'approve'),b=await vote(founder,p.id,'reject');
-  const s=await deriveGroup([gen,p,a,b],gen.id);
-  assert.equal(s.pending.length,1);assert.equal(s.state.reviewers[reviewer.author],undefined);
+test('rejection cannot retroactively un-ratify and equivocation does not add approvals',async()=>{
+  const founder=await generateIdentity(),member=await generateIdentity(),reviewer=await generateIdentity(),gen=await charter(founder);
+  const add=await proposal(founder,gen.id,gen.id,{type:'add-member',author:member.author});
+  const ratified=await vote(founder,add.id);
+  const p=await proposal(founder,gen.id,add.id,{type:'appoint-reviewer',author:reviewer.author,weight:1});
+  const yes=await vote(founder,p.id,'approve'),no=await vote(founder,p.id,'reject');
+  let s=await deriveGroup([gen,add,ratified,p,yes,no],gen.id);
+  assert.equal(s.pending.length,1); // 1 of 2 members; one author cannot count twice
+  const second=await vote(member,p.id);
+  s=await deriveGroup([gen,add,ratified,p,yes,no,second],gen.id);
+  assert.equal(s.state.reviewers[reviewer.author],1);
+  assert.deepEqual(s.equivocations.find(x=>x.proposal===p.id).authors,[founder.author]);
+  // The previous approval still counts, regardless of the later rejection.
+  const withoutRejection=await deriveGroup([gen,add,ratified,p,yes,second],gen.id);
+  assert.deepEqual(s.state.reviewers,withoutRejection.state.reviewers);
 });
 test('tampered votes and unknown parents do not grant any authority',async()=>{
   const founder=await generateIdentity(),reviewer=await generateIdentity(),gen=await charter(founder);

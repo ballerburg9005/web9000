@@ -33,9 +33,9 @@ const validSignatures=async events=>{
 /**
  * Derive ALL recognized branches of a group; never invent a global winning head.
  * Quorum is evaluated against members in the proposal's *parent snapshot*.
- * A member who signed both yes/no on a proposal is ignored for that proposal.
- * Rejected votes are retained as evidence, but do not retroactively veto a
- * threshold of approvals (acceptance is monotonic as additional events arrive).
+ * Any distinct valid approving voter counts once. Signed rejections are retained
+ * as dissent; a later rejection cannot un-ratify an existing accepted charter.
+ * Both choices from one voter are equivocation evidence, not a retroactive veto.
  */
 export async function deriveGroup(events, groupId, {selectedHead=null,maxEvents=5000,maxDepth=64}={}) {
   if(!idRe.test(groupId))throw Error('Invalid group ID');
@@ -59,6 +59,7 @@ export async function deriveGroup(events, groupId, {selectedHead=null,maxEvents=
     votes.get(id).push(event);
   }
   const recognized=new Set();
+  const equivocations=[];
   const notRecognized=new Map();
   const maxRounds=Math.min(maxDepth,proposals.length)+1;
   for(let round=0;round<maxRounds;round++){
@@ -76,7 +77,9 @@ export async function deriveGroup(events, groupId, {selectedHead=null,maxEvents=
         if(!eligible.has(vote.payload.author))eligible.set(vote.payload.author,new Set());
         eligible.get(vote.payload.author).add(vote.payload.body.choice);
       }
-      const yes=[...eligible.values()].filter(v=>v.size===1&&v.has('approve')).length;
+      const doubleVotes=[...eligible.entries()].filter(([,v])=>v.size>1).map(([author])=>author);
+      if(doubleVotes.length) equivocations.push({proposal:event.id,authors:doubleVotes.sort()});
+      const yes=[...eligible.values()].filter(v=>v.has('approve')).length;
       if(yes<threshold(s)){notRecognized.set(event.id,'insufficient approved member ballots');continue;}
       const next=applyChange(s,change);
       if(!next){notRecognized.set(event.id,'invalid state transition');continue;}
@@ -99,7 +102,8 @@ export async function deriveGroup(events, groupId, {selectedHead=null,maxEvents=
     states: [...states.values()].map(copy),
     recognized:asSorted(recognized),
     pending:proposals.filter(e=>!recognized.has(e.id)).map(e=>({id:e.id,reason:notRecognized.get(e.id)||'missing parent or exceeding depth'})),
-    forks
+    forks,
+    equivocations
   };
 }
 /** Materialize independently chosen group checkpoints into a LOCAL policy.

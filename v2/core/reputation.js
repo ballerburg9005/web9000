@@ -37,8 +37,10 @@ export async function evaluateReputation(events,opts={}) {
     if(await verifyEvent(event))verified.push(event);
   }
   const invitations=new Map();
+  // Invite expiry limits *when acceptance may occur*. Once bilaterally
+  // accepted before the deadline, sponsor lineage and liability persist.
   for(const event of verified.filter(e=>e.payload.kind==='invitation'&&e.payload.body.scope===p.scope)
-    .filter(e=>e.payload.body.expiresAt===undefined||e.payload.body.expiresAt>=p.now)){
+    .filter(e=>e.payload.time<=p.now)){
     if(event.payload.author===event.payload.body.invitee)continue;
     invitations.set(event.id,event);
   }
@@ -49,7 +51,7 @@ export async function evaluateReputation(events,opts={}) {
   for(const a of verified.filter(e=>e.payload.kind==='accept')){
     const invitation=invitations.get(a.payload.body.invitation);
     if(!invitation || a.payload.author!==invitation.payload.body.invitee ||
-       a.payload.time<invitation.payload.time ||
+       a.payload.time<invitation.payload.time || a.payload.time>p.now ||
        (invitation.payload.body.expiresAt!==undefined && a.payload.time>invitation.payload.body.expiresAt))continue;
     const invitee=a.payload.author;
     if(!accepted.has(invitee))accepted.set(invitee,new Set());
