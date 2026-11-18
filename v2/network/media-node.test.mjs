@@ -12,7 +12,7 @@ import {gossipsub} from '@libp2p/gossipsub';
 import {createHelia} from 'helia';
 import {LevelBlockstore} from 'blockstore-level';
 import {createImageGateway} from './media-node.mjs';
-test('opt-in image peer stores genuine content-addressed UnixFS bytes and refuses unsafe files',async()=>{
+test('opt-in image peer stores genuine content-addressed raw IPFS blocks and refuses unsafe files',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'web9000-media-'));
  let peer,ipfs,gateway;
  try{
@@ -34,7 +34,7 @@ test('opt-in image peer stores genuine content-addressed UnixFS bytes and refuse
   const huge=await fetch(url+'/upload',{method:'POST',headers:{'content-type':'image/png'},body:Buffer.alloc(262145)});
   assert.equal(huge.status,413);
   const health=await(await fetch(url+'/health')).json();assert.equal(health.images,1);
-  console.log('PASS independent media node stores real, bounded IPFS/UnixFS images');
+  console.log('PASS independent media node stores real, bounded IPFS raw-block images');
  }finally{
   try{await gateway?.close();}catch{}
   try{await ipfs?.stop();}catch{}

@@ -108,7 +108,15 @@ export async function createImageGateway({
       try{
         const cid=CID.parse(match[1]);
         if(cid.code!==raw.code)throw Error('Unsupported image block codec');
-        const bytes=Buffer.from(await ipfs.blockstore.get(cid));
+        const chunks=[];let size=0;
+        // Helia's blockstore.get returns AsyncIterable<Uint8Array>, not a
+        // single byte array. Enforce the cap during streaming retrieval.
+        for await(const chunk of ipfs.blockstore.get(cid)){
+          size+=chunk.byteLength;
+          if(size>MAX_UPLOAD)throw Error('Stored image exceeds local size limit');
+          chunks.push(Buffer.from(chunk));
+        }
+        const bytes=Buffer.concat(chunks,size);
         const digest=await sha256.digest(bytes);
         if(Buffer.compare(Buffer.from(digest.bytes),Buffer.from(cid.multihash.bytes))!==0)
           throw Error('Stored image failed CID checksum');
