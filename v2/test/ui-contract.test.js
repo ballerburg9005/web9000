@@ -20,7 +20,7 @@ test('classic board has working controls rather than generic debug-only detail m
  const ids=[...app.matchAll(/\$\(['"]([a-zA-Z0-9_-]+)['"]\)/g)].map(m=>m[1]);
  assert.ok(ids.length>25);
  assert.deepEqual([...new Set(ids)].filter(x=>!html.includes('id="'+x+'"')),[]);
- for(const name of ['imageGrid','poll','schedule','postDialog','postForm','joinNetwork','showUnverified'])
+ for(const name of ['imageGrid','composePollQuestion','composeStart','postDialog','postForm','joinNetwork','showUnverified'])
    assert.ok(html.includes(name),name);
  assert.ok(app.includes('keydown'),'keyboard navigation must not regress');
 });
