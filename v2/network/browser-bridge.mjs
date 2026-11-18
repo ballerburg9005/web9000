@@ -116,7 +116,7 @@ export async function createBrowserBridge({
   return {
     replica,index: index.address,
     host,port:server.address().port,
-    url:'ws://'+(host.includes(':')?'['+host+']':host)+':'+server.address().port,
+    url:'ws://'+(host.includes(':')?'['+host+']':host)+':'+server.address().port+'/',
     async close(){
       unsubscribe();
       for(const session of sessions)session.ws.terminate();

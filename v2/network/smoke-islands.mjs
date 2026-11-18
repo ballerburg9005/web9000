@@ -65,7 +65,7 @@ try {
     observedBridge.set(event.id,event);
     const decision=mirrorDecision(event,[...observedBridge.values()],view,null,
       {enabled:true,spaces:['shared-nobody-owns-it']});
-    if(decision.mirror)carrier.publish(event,[a.bridge.url,b.bridge.url].filter(url=>url!==source));
+    if(decision.mirror)carrier.publish(event,carrier.urls.filter(url=>url!==source));
   });
   await eventually(()=>alice.connected===1&&bob.connected===1&&carrier.connected===2,'three active browsers');
   const signed=await signEvent(identity,{space:'shared-nobody-owns-it',
