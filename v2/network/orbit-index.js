@@ -20,6 +20,11 @@ export async function openPublicIndex(orbitdb, nameOrAddress) {
       for (const row of rows) results.push(await replica.ingest(row.value));
       return results;
     },
+    onUpdate(callback) {
+      const handler = entry => callback(entry?.payload?.value);
+      db.events.on('update',handler);
+      return () => db.events.off?.('update',handler);
+    },
     async close(){await db.close();}
   };
 }

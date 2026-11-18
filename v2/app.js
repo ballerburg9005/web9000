@@ -32,7 +32,7 @@ const newToast = msg => {
 const nickname=author=>Object.entries(state.fixtureKeys).find(([,v])=>v.author===author)?.[0] || (author===state.identity?.author?'You':shortAuthor(author));
 function policy() {
   return {...DEFAULT_POLICY,followedSpaces:Object.keys(spaces),showUnknown:state.showUnknown,
-    trustedAuthors:[state.identity.author,...Object.values(state.fixtureKeys).filter(x=>x.name!=='outsider').map(x=>x.author)],
+    trustedAuthors:[...new Set([state.identity.author,...Object.values(state.fixtureKeys).filter(x=>x.name!=='outsider').map(x=>x.author),...(state.userTrusted || [])])],
     groups:community,subscriptions:state.subscribed,
     reviewerWeights:{[state.identity.author]:1}
   };
@@ -179,8 +179,9 @@ function bindEvents(){
       $('#composer').close();$('#composeForm').reset();state.space='all';state.type='All';render();newToast('Signed and saved locally. Export to share with independent peers.');
     }catch(error){$('#composeMessage').textContent=error.message;newToast('Cannot sign: '+error.message);}
   };
-  $('#trustAuthor').onclick=()=>{const author=state.selected?.payload.author;if(author){state.policy.trustedAuthors.push(author); // store preference in a durable local list
-    const arr=JSON.parse(localStorage.getItem('w9-trusted')||'[]');localStorage.setItem('w9-trusted',JSON.stringify([...new Set([...arr,author])]));render();openDetail(state.selected);newToast('Trusted locally. No global reputation changed.');}};
+  $('#trustAuthor').onclick=()=>{const author=state.selected?.payload.author;if(author){state.userTrusted=[...new Set([...(state.userTrusted || []),author])];
+    try{localStorage.setItem('w9-trusted',JSON.stringify(state.userTrusted));}catch{}
+    render();openDetail(state.selected);newToast('Trusted locally. No global reputation changed.');}};
   $('#flagEvent').onclick=async()=>{
     const target=state.selected;if(!target || target.payload.author===state.identity.author)return;
     const label=await signEvent(state.identity,{kind:'label',space:target.payload.space,body:{target:target.id,tag:'spam',reason:'Locally submitted label'}});

@@ -1,0 +1,28 @@
+name: WEB9000 v2 protocol
+on:
+  push:
+    paths:
+      - 'v2/**'
+      - '.github/workflows/web9000-v2.yml'
+  pull_request:
+    paths:
+      - 'v2/**'
+      - '.github/workflows/web9000-v2.yml'
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check JavaScript syntax
+        run: |
+          node --check v2/app.js
+          node --check v2/core/events.js
+          node --check v2/core/policy.js
+          node --check v2/core/replica.js
+          node --check v2/network/node-peer.mjs
+      - name: Protocol and view tests
+        working-directory: v2
+        run: npm test

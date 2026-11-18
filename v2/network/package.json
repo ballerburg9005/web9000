@@ -1,0 +1,21 @@
+{
+  "name": "web9000-peer-experiment",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@chainsafe/libp2p-noise": "^17.0.0",
+    "@chainsafe/libp2p-yamux": "^8.0.1",
+    "@libp2p/gossipsub": "^17.2.1",
+    "@libp2p/identify": "^4.1.18",
+    "@libp2p/tcp": "^11.0.32",
+    "@multiformats/multiaddr": "^13.0.3",
+    "@orbitdb/core": "^4.0.0",
+    "blockstore-level": "^3.0.2",
+    "helia": "^6.0.22",
+    "libp2p": "^3.5.1"
+  }
+}
