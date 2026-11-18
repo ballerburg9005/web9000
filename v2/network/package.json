@@ -16,9 +16,11 @@
     "@orbitdb/core": "^4.0.0",
     "blockstore-level": "^3.0.2",
     "helia": "^6.0.22",
-    "libp2p": "^3.5.1"
+    "libp2p": "^3.5.1",
+    "ws": "^8.18.3"
   },
   "scripts": {
-    "test:peers": "node smoke.mjs"
+    "test:peers": "node smoke.mjs",
+    "test:browser-bridge": "node smoke-browser.mjs"
   }
 }
