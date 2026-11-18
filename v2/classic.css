@@ -324,3 +324,14 @@ dialog::backdrop{background:#000b}
  border-top:1px solid #3d353c;border-bottom:1px solid #3d353c}
 .extra-attributes dt{color:#b4a2b3;text-transform:capitalize}
 .extra-attributes dd{margin:0;color:#e7d7ce;overflow-wrap:anywhere}
+
+/* Portable identity: compact, explicit encrypted backup workflow. */
+.identity-public{display:grid;grid-template-columns:1fr auto;gap:5px 9px;padding:9px;background:#201d23}
+.identity-public > span{grid-column:1/-1;color:#b7a9bc;font-size:10px}
+.identity-public code{display:block;min-width:0;overflow-wrap:anywhere;font:10px/1.4 monospace;color:#e1cfed}
+.identity-public button{align-self:start;color:#e5d0e5;background:#3b3441;border:0;padding:6px 9px;font-size:10px}
+.identity-actions{display:flex;gap:7px;flex-wrap:wrap}
+.identity-actions button{border:0;background:#453849;color:#f5e6ee;padding:7px 11px;font-size:11px}
+.identity-actions #saveIdentityBackup{background:#d2ac6d;color:#241a20;font-weight:700}
+.identity-warning{border-left:2px solid #90724b;padding:7px 10px;color:#c7ada2!important;background:#2d2825;font-size:11px}
+#identityMessage{min-height:16px;font-size:11px;color:#e7d5ae}

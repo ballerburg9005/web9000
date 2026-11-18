@@ -153,3 +153,8 @@ Discussions are actual signed nested comment trees, with independently collapsib
 The Report menu publishes a signed allegation with category and reason, never a universal deletion. Audit shows reporter identity, time, reason, and the chosen local policy status; each signed report can be ignored or restored by one reader without removing its provenance or altering another reader's view. Trash can show locally filtered posts.
 
 The composer supports searchable custom key/value attributes and a normal offer-price entry. Ordinary users are not required to submit raw JSON; supported values display readably in expanded posts.
+### Identity portability on the default classic board
+
+Use **Identity** in the classic toolbar to copy your public signing key or save a password-encrypted backup. The password must contain at least twelve characters. The backup file contains encrypted Ed25519 signing material, not public post history or IPFS files. Keep the backup and password separately and only open it on a trusted website. Restore the file into another static WEB9000 deployment using **Identity → Restore from encrypted file**; publication from the restored key carries the same public author identity without centralized login.
+
+The Chromium end-to-end test specifically performs this backup/restore operation between distinct website origins, then checks a valid signed publication on the independently replicated peer. Production adversarial security review remains necessary; a malicious website can modify its own JavaScript.

@@ -7,6 +7,7 @@ import {buildFeed,DEFAULT_POLICY} from './core/policy.js';
 import {BrowserPeerMesh,parsePeerUrls} from './network/browser-mesh.js';
 import {readSiteContext} from './network/site-context.js';
 import {MockKarmaProvider} from './core/mock-karma.js';
+import {exportIdentityBackup,importIdentityBackup} from './core/identity-backup.js';
 import {searchPosts,tagCloud,availableSpaces,postKind} from './core/search.js';
 import {deriveGroup} from './core/governance.js';
 
@@ -749,6 +750,16 @@ function onKey(e){
   }
   if(next){e.preventDefault();next.focus();if(state.selected)expand(next.dataset.id,{focus:false});}
 }
+function openIdentitySettings(){
+  $('identityPublicKey').textContent=state.identity.author;
+  $('identityPassword').value='';
+  $('identityMessage').textContent='';
+  $('identityDialog').showModal();
+}
+function identityMessage(message){
+  $('identityMessage').textContent=message;
+  toast(message);
+}
 function renderMockRoster(){
   const target=$('mockRoster');target.replaceChildren();
   for(const {author,score} of state.mockKarma.entries()){
@@ -1009,6 +1020,57 @@ function bind(){
       $('createGroupForm').reset();$('createGroupDetails').open=false;
       toast('Signed group charter published. Members vote on admissions. Names do not reserve spaces.');
     }catch(error){toast('Could not create group: '+error.message);}
+  };
+  $('identityButton').onclick=openIdentitySettings;
+  $('closeIdentity').onclick=()=>{
+    $('identityPassword').value='';
+    $('identityDialog').close();
+  };
+  $('copyIdentity').onclick=()=>{
+    navigator.clipboard?.writeText(state.identity.author)
+      .then(()=>identityMessage('Public signing identity copied.'))
+      .catch(()=>identityMessage('Clipboard unavailable. Select and copy the displayed public key.'));
+  };
+  $('saveIdentityBackup').onclick=async()=>{
+    const control=$('saveIdentityBackup');
+    control.disabled=true;
+    try{
+      const backup=await exportIdentityBackup(state.identity,$('identityPassword').value);
+      const blob=new Blob([JSON.stringify(backup,null,2)+'\n'],{type:'application/json'});
+      const url=URL.createObjectURL(blob);
+      try{
+        const link=document.createElement('a');
+        link.href=url;link.download='web9000-identity-'+state.identity.author.slice(-8)+'.encrypted.json';
+        document.body.append(link);link.click();link.remove();
+      }finally{setTimeout(()=>URL.revokeObjectURL(url),1000);}
+      identityMessage('Encrypted backup generated. Keep its password securely and separately.');
+    }catch(error){identityMessage('Backup failed: '+error.message);}
+    finally{control.disabled=false;$('identityPassword').value='';}
+  };
+  $('restoreIdentityBackup').onclick=()=>{
+    if($('identityPassword').value.length<12)
+      return identityMessage('Enter the backup password (at least 12 characters) before restoring.');
+    $('identityBackupFile').click();
+  };
+  $('identityBackupFile').onchange=async event=>{
+    const file=event.target.files?.[0];
+    if(!file)return;
+    try{
+      if(file.size>15000)throw Error('Backup exceeds the 15 KB limit');
+      const backup=JSON.parse(await file.text());
+      const restored=await importIdentityBackup(backup,$('identityPassword').value);
+      if(restored.author!==state.identity.author&&!window.confirm(
+        'Replace this website’s current signing key with the restored key? '+
+        'Your previous posts will still belong to the old identity. '+
+        'Keep an encrypted backup of your current key before switching.'
+      ))return;
+      state.identity=restored;
+      await setItem(state.db,'identity',restored);
+      $('identityPublicKey').textContent=restored.author;
+      render();
+      identityMessage('Signing identity restored on this website. Other records were not deleted.');
+    }catch(error){identityMessage('Restore rejected: '+error.message);}
+    finally{event.target.value='';$('identityPassword').value='';}
   };
   $('mockKarmaButton').onclick=()=>openMockKarma();
   $('closeMockDialog').onclick=()=>$('mockDialog').close();

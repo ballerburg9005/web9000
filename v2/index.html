@@ -64,6 +64,7 @@
 <button type="button" id="goSpace">Open</button>
 <label>View <select id="viewStyle"><option value="grid">Classic grid</option><option value="mixed">Mixed</option><option value="blog">Blog</option></select></label>
 <label><input type="checkbox" id="showUnverified"> Show unstaked / unverified (raw lane)</label>
+<button id="identityButton" type="button" title="Your portable signing identity">Identity</button>
 <button id="mockKarmaButton" type="button">Test karma</button>
 <span id="mockModeLabel" class="mock-active" hidden></span>
 <span class="peer-state" id="peerStatus">Local, disconnected</span>
@@ -110,6 +111,21 @@
 <p class="fine">Local-only posts queue until a willing peer acknowledges them. If an endpoint is offline, export and share signed records or try another peer.</p>
 </div></dialog>
 
+<dialog id="identityDialog"><div class="dialog-inner">
+<div class="dialog-title"><strong>Your signing identity</strong>
+<button type="button" id="closeIdentity" aria-label="Close identity settings">×</button></div>
+<p>Your public key signs posts, replies and group votes. It belongs to you, not to a namespace owner or test peer. The encrypted backup carries the signing key only; it does not archive all posts and attachments.</p>
+<div class="identity-public"><span>Public identity</span><code id="identityPublicKey"></code>
+<button type="button" id="copyIdentity">Copy public key</button></div>
+<label>Backup password (minimum 12 characters)
+<input type="password" id="identityPassword" minlength="12" autocomplete="new-password" placeholder="Used to encrypt/decrypt your backup"></label>
+<div class="identity-actions">
+<button type="button" id="saveIdentityBackup">Download encrypted backup</button>
+<button type="button" id="restoreIdentityBackup">Restore from encrypted file</button></div>
+<input type="file" id="identityBackupFile" accept=".json,application/json" hidden>
+<p class="identity-warning">Keep your backup and password separately. Only enter the password on websites whose code you trust: scripts served by a compromised host can access browser signing keys. Restoring a different key does not rename your previous posts.</p>
+<p id="identityMessage" role="status"></p>
+</div></dialog>
 <dialog id="mockDialog"><div class="dialog-inner">
 <div class="dialog-title"><strong>Numeric karma test provider</strong><button id="closeMockDialog" type="button" aria-label="Close">×</button></div>
 <p><strong>Simulation only.</strong> Assign a numerical score to a public signing identity to prototype how qualified feeds might behave. This does not represent locked coins, independently earned reputation, or an on-chain verification. This browser stores its own simulated numbers.</p>
