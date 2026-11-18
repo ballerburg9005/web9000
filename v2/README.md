@@ -11,7 +11,7 @@ python3 -m http.server 4173
 # http://localhost:4173/v2/
 ```
 
-Requires a modern browser with Ed25519 WebCrypto and IndexedDB. The UI displays an explicit **LOCAL PROTOTYPE** status because it does not yet connect to remote peers. It signs posts with a local browser key, validates signed incoming records, supports JSON import/export, shows configurable views and lets users flag posts without deleting the originals. The fixture content is fictional and generated locally as properly signed events. Its gallery images reference assets already in the repository.
+Requires a modern browser with Ed25519 WebCrypto and IndexedDB. The UI displays an explicit **LOCAL PROTOTYPE** status because it does not yet connect to remote peers. It signs posts with a non-exportable local browser key (identity backup/import is not yet implemented), validates signed incoming records, supports portable signed-event JSON import/export, shows configurable views and lets users flag posts without deleting the originals. The fixture content is fictional and generated locally as properly signed events. Its gallery images reference assets already in the repository.
 
 Run deterministic protocol and policy tests (Node.js 22+):
 

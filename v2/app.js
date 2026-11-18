@@ -114,7 +114,19 @@ function card({event,decision}){
   footer.append(textEl('span','trust'+(decision.reason==='unverified'?' unknown':''),filtered?'Filtered':decision.reason==='trusted'?'● Trusted':'○ Unknown'));
   body.append(footer);item.append(media,body);return item;
 }
+function discoverSpaces(){
+  for(const event of state.replica.list()){
+    const name=event.payload.space;
+    if(!name || Object.prototype.hasOwnProperty.call(spaces,name))continue;
+    spaces[name]=name;
+    const button=textEl('button','side-link','◈ '+name);
+    button.dataset.space=name;
+    button.onclick=()=>{state.space=name;render();};
+    $('.side-section .side-link[data-space="all"]').parentElement.append(button);
+  }
+}
 function render(){
+  discoverSpaces();
   state.policy=policy();
   const all=buildFeed(state.replica.list(),state.policy,state.identity.author);
   const visible=all.filter(x=>x.decision.visible).length,hidden=all.length-visible;
