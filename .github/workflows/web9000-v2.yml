@@ -36,6 +36,9 @@ jobs:
           node --check v2/network/peer-identity.mjs
           node --check v2/network/peer-identity.test.mjs
           node --check v2/network/smoke-ui.mjs
+          node --check v2/classic.js
+          node --check v2/network/smoke-classic.mjs
+          node --check v2/network/media-node.mjs
       - name: Protocol and view tests
         working-directory: v2
         run: npm test
@@ -70,6 +73,14 @@ jobs:
         working-directory: v2/network
         timeout-minutes: 3
         run: npm run test:browser-ui
+      - name: Real classic board UI across two website origins
+        working-directory: v2/network
+        timeout-minutes: 3
+        run: npm run test:classic-ui
+      - name: Real Helia IPFS media upload, retrieve and refusals
+        working-directory: v2/network
+        timeout-minutes: 3
+        run: npm run test:media
       - name: Upload real browser screenshots for design review
         if: always()
         uses: actions/upload-artifact@v4
