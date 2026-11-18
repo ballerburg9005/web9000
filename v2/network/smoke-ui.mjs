@@ -108,7 +108,7 @@ try{
   const cid='ipfs://bafybeigdyrzt3cu5z4z4bz3hyjipfxzabfqb4zl3nkrhuxuu7pn7efq3aa';
   await createPost(second,titleB,'An independently authored metadata-only image listing.',cid);
   await first.waitForFunction(title=>[...document.querySelectorAll('#feed h3')].some(x=>x.textContent===title),{timeout:15000},titleB);
-  assert.ok((await first.$eval('.media-count', els=>els.map(e=>e.textContent))).some(s=>s.includes('IPFS')));
+  assert.equal(await first.evaluate(()=>Array.from(document.querySelectorAll('.media-count'), e=>e.textContent).some(s=>s.includes('IPFS'))),true);
 
   // A separate embedding website can prefer an author's posts, but cannot
   // revoke another author's valid publication. The visitor can override it.
