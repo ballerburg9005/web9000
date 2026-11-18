@@ -176,4 +176,10 @@ Mixed view promotes only substantive text-first discussion and idea posts with l
 
 The compact thumbnail and expanded sound player use ONE shared audio engine, so playback and seek position persist through open, close and rerender. Signed demo videos use their own video frames and minimal translucent custom controls. Polls have distinct voting-option rows, visible totals and selected state.
 
-The ordinary post composer requires preview and affirmative acknowledgment that independent replicas cannot reliably delete already published data. A primary IMAGE may be selected before signing and is used for post thumbnail and gallery selection. Mixed image/audio/video archives and arbitrary preferred media are future milestones, not yet operational uploads.
+The ordinary post composer requires preview and affirmative acknowledgment that independent replicas cannot reliably delete already published data. A primary IMAGE may be selected before signing and is used for post thumbnail and gallery selection. Mixed image/audio/video archives and arbitrary preferred media are future milestones, not yet operational uploads.### Signed post correction and withdrawal (experimental)
+
+From a post you signed, use Correct this post to create a new independently signed version with the same original post ID for comments, ratings and links. Ordinary post preview and permanence consent are mandatory. Editing does NOT rewrite earlier records. Existing attached image CIDs are retained unless you explicitly replace them with new uploaded images. Any previous version's media may continue to be hosted by willing peers.
+
+Request withdrawal creates an author-signed public intent statement. By default the reader's normal feed hides that post, but the signed original is still inspectable in Trash, including its readable immutable history and signed correction/withdrawal actions. Another reader can disable the 'Hide author-withdrawn posts' preference in Advanced search without affecting your view. The author may later sign a Restore request, which does not erase the previous withdrawal.
+
+The independent test peer and ordinary text database DO NOT support universal deletion of published events. These tools cannot promise removal from other sites, peers, backups, or IPFS stores. Signed corrections and withdrawal requests have no global authority.

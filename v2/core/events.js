@@ -34,6 +34,21 @@ export function validatePayload(p) {
     if (p.body.media !== undefined && (!Array.isArray(p.body.media) || p.body.media.length > 12 || p.body.media.some(m => typeof m !== 'string' || !/^ipfs:\/\/[A-Za-z0-9]{20,120}$/.test(m)))) throw Error('Media must be IPFS CIDs');
     // body.fields is an arbitrary JSON object: market listings, event dates, job positions etc.
     if (p.body.fields !== undefined && (!p.body.fields || typeof p.body.fields !== 'object' || Array.isArray(p.body.fields))) throw Error('Invalid custom fields');
+    // A correction is a NEW signed post referring to a previous immutable
+    // publication. No event mutates, overwrites or deletes the previous one.
+    if (p.kind === 'post' && p.body.fields?.revises !== undefined &&
+      (typeof p.body.fields.revises !== 'string' ||
+       !/^sha256:[0-9a-f]{64}$/.test(p.body.fields.revises)))
+      throw Error('Invalid signed revision target');
+  }
+  if(p.kind==='retraction'){
+    // Signed non-deletion withdrawal of a *post*; the author and exact
+    // target are checked against immutable records at projection time.
+    const b=p.body;
+    if(typeof b.target!=='string'||!/^sha256:[0-9a-f]{64}$/.test(b.target)||
+       !['withdraw','restore'].includes(b.action)||
+       (b.reason!==undefined&&(typeof b.reason!=='string'||b.reason.length>500)))
+      throw Error('Invalid signed withdrawal/restore');
   }
   if(p.kind==='profile'){
     const b=p.body;

@@ -10,18 +10,19 @@ import {MockKarmaProvider} from './core/mock-karma.js';
 import {exportIdentityBackup,importIdentityBackup} from './core/identity-backup.js';
 import {searchPosts,tagCloud,availableSpaces,postKind} from './core/search.js';
 import {deriveGroup} from './core/governance.js';
+import {buildPostLifecycles} from './core/lifecycle.js';
 
 const $=id=>document.getElementById(id);
 const state={
   db:null,identity:null,replica:new Replica({maxEvents:25000}),saved:[],outbox:[],
   peers:[],mesh:null,suggested:[],mediaBase:null,
   space:'commons',profileAuthor:null,sort:'new',view:'grid',search:'',showUnverified:false,
-  ownerHint:null,respectOwner:true,selected:null,trust:[],ignoredLabels:[],audit:false,showMedia:false,
+  ownerHint:null,respectOwner:true,respectWithdrawals:true,selected:null,trust:[],ignoredLabels:[],audit:false,showMedia:false,
   demo:[],demoVotes:new Map(),demoPollChoices:new Map(),demoReplies:new Map(),demoFlags:new Map(),demoTagVotes:new Map(),
   mockKarma:null,mockMode:false,demoAuthor:null,demoAutoConnect:false,autoDemoPeerDisabled:false,
   followedSpaces:['demo','commons'],showGroupSpaces:true,groupSubscriptions:[],groupViews:[],
   searchFilters:{attribute:'all',includeTags:[],excludeTags:[],excludeKinds:[],minScore:0,customField:''},
-  replyDrafts:new Map(),expandedTags:new Set(),lastError:'',renderPending:false
+  replyDrafts:new Map(),expandedTags:new Set(),editingPostId:null,editingMedia:[],editingFields:null,lastError:'',renderPending:false
 };
 const safeSpace=s=>typeof s==='string'&&s.length>0&&s.length<=180&&!/[\x00-\x1f]/.test(s);
 const validTag=s=>/^[a-z0-9][a-z0-9._:-]{0,47}$/.test(s);
@@ -91,9 +92,16 @@ const currentPosts=()=>{
     // reader-selected raw-profile view, not global default-feed admission.
     policy.trustedAuthors=[...new Set([...policy.trustedAuthors,state.profileAuthor])];
   }
+  const lifecycles=buildPostLifecycles(records);
   const all=buildFeed(records,policy,state.identity.author)
-    .filter(x=>x.event.payload.kind==='post'&&
-      (!state.profileAuthor||x.event.payload.author===state.profileAuthor));
+    .filter(x=>x.event.payload.kind==='post'&&lifecycles.has(x.event.id)&&
+      (!state.profileAuthor||x.event.payload.author===state.profileAuthor))
+    .map(x=>{
+      const lifecycle=lifecycles.get(x.event.id);
+      return {...x,displayBody:lifecycle.display.payload.body,lifecycle,
+        decision:lifecycle.withdrawn&&state.respectWithdrawals?
+          {...x.decision,visible:false,reason:'signed author withdrawal (original retained)'}:x.decision};
+    });
   const f=state.searchFilters,custom=f.customField.trim();
   const sort=state.sort==='trash'?'new':state.sort;
   return searchPosts(all,{
@@ -119,9 +127,9 @@ const latestVotes=(kind,target,events=allEvents())=>{
 function reactionScore(target,records=allEvents()){
   return latestVotes('reaction',target,records).reduce((sum,e)=>sum+e.payload.body.value,0);
 }
-function recognizedTags(post,records=allEvents()){
+function recognizedTags(post,records=allEvents(),displayBody=post.payload.body){
   const total=new Map();
-  for(const raw of post.payload.body.fields?.tags||[]){
+  for(const raw of displayBody.fields?.tags||[]){
     if(typeof raw!=='string'||!validTag(raw))continue;
     total.set(raw,(total.get(raw)||0)+1);
   }
@@ -318,7 +326,7 @@ function addDemoVideoHover(card,payload){
   card.append(progress);
 }
 function tile(item,i,replyCounts){
-  const p=item.event.payload,b=p.body;
+  const p=item.event.payload,b=item.displayBody||p.body;
   const category=b.fields?.presentation||'image';
   // Mixed is a text-promoting layout. Even media posts without a currently
   // fetchable thumbnail stay a single cell, never 3 or 9.
@@ -366,6 +374,8 @@ function tile(item,i,replyCounts){
   if(b.text)copy.append(element('div','post-description',b.text));
   card.append(copy);
   const icons=[];
+  if(item.lifecycle?.revisions.length>1)icons.push('✎ '+(item.lifecycle.revisions.length-1)+' corrections');
+  if(item.lifecycle?.withdrawn)icons.push('⊘ Withdrawn');
   const kind=b.fields?.presentation||'image';
   if(item.video||(p.author===state.demoAuthor&&p.space==='demo'&&b.fields?.demoVideo))
     icons.push('▶ Video');
@@ -426,7 +436,10 @@ function renderProfileHeader(){
   header.hidden=false;header.replaceChildren();
   const author=state.profileAuthor,info=latestProfile(author)||{};
   const authored=allEvents().filter(event=>event.payload.author===author);
-  const posts=authored.filter(event=>event.payload.kind==='post');
+  const histories=[...buildPostLifecycles(authored).values()];
+  const posts=histories.map(life=>life.root);
+  const corrections=histories.reduce((sum,life)=>sum+life.revisions.length-1,0);
+  const withdrawn=histories.filter(life=>life.withdrawn).length;
   const replies=authored.filter(event=>event.payload.kind==='reply');
   const score=posts.reduce((sum,event)=>sum+reactionScore(event.id),0);
   const name=element('h2','profile-title',info.name?.trim()||shortAuthor(author));
@@ -435,7 +448,8 @@ function renderProfileHeader(){
   heading.append(name,key);
   const stats=element('div','profile-stats');
   for(const [title,val] of [
-    ['Posts',posts.length],['Replies',replies.length],['Received vote score',score],
+    ['Posts',posts.length],['Corrections',corrections],['Withdrawn',withdrawn],
+    ['Replies',replies.length],['Received vote score',score],
     ['Local test karma',state.mockMode?state.mockKarma.scoreFor(author)+'/100':'Not verified']]){
     const entry=element('div','profile-stat');
     entry.append(element('b','',String(val)),element('span','',title));stats.append(entry);
@@ -512,7 +526,24 @@ function updateOpenDiscussion(){
   const panel=document.querySelector('.post-container.expanded');
   if(!panel||!state.selected)return false;
   const item=getSelected();
-  if(!item)return false;
+  if(!item){
+    // Reader's normal feed may have changed because the author withdrew a
+    // publication. Do not leave stale content pretending it is still live.
+    state.selected=null;
+    render();
+    return true;
+  }
+  const newDisplayId=item.lifecycle?.display.id||item.event.id;
+  if(panel.dataset.displayId!==newDisplayId||
+     panel.dataset.withdrawn!==String(item.lifecycle?.withdrawn||false)){
+    if(document.activeElement?.closest?.('.comment-form')){
+      state.deferredDuringComment=true;return true;
+    }
+    const y=window.scrollY;
+    expand(item.event.id,{focus:false});
+    window.scrollTo({top:y,behavior:'instant'});
+    return true;
+  }
   const old=panel.querySelector('.comments-section');
   if(old){
     // Only replace a discussion when that *particular signed thread* changed.
@@ -570,6 +601,7 @@ async function store(){
     setItem(state.db,'classic-trust',state.trust),
     setItem(state.db,'classic-ignored-labels',state.ignoredLabels),
     setItem(state.db,'classic-show-unknown',state.showUnverified),
+    setItem(state.db,'classic-respect-withdrawals',state.respectWithdrawals),
     setItem(state.db,'classic-view',state.view),
     setItem(state.db,'classic-show-media',state.showMedia),
     setItem(state.db,'classic-media-url',state.mediaBase),
@@ -893,12 +925,14 @@ function expand(id,{focus=true}={}){
   const feed=effectiveFeed(),index=feed.findIndex(x=>x.event.id===id);
   if(index<0)return;
   state.selected=id;
-  const current=feed[index],p=current.event.payload,b=p.body;
+  const current=feed[index],p=current.event.payload,b=current.displayBody||p.body;
   for(const container of document.querySelectorAll('.post-container'))container.remove();
   for(const tile of document.querySelectorAll('.post.selected'))tile.classList.remove('selected');
   const cards=[...document.querySelectorAll('.post')],card=cards[index];
   card.classList.add('selected');
   const panel=element('div','post-container expanded'),row=element('div','expanded-row');
+  panel.dataset.displayId=current.lifecycle?.display.id||id;
+  panel.dataset.withdrawn=String(current.lifecycle?.withdrawn||false);
   const left=element('span','nav-arrow','◀'),right=element('span','nav-arrow','▶');
   left.tabIndex=0;right.tabIndex=0;
   left.addEventListener('click',()=>navigate(-1));right.addEventListener('click',()=>navigate(1));
@@ -920,6 +954,22 @@ function expand(id,{focus=true}={}){
     'SIMULATED SCORE '+state.mockKarma.scoreFor(p.author)+'/100 — NOT ON-CHAIN'));
   if(b.fields?.presentation)metadata.append(element('span','',b.fields.presentation.toUpperCase()));
   body.append(metadata);
+  if(current.lifecycle){
+    const l=current.lifecycle;
+    if(l.withdrawn){
+      const notice=element('div','author-withdrawal');
+      notice.append(element('strong','','Author requested withdrawal — original still independently retrievable'));
+      if(l.latestAction?.payload.body.reason)
+        notice.append(element('span','',l.latestAction.payload.body.reason));
+      notice.append(element('small','','Your selected view hides this in normal feeds; other clients and mirrors may retain it.'));
+      body.append(notice);
+    }
+    if(l.revisions.length>1){
+      const marker=element('span','signed-revision-note',
+        'Corrected · '+(l.revisions.length-1)+' signed '+(l.revisions.length===2?'revision':'revisions'));
+      metadata.append(marker);
+    }
+  }
   if(signedDemoMedia(p)?.type==='audio'){
     const player=miniAudio(signedDemoMedia(p).src);
     mediaRoot.append(player);
@@ -927,7 +977,7 @@ function expand(id,{focus=true}={}){
   if(current.thumb&&!signedDemoMedia(p)){
     const region=element('div','attachments'),img=document.createElement('img');
     img.src=current.thumb;img.alt=b.title||'Demo image';img.loading='eager';img.decoding='async';region.append(img);mediaRoot.append(region);
-  }else if(!signedDemoMedia(p))showMedia(mediaRoot,current.event);
+  }else if(!signedDemoMedia(p))showMedia(mediaRoot,current.lifecycle?.display||current.event);
   // Earlier example video events accidentally contained unrelated photo CIDs;
   // they remain in the signed event for audit, never presented as video art.
 
@@ -953,7 +1003,7 @@ function expand(id,{focus=true}={}){
     if(value)body.append(element('div','listing-price','Listed price: '+value));
   }
   const structured=new Set(['tags','presentation','schedule','poll','positions','price','demo',
-    'demoVersion','demoVideo','media','primaryMediaIndex']);
+    'demoVersion','demoVideo','media','primaryMediaIndex','revises']);
   const other=element('dl','extra-attributes');
   let attributes=0;
   for(const [name,value] of Object.entries(field)){
@@ -1005,7 +1055,7 @@ function expand(id,{focus=true}={}){
     body.append(poll);
   }
   const tags=element('div','label-row');
-  const allTags=recognizedTags(current.event);
+  const allTags=recognizedTags(current.event,allEvents(),b);
   const showAll=state.expandedTags.has(id);
   for(const [name,count] of (showAll?allTags:allTags.slice(0,20))){
     const chip=element('span','tag-chip');
@@ -1087,6 +1137,49 @@ function expand(id,{focus=true}={}){
     },'trust-action'));
     votes.append(button('Copy signed record',()=>navigator.clipboard?.writeText(JSON.stringify(current.event,null,2)).then(()=>toast('Signed record copied')),'source-action'));
     body.append(votes);
+    if(current.lifecycle){
+      const life=current.lifecycle;
+      const controls=element('div','publication-lifecycle-controls');
+      if(p.author===state.identity.author){
+        controls.append(button('✎ Correct this post',()=>openCorrection(current),'correct-post'));
+        controls.append(button(life.withdrawn?'↻ Restore in your feed':'⊘ Request withdrawal',
+          ()=>changeWithdrawal(current),'withdraw-post'));
+      }
+      const history=element('details','publication-history');
+      const summary=element('summary','',
+        'Signed history · '+life.revisions.length+' '+(life.revisions.length===1?'version':'versions')+
+        ', '+life.actions.length+' author withdrawal/restore events');
+      history.append(summary);
+      for(const e of life.revisions){
+        const row=element('div','history-row');
+        row.append(element('span','history-date',formatDate(e.payload.time)),
+          element('strong','',e===life.root?'Original signed post':'Signed correction'),
+          element('span','',e.payload.body.title||'Untitled'));
+        const read=element('details','history-readable-version');
+        read.append(element('summary','','Read this immutable version'));
+        if(e.payload.body.text)read.append(element('p','history-post-text',e.payload.body.text));
+        const names=e.payload.body.fields?.tags||[];
+        if(names.length)read.append(element('p','history-post-tags',
+          names.filter(x=>typeof x==='string').map(x=>'#'+x).join('  ')));
+        const attachments=e.payload.body.media||[];
+        if(attachments.length)read.append(element('p','history-post-media',
+          attachments.length+' originally attached IPFS reference(s) remain part of the signed event. '+
+          'Media may no longer be hosted by the peer you selected.'));
+        row.append(read);
+        row.append(button('Copy signed event',()=>navigator.clipboard?.writeText(JSON.stringify(e,null,2))
+          .then(()=>toast('Immutable event copied')),'history-copy'));
+        history.append(row);
+      }
+      for(const e of life.actions){
+        const row=element('div','history-row');
+        row.append(element('span','history-date',formatDate(e.payload.time)),
+          element('strong','',e.payload.body.action==='withdraw'?'Withdrawal request':'Restore request'));
+        if(e.payload.body.reason)row.append(element('span','',e.payload.body.reason));
+        history.append(row);
+      }
+      controls.append(history);
+      body.append(controls);
+    }
     markAudit(body,current);renderReplies(body,current.event);
   }
   // Primary media first, then headline and provenance, voting controls,
@@ -1357,6 +1450,73 @@ function renderGroupList(){
     section.append(controls);box.append(section);
   }
 }
+function resetComposition(){
+  state.editingPostId=null;
+  state.editingMedia=[];
+  state.editingFields=null;
+  $('postForm').reset();
+  $('composeAttributeRows').replaceChildren();
+  $('composeSpace').readOnly=false;
+  $('composeSpace').value=state.space;
+  $('composePrimaryIndex').value='0';
+  $('composeError').hidden=true;
+  $('composePreviewError').hidden=true;
+  $('submitPost').textContent='Preview post';
+  updateComposeType();
+}
+function openCorrection(item){
+  const root=item.event,body=item.displayBody||root.payload.body;
+  if(root.payload.author!==state.identity.author)
+    return toast('Only this signing key can publish an author correction.');
+  resetComposition();
+  state.editingPostId=root.id;
+  state.editingMedia=[...(body.media||[])];
+  state.editingFields=structuredClone(body.fields||{});
+  $('composeSpace').value=root.payload.space;
+  $('composeSpace').readOnly=true;
+  $('composeTitle').value=body.title;
+  $('composeText').value=body.text;
+  $('composePresentation').value=body.fields?.presentation||'text';
+  if(!$('composePresentation').value)$('composePresentation').value='text';
+  $('composeTags').value=(body.fields?.tags||[]).join(', ');
+  $('composePrice').value=body.fields?.price||'';
+  $('composeStart').value=String(body.fields?.schedule?.start||'').slice(0,16);
+  $('composeEnd').value=String(body.fields?.schedule?.end||'').slice(0,16);
+  $('composeLocation').value=body.fields?.schedule?.location||'';
+  $('composePollQuestion').value=body.fields?.poll?.question||'';
+  $('composePollOptions').value=(body.fields?.poll?.options||[]).join('\n');
+  $('composePositions').value=(body.fields?.positions||[]).join('\n');
+  $('composePrimaryIndex').value=String(body.fields?.primaryMediaIndex||0);
+  $('submitPost').textContent='Preview signed correction';
+  updateComposeType();
+  $('postDialog').showModal();
+}
+async function changeWithdrawal(item){
+  const root=item.event,lifecycle=item.lifecycle;
+  if(root.payload.author!==state.identity.author)
+    return toast('Only the publishing key can request withdrawal or restoration.');
+  const action=lifecycle.withdrawn?'restore':'withdraw';
+  const question=action==='withdraw'?
+    'Sign a public withdrawal request? Your post will move to YOUR view’s Trash. '+
+    'Independent replicas may retain and display its original contents.':
+    'Sign a new public request to restore this post to your ordinary feed? '+
+    'The earlier withdrawal remains independently signed and visible in its history.';
+  if(!window.confirm(question))return;
+  const reason=window.prompt('Optional public reason (up to 500 characters)', '')||'';
+  if(reason.length>500)return toast('Reason too long (500 characters maximum)');
+  try{
+    await publish('retraction',{target:root.id,action,reason},{space:root.payload.space});
+    state.selected=null;
+    // Use the same sort transition as the normal toolbar so both the
+    // selected feed and its highlighted controls stay consistent.
+    chooseSort(action==='withdraw'&&state.respectWithdrawals?'trash':'new');
+    const card=[...document.querySelectorAll('.post')].find(x=>x.dataset.id===root.id);
+    if(card){expand(root.id,{focus:false});alignGridRow(card);}
+    toast(action==='withdraw'?
+      'Signed withdrawal requested. The original record is NOT deleted and may remain on independent peers.':
+      'Signed restore requested. The original withdrawal remains permanently auditable.');
+  }catch(error){toast('Could not publish signed request: '+error.message);}
+}
 let composerPreviewObjectURLs=[];
 function clearComposerPreview(){
   for(const url of composerPreviewObjectURLs)URL.revokeObjectURL(url);
@@ -1370,7 +1530,7 @@ function checkComposeInputs(){
   if(!safeSpace(space))throw Error('Invalid namespace');
   const title=$('composeTitle').value.trim(),text=$('composeText').value.trim();
   const files=[...$('composeFiles').files];
-  if(!title&&!text&&!files.length)throw Error('Provide a headline, text or image');
+  if(!title&&!text&&!files.length&&!state.editingMedia.length)throw Error('Provide a headline, text or image');
   if(files.length>3)throw Error('Maximum three images per test post');
   for(const file of files)
     if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>256*1024)
@@ -1389,6 +1549,10 @@ function openComposePreview(event){
     error.hidden=true;
     clearComposerPreview();
     const region=$('composePreviewContent');
+    if(state.editingPostId){
+      region.append(element('div','preview-revision-warning',
+        'SIGNED CORRECTION · This will publish a new immutable event referring to the original, not edit or delete any existing record.'));
+    }
     const heading=element('h2','',input.title||'Untitled post');
     const detail=element('div','preview-post-meta',
       '/'+input.space+' · '+$('composePresentation').selectedOptions[0].textContent);
@@ -1417,6 +1581,10 @@ function openComposePreview(event){
       }
       region.append(gallery);
     }
+    if(state.editingMedia.length&&!files.length)
+      region.append(element('p','preview-post-meta',
+        'Retaining '+state.editingMedia.length+' previously signed attachment(s). '+
+        'Selecting new image files replaces the attachment set in this correction; old bytes may still exist on independent peers.'));
     if($('composePollQuestion').value.trim())
       region.append(element('p','preview-post-meta',
         'Poll · '+$('composePollQuestion').value.trim()+
@@ -1450,7 +1618,7 @@ function addComposeAttributeRow(){
 }
 function customComposeFields(){
   const fields={};
-  const reserved=new Set(['tags','presentation','price','poll','schedule','positions','media','demo','demoVersion','demoVideo']);
+  const reserved=new Set(['tags','presentation','price','poll','schedule','positions','media','demo','demoVersion','demoVideo','revises','primaryMediaIndex']);
   for(const row of $('composeAttributeRows').children){
     const key=row.querySelector('.attribute-key').value.trim().toLowerCase();
     const value=row.querySelector('.attribute-value').value.trim();
@@ -1608,13 +1776,16 @@ function bind(){
     }catch(error){toast(error.message);}
   };
   $('showUnverified').onchange=async e=>{state.showUnverified=e.target.checked;await store();render();};
+  $('respectWithdrawals').onchange=async e=>{
+    state.respectWithdrawals=e.target.checked;await store();render();
+  };
   $('viewStyle').onchange=async e=>{state.view=e.target.value;await store();render();};
   $('goSpace').onclick=async()=>{
     const name=$('spaceName').value.trim();if(!safeSpace(name))return toast('Invalid namespace');
     selectSpace(name);
   };
   $('spaceName').onkeydown=e=>{if(e.key==='Enter')$('goSpace').click();};
-  $('postNew').onclick=()=>{$('composeSpace').value=state.space;updateComposeType();modal('postDialog');};
+  $('postNew').onclick=()=>{resetComposition();modal('postDialog');};
   $('composePresentation').onchange=updateComposeType;
   $('addComposeAttribute').onclick=addComposeAttributeRow;
   $('closeComposer').onclick=()=>close('postDialog');$('cancelPost').onclick=()=>close('postDialog');
@@ -1709,6 +1880,10 @@ async function compose(event){
     checkComposeInputs();
     const space=$('composeSpace').value.trim(),title=$('composeTitle').value.trim(),text=$('composeText').value.trim();
     if(!safeSpace(space))throw Error('Invalid namespace');
+    const root=state.editingPostId?state.replica.get(state.editingPostId):null;
+    if(state.editingPostId&&(!root||root.payload.kind!=='post'||
+       root.payload.author!==state.identity.author||root.payload.space!==space))
+      throw Error('Correction requires an existing post by this exact signing key in the same namespace');
     const files=[...$('composeFiles').files];
     const tags=parseCSV($('composeTags').value);
     const schedule=$('composeStart').value?{start:$('composeStart').value,end:$('composeEnd').value,location:$('composeLocation').value.trim()}:null;
@@ -1716,20 +1891,26 @@ async function compose(event){
     const options=$('composePollOptions').value.split(/\n/).map(x=>x.trim()).filter(Boolean).slice(0,20);
     if(pollQuestion&&options.length<2)throw Error('Polls need at least two choices');
     const positions=$('composePositions').value.split(/\n/).map(x=>x.trim()).filter(Boolean).slice(0,20);
-    if(!title&&!text&&!files.length)throw Error('Provide a headline, text or image');
-    const media=await uploadMedia(files);
-    const fields={tags,presentation:$('composePresentation').value};
+    if(!title&&!text&&!files.length&&!state.editingMedia.length)
+      throw Error('Provide a headline, text or image');
+    const media=files.length?await uploadMedia(files):[...state.editingMedia];
+    const fields={...(state.editingFields||{}),tags,presentation:$('composePresentation').value};
     if(media.length)fields.primaryMediaIndex=
       Math.min(media.length-1,Math.max(0,Number($('composePrimaryIndex').value)||0));
+    else delete fields.primaryMediaIndex;
     Object.assign(fields,customComposeFields());
+    if(root)fields.revises=root.id;
+    else delete fields.revises;
     if(fields.presentation==='offer'){
       const price=$('composePrice').value.trim();
       if(price)fields.price=price;
     }
-    if(schedule)fields.schedule=schedule;
-    if(pollQuestion)fields.poll={question:pollQuestion,options};
-    if(positions.length)fields.positions=positions;
-    await publish('post',{title,text,fields,media},{space});
+    if(schedule)fields.schedule=schedule;else delete fields.schedule;
+    if(pollQuestion)fields.poll={question:pollQuestion,options};else delete fields.poll;
+    if(positions.length)fields.positions=positions;else delete fields.positions;
+    const message=await publish('post',{title,text,fields,media},{space});
+    if(root)toast('New signed correction '+message.id.slice(0,16)+'… published; the original remains intact.');
+    state.editingPostId=null;state.editingMedia=[];state.editingFields=null;
     state.space=space;$('spaceName').value=space;await store();
     $('postForm').reset();
     $('composePrimaryIndex').value='0';
@@ -1756,6 +1937,7 @@ async function init(){
   state.ignoredLabels=(await getItem(state.db,'classic-ignored-labels')||[])
     .filter(id=>typeof id==='string'&&/^sha256:[0-9a-f]{64}$/.test(id)).slice(0,2000);
   state.showUnverified=await getItem(state.db,'classic-show-unknown')===true;
+  state.respectWithdrawals=await getItem(state.db,'classic-respect-withdrawals')!==false;
   state.view=await getItem(state.db,'classic-view')||'grid';
   state.showMedia=await getItem(state.db,'classic-show-media')===true;
   state.mediaBase=await getItem(state.db,'classic-media-url')||null;
@@ -1800,6 +1982,7 @@ async function init(){
   $('viewAudited').classList.toggle('active',state.sort==='trash');
   $('mockEnabled').checked=state.mockMode;
   $('viewStyle').value=state.view;
+  $('respectWithdrawals').checked=state.respectWithdrawals;
   $('peerURLs').value=state.peers.join('\n');
   $('mediaPeerUrl').value=state.mediaBase||'';
   bind();

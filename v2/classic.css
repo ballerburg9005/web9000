@@ -659,3 +659,41 @@ dialog::backdrop{background:#000b}
 .expanded-body .details-line{margin-bottom:8px}
 .expanded-body .reactions{margin-bottom:8px}
 .expanded-body .label-row{margin-bottom:12px}
+
+/* Signed corrections/withdrawal have a small, inspectable timeline. */
+.signed-revision-note{font-size:10px;color:#d9ba78}
+.author-withdrawal{display:flex;flex-direction:column;gap:4px;border-left:3px solid #a77c71;
+ background:#372c30;color:#ead1c8;padding:10px 12px;margin:10px 0 13px;max-width:800px}
+.author-withdrawal strong{font-size:12px}
+.author-withdrawal span{font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere}
+.author-withdrawal small{color:#c8aeb5;font-size:10px}
+.publication-lifecycle-controls{width:min(100%,850px);display:flex;align-items:center;
+ flex-wrap:wrap;gap:8px;margin:18px 0 12px}
+.publication-lifecycle-controls>button{background:#3e333c;color:#e0ced9;
+ border:1px solid #5a4957;border-radius:2px;padding:5px 9px;font-size:11px;cursor:pointer}
+.publication-lifecycle-controls .withdraw-post{color:#e4c9af}
+.publication-lifecycle-controls button:hover{box-shadow:0 0 0 1px #ccac75}
+.publication-history{flex-basis:100%;font-size:11px;border-left:2px solid #6d566b;
+ background:#28222d;padding:5px 10px}
+.publication-history summary{cursor:pointer;color:#d5b5ce;padding:4px 0}
+.publication-history .history-row{display:flex;align-items:center;gap:11px;
+ border-top:1px solid #423947;padding:7px 2px;flex-wrap:wrap}
+.publication-history .history-row strong{font-size:11px;color:#dcbf83}
+.publication-history .history-row span{font-size:10px;color:#c7bcc6;overflow-wrap:anywhere}
+.publication-history .history-date{color:#968a9a}
+.publication-history .history-copy{background:transparent;border:0;
+ color:#d5b5ce;text-decoration:underline;font-size:10px;padding:0}
+.preview-revision-warning{border-left:2px solid #d6b46d;background:#332a32;
+ color:#e4d4bf;padding:9px 12px;font-size:11px;line-height:1.5}
+.search-panel .withdrawal-preference{display:flex;flex-direction:row;
+ align-items:flex-start;gap:8px;color:#c5b6c7;font-size:11px;line-height:1.45}
+.search-panel .withdrawal-preference input[type=checkbox]{width:13px!important;
+ height:13px!important;min-width:13px!important;flex:0 0 13px;padding:0!important;margin:1px 0 0}
+
+.publication-history .history-readable-version{flex-basis:100%;margin:2px 0 5px 1px;
+ border-left:2px solid #675269;padding:5px 9px}
+.publication-history .history-readable-version summary{color:#d9c3d3;font-size:11px;cursor:pointer}
+.publication-history .history-post-text{color:#f0e4eb;white-space:pre-wrap;
+ overflow-wrap:anywhere;line-height:1.55;font-size:12px;margin:7px 0}
+.publication-history .history-post-tags{font-size:10px;color:#dcbccb}
+.publication-history .history-post-media{font-size:10px;color:#b9a6b1}

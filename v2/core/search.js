@@ -3,7 +3,7 @@
 export const SEARCH_KINDS=['image','video','audio','event','poll','text','discussion','job','project','offer'];
 const norm=s=>String(s??'').toLocaleLowerCase();
 export function postKind(item){
-  const b=item.event.payload.body, f=b.fields||{};
+  const b=item.displayBody||item.event.payload.body, f=b.fields||{};
   if(f.poll)return 'poll';
   if(f.schedule)return 'event';
   const p=f.presentation;
@@ -18,10 +18,10 @@ export function postKind(item){
   return 'text';
 }
 function tags(item){
-  return (item.event.payload.body.fields?.tags||[]).filter(v=>typeof v==='string').map(norm);
+  return ((item.displayBody||item.event.payload.body).fields?.tags||[]).filter(v=>typeof v==='string').map(norm);
 }
 function fieldValues(item,attribute){
-  const p=item.event.payload,b=p.body,f=b.fields||{};
+  const p=item.event.payload,b=item.displayBody||p.body,f=b.fields||{};
   if(attribute==='title')return [b.title];
   if(attribute==='body')return [b.text];
   if(attribute==='tags')return tags(item);
@@ -54,7 +54,7 @@ export function searchPosts(items,{
   const includes=includeTags.map(norm).filter(Boolean),excludes=excludeTags.map(norm).filter(Boolean);
   const blocked=new Set(excludeKinds);
   const filtered=items.filter(item=>{
-    const p=item.event.payload,f=p.body.fields||{},t=tags(item);
+    const p=item.event.payload,f=(item.displayBody||p.body).fields||{},t=tags(item);
     if(blocked.has(postKind(item)))return false;
     if(onlyFlagged && item.decision.visible)return false;
     if(!onlyFlagged && !item.decision.visible)return false;

@@ -734,7 +734,102 @@ try{
    e.textContent==='Portable key on a third independent website')));
  console.log('CLASSIC checkpoint 19a: signed personal page and unified grid of authored posts');
  console.log('CLASSIC checkpoint 19: encrypted identity backup and signing across three website origins');
- console.log('PASS classic board, threads, audit, attributes and portable identities across three origins');
+
+ // The visible author can correct a publication without modifying its
+ // immutable original ID, vote totals or thread ancestry. The correction
+ // follows the restored private key to any independent website origin.
+ const originalPost=bridge.replica.list().find(e=>e.payload.kind==='post'&&
+   e.payload.body.title==='Portable key on a third independent website');
+ await c.evaluate(id=>document.querySelector('.post[data-id="'+id+'"]').click(),originalPost.id);
+ assert.equal(await c.$$eval('.correct-post',els=>els.length),1,
+   'only the signing key sees a correct-publication action');
+ await c.evaluate(()=>{
+   document.querySelector('.correct-post').click();
+   document.getElementById('composeTitle').value='Portable idea corrected by its actual author';
+   document.getElementById('composeText').value='Second immutable signed version; the original must remain.';
+   document.getElementById('postForm').requestSubmit();
+ });
+ assert.equal(await c.evaluate(()=>document.querySelector('#composePreviewDialog').open),true,
+   'signed corrections must use the same explicit preview as initial publication');
+ assert.match(await c.$eval('.preview-revision-warning',e=>e.textContent),/new immutable event/);
+ await c.evaluate(()=>{
+   document.getElementById('composePermanentAck').click();
+   document.getElementById('confirmPublishPost').click();
+ });
+ await eventually(()=>bridge.replica.list().some(e=>e.payload.kind==='post'&&
+   e.payload.body.fields?.revises===originalPost.id&&
+   e.payload.body.title==='Portable idea corrected by its actual author'),
+   'signed author correction reaches independent peer');
+ const correction=bridge.replica.list().find(e=>e.payload.kind==='post'&&
+   e.payload.body.fields?.revises===originalPost.id);
+ await eventually(()=>c.evaluate(id=>{
+   const card=document.querySelector('.post[data-id="'+id+'"]');
+   return card?.querySelector('.post-headline')?.textContent===
+     'Portable idea corrected by its actual author'&&
+     document.querySelectorAll('.post[data-id="'+id+'"]').length===1;
+ },originalPost.id),'original post ID stays fixed while corrected title appears');
+ assert.equal(await c.evaluate(id=>!!document.querySelector('.post[data-id="'+id+'"]'),correction.id),
+   false,'correction is not a duplicate new grid card');
+ await c.evaluate(id=>{
+   if(!document.querySelector('.post-container.expanded'))
+     document.querySelector('.post[data-id="'+id+'"]').click();
+ },originalPost.id);
+ assert.match(await c.$eval('.publication-history summary',e=>e.textContent),/2 versions/);
+ assert.equal(await c.$$eval('.publication-history .history-row',els=>els.length),2);
+ await c.evaluate(()=>document.querySelector('.publication-history').open=true);
+ await c.evaluate(()=>document.querySelector('.history-readable-version').open=true);
+ assert.match(await c.$eval('.history-post-text',e=>e.textContent),
+   /Signed using the imported key/,'original readable content remains available to audit');
+ assert.equal(await c.$eval('.expanded-body .post-detail-heading h2',e=>e.textContent),
+   'Portable idea corrected by its actual author');
+ assert.ok(bridge.replica.list().some(e=>e.id===originalPost.id)&&
+   bridge.replica.list().some(e=>e.id===correction.id),
+   'both signed versions remain independently retrievable');
+
+ // Withdrawal is an author-signed request, NOT deletion. The requesting
+ // reader sees the original in Trash, but both signed events still exist.
+ await c.evaluate(()=>{
+   window.confirm=()=>true;window.prompt=()=> 'Retracting to reconsider this claim';
+   document.querySelector('.withdraw-post').click();
+ });
+ await eventually(()=>bridge.replica.list().some(e=>e.payload.kind==='retraction'&&
+   e.payload.body.target===originalPost.id&&
+   e.payload.body.action==='withdraw'),'author withdrawal reaches independent peer');
+ const withdraw=bridge.replica.list().find(e=>e.payload.kind==='retraction'&&
+   e.payload.body.target===originalPost.id&&e.payload.body.action==='withdraw');
+ await eventually(()=>c.evaluate(id=>
+   !!document.querySelector('.post[data-id="'+id+'"]')&&
+   !!document.querySelector('.author-withdrawal')&&
+   document.getElementById('viewAudited').classList.contains('active'),
+   originalPost.id),'author-withdrawn record remains accessible from the local Trash audit');
+ assert.equal(await c.evaluate(()=>document.querySelector('.publication-history .history-row')!==null),true);
+ assert.ok(bridge.replica.list().some(e=>e.id===originalPost.id)&&
+   bridge.replica.list().some(e=>e.id===correction.id)&&
+   bridge.replica.list().some(e=>e.id===withdraw.id),
+   'withdrawal did not delete or rewrite any prior signed event');
+ // A different client is free to disregard the author's latest preference.
+ await c.evaluate(()=>{
+   document.querySelector('.post.selected')?.click();
+   document.getElementById('showSearchOptions').click();
+   document.getElementById('respectWithdrawals').click();
+   document.querySelector('[data-sort="new"]').click();
+ });
+ await eventually(()=>c.evaluate(id=>!!document.querySelector('.post[data-id="'+id+'"]'),
+   originalPost.id),'reader can independently elect to display author-withdrawn posts');
+ await c.evaluate(id=>document.querySelector('.post[data-id="'+id+'"]').click(),originalPost.id);
+ assert.ok(await c.$eval('.author-withdrawal',el=>el.textContent.includes('original still independently retrievable')));
+ // The same author may later sign a restoration; the signed withdrawal is
+ // nevertheless still accessible in the immutable timeline.
+ await c.evaluate(()=>document.querySelector('.withdraw-post').click());
+ await eventually(()=>bridge.replica.list().some(e=>e.payload.kind==='retraction'&&
+   e.payload.body.target===originalPost.id&&e.payload.body.action==='restore'),
+   'author independently restores ordinary view without erasing withdrawal evidence');
+ const restoration=bridge.replica.list().find(e=>e.payload.kind==='retraction'&&
+   e.payload.body.target===originalPost.id&&e.payload.body.action==='restore');
+ assert.ok(restoration.payload.author===originalSigner);
+ assert.ok(bridge.replica.list().some(e=>e.id===withdraw.id));
+ console.log('CLASSIC checkpoint 20: authenticated corrections and reversible author withdrawal, every signed version retained');
+ console.log('PASS classic board, threads, audit, attributes, identity portability and append-only revision/withdrawal');
 }finally{
  try{await browser?.close();}catch{}
  for(const server of servers)await new Promise(resolve=>server.close(resolve));
