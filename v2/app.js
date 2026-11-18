@@ -12,7 +12,7 @@ const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const spaces={commons:'Commons',art:'Creative works',organize:'Organize',exchange:'Exchange',projects:'Projects'};
 const types=['All','Discussion','Art','Event','Offer','Project','Job'];
-const state={replica:new Replica(),identity:null,db:null,space:'all',type:'All',layout:'grid',sort:'new',search:'',showFiltered:false,showUnknown:true,subscribed:[],policy:null,selected:null,fixtureKeys:{},localIds:[],groupIds:{},compiledGroups:{},groupViews:[],userTrusted:[],followedSpaces:Object.keys(spaces),mesh:null,peerUrls:[],replicationScopes:Object.keys(spaces),pending:[],lastConnected:0,autoMirror:false,siteContext:null,honorSiteOwner:true};
+const state={replica:new Replica(),identity:null,db:null,space:'all',type:'All',layout:'grid',sort:'new',search:'',showFiltered:false,showUnknown:true,subscribed:[],policy:null,selected:null,fixtureKeys:{},localIds:[],groupIds:{},compiledGroups:{},groupViews:[],userTrusted:[],followedSpaces:Object.keys(spaces),mesh:null,peerUrls:[],replicationScopes:Object.keys(spaces),pending:[],lastConnected:0,autoMirror:false,siteContext:null,honorSiteOwner:true,groupHeadChoices:{}};
 // Moderation authority derives from signed group checkpoints, not hard-coded group objects.
 const previewContent=[
  {space:'art',type:'Art',title:'Some interesting visual experiments',text:'A small collection of sketches and procedural compositions. What should be explored next?',image:'../thumb/thumb11.jpg',fields:{media:'Image gallery',count:4},author:'maker'},
@@ -66,7 +66,9 @@ async function persistNetwork(){
     setItem(state.db,'peer-urls',state.peerUrls),
     setItem(state.db,'replicate-scopes',state.replicationScopes),
     setItem(state.db,'followed-spaces',state.followedSpaces),
-    setItem(state.db,'auto-mirror',state.autoMirror)
+    setItem(state.db,'auto-mirror',state.autoMirror),
+    setItem(state.db,'group-heads',state.groupHeadChoices),
+    setItem(state.db,'group-subscriptions',state.subscribed)
   ]);
 }
 function ensureSpace(name){
@@ -191,20 +193,24 @@ async function init() {
   for(const event of local) {
     if((await state.replica.ingest(event)).accepted) state.localIds.push(event.id);
   }
+  if(state.db){
+    state.groupHeadChoices=await getItem(state.db,'group-heads')||{};
+    state.subscribed=await getItem(state.db,'group-subscriptions')||[];
+  }
   await refreshGroups();
   bindEvents();await setupNetwork();applySiteContext();render();
 }
 async function refreshGroups() {
   const events=state.replica.list(), compiled={},views=[];
   for(const record of events.filter(e=>e.payload.kind==='group')){
-    const view=await deriveGroup(events,record.id);
+    const view=await deriveGroup(events,record.id,{selectedHead:state.groupHeadChoices[record.id]||null});
     if(!view.found)continue;
     compiled[record.id]={reviewers:view.state.reviewers,inherits:view.state.delegates};
-    views.push({id:record.id,name:view.state.name,heads:view.heads,ambiguous:view.ambiguous});
+    views.push({id:record.id,name:view.state.name,heads:view.heads,selectedHead:view.selectedHead,ambiguous:view.ambiguous});
   }
   state.compiledGroups=compiled;state.groupViews=views;
-  const known=new Set(views.map(x=>x.id));
-  state.subscribed=state.subscribed.filter(id=>known.has(id));
+  // Preserve subscriptions even when a group is temporarily undiscoverable.
+  // Reappearance of its signed charter must not require central approval.
   renderGroupChoices();
 }
 function renderGroupChoices() {
@@ -213,10 +219,29 @@ function renderGroupChoices() {
   for(const info of state.groupViews.filter(v=>!Object.values(state.groupIds).includes(v.id))){
     const label=textEl('label','federation',''),input=document.createElement('input');
     input.type='checkbox';input.checked=state.subscribed.includes(info.id);
-    input.onchange=()=>{state.subscribed=input.checked?[...new Set([...state.subscribed,info.id])]:state.subscribed.filter(x=>x!==info.id);render();};
+    input.onchange=()=>{state.subscribed=input.checked?[...new Set([...state.subscribed,info.id])]:state.subscribed.filter(x=>x!==info.id);void persistNetwork();render();};
     const mark=textEl('span','federation-mark mark-blue','C'),copy=textEl('span','','');
     copy.append(textEl('strong','',info.name),textEl('small','',info.ambiguous?'Conflicting histories: founder rules':'Signed group · '+info.id.slice(0,16)+'…'));
     label.append(input,mark,copy);target.append(label);
+    if(info.heads.length>1){
+      const wrapper=textEl('div','group-fork-select','');
+      wrapper.append(textEl('span','','Conflicting ratified branches — choose which to recognize:'));
+      const select=document.createElement('select');
+      const opts=[info.id,...info.heads].filter((head,i,a)=>a.indexOf(head)===i);
+      for(const head of opts){
+        const item=document.createElement('option');item.value=head;
+        const proposal=state.replica.get(head);
+        const summary=head===info.id?'Founding rules (no branch selected)':
+          (proposal?.payload.body.change?.type||'branch')+' · '+head.slice(7,19)+'…';
+        item.textContent=summary;select.append(item);
+      }
+      select.value=state.groupHeadChoices[info.id]||info.id;
+      select.onchange=async()=>{
+        state.groupHeadChoices[info.id]=select.value===info.id?null:select.value;
+        await persistNetwork();await refreshGroups();render();
+      };
+      wrapper.append(select);target.append(wrapper);
+    }
   }
 }
 function applySiteContext(){
@@ -376,8 +401,8 @@ function bindEvents(){
   $('#showUnknown').onchange=e=>{state.showUnknown=e.target.checked;render();};
   $('#showFiltered').onchange=e=>{state.showFiltered=e.target.checked;render();};
   $('#hiddenToggle').onclick=()=>{state.showFiltered=!state.showFiltered;$('#showFiltered').checked=state.showFiltered;render();};
-  $('#subscribeGuild').onchange=e=>{state.subscribed=e.target.checked?[...new Set([...state.subscribed,state.groupIds.guild])]:state.subscribed.filter(x=>x!==state.groupIds.guild);render();};
-  $('#subscribeSafety').onchange=e=>{state.subscribed=e.target.checked?[...new Set([...state.subscribed,state.groupIds.safety])]:state.subscribed.filter(x=>x!==state.groupIds.safety);render();};
+  $('#subscribeGuild').onchange=e=>{state.subscribed=e.target.checked?[...new Set([...state.subscribed,state.groupIds.guild])]:state.subscribed.filter(x=>x!==state.groupIds.guild);void persistNetwork();render();};
+  $('#subscribeSafety').onchange=e=>{state.subscribed=e.target.checked?[...new Set([...state.subscribed,state.groupIds.safety])]:state.subscribed.filter(x=>x!==state.groupIds.safety);void persistNetwork();render();};
   $('#createGroupButton').onclick=()=>$('#groupComposer').showModal();
   $('#closeGroup').onclick=()=>$('#groupComposer').close();
   $('#groupForm').onsubmit=async e=>{
@@ -444,7 +469,17 @@ function bindEvents(){
   $('#closeDetail').onclick=()=>$('#detail').close();
   $('#noticeClose').onclick=()=>$('#notice').remove();
   $('#settingsButton').onclick=()=>newToast('Adjust the switches or subscribe to voluntary reviewer groups.');
-  $('#showRules').onclick=()=>newToast('Your view is determined by local switches and voluntary guild subscriptions.');
+  $('#showRules').onclick=()=>{
+    const subscribed=state.groupViews.filter(g=>state.subscribed.includes(g.id));
+    $('#rulesDetails').textContent=
+      'Your view trusts '+subscribed.length+' independently signed group(s).\n\n'+
+      (subscribed.length?subscribed.map(g=>g.name+'\ncharter: '+g.id+
+      '\nbranch: '+(state.groupHeadChoices[g.id]||'founding/unique')+
+      '\ncompeting heads: '+g.heads.length).join('\n\n'):'No groups selected.')+
+      '\n\nNo selection above changes the right to publish or deletes anyone’s records.';
+    $('#rulesDialog').showModal();
+  };
+  $('#closeRules').onclick=()=>$('#rulesDialog').close();
   $('#composeForm').onsubmit=async e=>{
     e.preventDefault();
     try{

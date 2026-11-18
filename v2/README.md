@@ -103,3 +103,7 @@ Copy the static `v2/` folder to any ordinary HTTP(S) host. The code host is not 
 ```
 
 If an `owner=` key is supplied, the embedded board exposes a toggle to **ignore the site's owner-preferred view**. The preference never grants exclusive writes, removes outside authors' signed records or changes another client's policy. The site's host cannot silently pick WebSocket peers by query string; visitors configure their own peer endpoints. In embedded cross-origin iframes, browser storage partitioning and third-party restrictions may affect persistence—self-hosting on the same origin is preferred. No privacy anonymity is promised by this transport.
+
+## Signed group forks and explicit reader choice
+
+Two simultaneously ratified amendments to the same signed charter are **separate branches**, not a database conflict that a privileged node can resolve. The frontend now exposes a branch selector for imported groups with multiple ratified heads, persists which head the reader chooses, and preserves subscriptions while a group temporarily disappears from discovery. The **View my rules** dialog displays the selected charters. In a conflicting state, the safest default is the founding rules until the reader explicitly selects a branch.

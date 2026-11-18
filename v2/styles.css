@@ -31,3 +31,8 @@ body.embedded .main{padding:14px;max-width:1100px;margin:auto}
 body.embedded .feed-controls{margin-top:0;padding-top:12px}
 body.embedded .brand{flex:0 0 auto}
 @media(max-width:730px){.site-banner{flex-wrap:wrap}.site-banner label{max-width:none}}
+
+.group-fork-select{margin:3px 6px 12px 32px;font-size:10px;color:#c1badb;line-height:1.45}
+.group-fork-select span{display:block;margin-bottom:6px}
+.group-fork-select select{width:100%;background:#242a35;color:#e0d7f3;border:1px solid #504d68;padding:6px;border-radius:5px;font-size:10px}
+.rules-details{font-size:11px;color:#abbac9;white-space:pre-wrap;line-height:1.7;word-break:break-word}
