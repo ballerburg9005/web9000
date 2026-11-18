@@ -56,3 +56,7 @@ More detail: [ARCHITECTURE.md](./ARCHITECTURE.md).
 ## Opt-in media handling
 
 `core/media-policy.js` enforces a local-only preview/pinning decision: by default IPFS bytes do **not** automatically download, and independently trusted reviewer quorum is needed to quarantine by CID or source event. A node operator can choose `autoUnpin` with a local unpin handler; there is no protocol-wide deletion ability. This is policy code only: the UI does not fetch arbitrary IPFS content and a real node pin manager is not yet connected. Consult local legal counsel before operating a public media host.
+
+## Identity portability
+
+New browser keys can be exported **only in encrypted form** using `core/identity-backup.js`: WebCrypto PBKDF2-SHA256 (300,000 iterations) and AES-256-GCM with a random salt and authenticated metadata. The backup is password-protected and can be imported on another domain, preserving the original Ed25519 public identity. Legacy non-exportable prototype keys can only migrate to a new identity with a signed endorsement; they cannot be magically extracted. **The browser must be trusted with the decrypted key while in use.** A hostile hosted copy can forge signatures, irrespective of backup encryption. There is no central password reset or key escrow.

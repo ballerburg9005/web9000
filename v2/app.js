@@ -2,6 +2,7 @@ import {generateIdentity,signEvent,verifyEvent,shortAuthor} from './core/events.
 import {Replica} from './core/replica.js';
 import {buildFeed,DEFAULT_POLICY} from './core/policy.js';
 import {deriveGroup} from './core/governance.js';
+import {exportIdentityBackup,importIdentityBackup} from './core/identity-backup.js';
 import {openLocal,getItem,setItem} from './core/persist.js';
 
 const $ = s => document.querySelector(s);
@@ -46,9 +47,9 @@ async function init() {
   try {
     state.db=await openLocal();
     state.identity=await getItem(state.db,'identity');
-    if(!state.identity){state.identity=await generateIdentity();await setItem(state.db,'identity',state.identity);}
-  } catch (e) { console.warn('IndexedDB unavailable',e);state.identity=await generateIdentity();newToast('Browser storage unavailable: session is temporary'); }
-  $('#identityKey').textContent=shortAuthor(state.identity.author);
+    if(!state.identity){state.identity=await generateIdentity({extractable:true});await setItem(state.db,'identity',state.identity);}
+  } catch (e) { console.warn('IndexedDB unavailable',e);state.identity=await generateIdentity({extractable:true});newToast('Browser storage unavailable: session is temporary'); }
+  refreshIdentityUI();
   for(const name of ['maker','organizer','thinker','outsider','guildReviewer','safetyReviewer']){
     state.fixtureKeys[name]=await generateIdentity();
     state.fixtureKeys[name].name=name;
@@ -105,6 +106,15 @@ function renderGroupChoices() {
     copy.append(textEl('strong','',info.name),textEl('small','',info.ambiguous?'Conflicting histories: founder rules':'Signed group · '+info.id.slice(0,16)+'…'));
     label.append(input,mark,copy);target.append(label);
   }
+}
+function refreshIdentityUI(){
+  $('#identityKey').textContent=shortAuthor(state.identity.author);
+  $('#migrateLegacyIdentity').hidden=!!state.identity.privateKey.extractable;
+}
+function downloadJSON(value,name){
+  const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'}));
+  const link=document.createElement('a');link.href=url;link.download=name;
+  document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);
 }
 function howLong(ts){
   const hours=Math.max(0,Math.floor((Date.now()-ts)/3600000));
@@ -212,6 +222,45 @@ function bindEvents(){
       $('#groupComposer').close();$('#groupForm').reset();render();
       newToast('Signed group created. Export events to share its charter and ballots.');
     }catch(error){newToast('Group creation failed: '+error.message);}
+  };
+  $('#identityBackupButton').onclick=()=>$('#identityDialog').showModal();
+  $('#closeIdentity').onclick=()=>{ $('#backupPassword').value='';$('#identityDialog').close(); };
+  $('#downloadBackup').onclick=async()=>{
+    try{
+      const pass=$('#backupPassword').value;
+      const backup=await exportIdentityBackup(state.identity,pass);
+      downloadJSON(backup,'web9000-identity-encrypted.json');
+      newToast('Encrypted signing-key backup exported. Keep the password and file separately.');
+    }catch(e){newToast('Backup failed: '+e.message);}
+  };
+  $('#restoreBackup').onclick=()=>{
+    if($('#backupPassword').value.length<12){newToast('Enter your backup password (at least 12 characters).');return;}
+    $('#identityFile').click();
+  };
+  $('#identityFile').onchange=async e=>{
+    const file=e.target.files?.[0];if(!file)return;
+    try{
+      if(file.size>15000)throw Error('Identity backup exceeds 15 KB');
+      const restored=await importIdentityBackup(JSON.parse(await file.text()),$('#backupPassword').value);
+      if(restored.author!==state.identity.author && state.localIds.some(id=>state.replica.get(id)?.payload.author===state.identity.author)){
+        if(!window.confirm('Changing signing identity means your previous posts remain attributed to your old key. Have you securely backed up the old key?'))return;
+      }
+      state.identity=restored;
+      if(state.db)await setItem(state.db,'identity',restored);
+      refreshIdentityUI();render();
+      $('#backupPassword').value='';$('#identityDialog').close();
+      newToast('Encrypted identity restored on this website. Signatures remain portable.');
+    }catch(err){newToast('Restore rejected: '+err.message);}finally{e.target.value='';}
+  };
+  $('#migrateLegacyIdentity').onclick=async()=>{
+    if(!window.confirm('This old non-exportable key cannot be backed up. Migrate to a new portable key? A signed endorsement will link your old identity to the new one, but the old key will no longer be usable in this browser.'))return;
+    try{
+      const newIdentity=await generateIdentity({extractable:true});
+      const linkage=await signEvent(state.identity,{kind:'endorse',body:{subject:newIdentity.author,action:'trust'}});
+      await addLocal(linkage);
+      state.identity=newIdentity;if(state.db)await setItem(state.db,'identity',newIdentity);
+      refreshIdentityUI();render();newToast('New identity created; back it up now. Old endorsement is in your signed records.');
+    }catch(error){newToast('Migration failed: '+error.message);}
   };
   $('#composeButton').onclick=()=>$('#composer').showModal();
   $('#closeCompose').onclick=()=>$('#composer').close();
