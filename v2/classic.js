@@ -423,6 +423,8 @@ function expand(id,{focus=true}={}){
   metadata.append(element('span','','From '+who(p.author)),
     element('span','','Space: '+p.space),element('span','',formatDate(p.time)));
   if(current.demo)metadata.append(element('span','demo-note','PREVIEW — examples are not on the network'));
+  else if(state.mockMode)metadata.append(element('span','mock-score-detail',
+    'SIMULATED SCORE '+state.mockKarma.scoreFor(p.author)+'/100 — NOT ON-CHAIN'));
   if(b.fields?.presentation)metadata.append(element('span','',b.fields.presentation.toUpperCase()));
   body.append(metadata);
   if(current.thumb){

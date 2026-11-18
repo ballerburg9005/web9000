@@ -164,6 +164,24 @@ try{
  assert.equal(await a.evaluate(()=>document.querySelectorAll('.comments-section').length),1);
  await b.goto(originB,{waitUntil:'domcontentloaded'});await ready(b);
  console.log('CLASSIC checkpoint 8: second browser ready');
+ const publishedAuthor=bridge.replica.list().find(e=>e.payload.body.title==='My first actual cats post').payload.author;
+ await b.evaluate(author=>{
+   document.getElementById('mockKarmaButton').click();
+   document.getElementById('mockIdentity').value=author;
+   document.getElementById('mockScore').value='18';
+   document.getElementById('saveMockKarma').click();
+   document.getElementById('mockEnabled').click();
+ },publishedAuthor);
+ await eventually(()=>b.evaluate(()=>[...document.querySelectorAll('.post-headline')]
+   .some(e=>e.textContent==='My first actual cats post')),'independent peer appears under mock key-score qualification');
+ assert.equal(await b.evaluate(()=>document.getElementById('showUnverified').checked),false,
+   'mock-score qualification must not secretly enable raw/unverified feed');
+ await b.evaluate(()=>{
+   document.getElementById('mockEnabled').click();
+   document.getElementById('closeMockDialog').click();
+ });
+ await eventually(()=>b.evaluate(()=>![...document.querySelectorAll('.post-headline')]
+   .some(e=>e.textContent==='My first actual cats post')),'mock mode disabled restores default unknown-author suppression');
  await b.evaluate(()=>document.getElementById('showUnverified').click());
  console.log('CLASSIC checkpoint 9: second browser opted into raw lane');
  await connect(b,bridge.url);
