@@ -4,12 +4,13 @@ import {buildFeed,DEFAULT_POLICY} from './core/policy.js';
 import {deriveGroup} from './core/governance.js';
 import {exportIdentityBackup,importIdentityBackup} from './core/identity-backup.js';
 import {openLocal,getItem,setItem} from './core/persist.js';
+import {BrowserPeerMesh,parsePeerUrls} from './network/browser-mesh.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const spaces={commons:'Commons',art:'Creative works',organize:'Organize',exchange:'Exchange',projects:'Projects'};
 const types=['All','Discussion','Art','Event','Offer','Project','Job'];
-const state={replica:new Replica(),identity:null,db:null,space:'all',type:'All',layout:'grid',sort:'new',search:'',showFiltered:false,showUnknown:true,subscribed:[],policy:null,selected:null,fixtureKeys:{},localIds:[],groupIds:{},compiledGroups:{},groupViews:[],userTrusted:[]};
+const state={replica:new Replica(),identity:null,db:null,space:'all',type:'All',layout:'grid',sort:'new',search:'',showFiltered:false,showUnknown:true,subscribed:[],policy:null,selected:null,fixtureKeys:{},localIds:[],groupIds:{},compiledGroups:{},groupViews:[],userTrusted:[],followedSpaces:Object.keys(spaces),mesh:null,peerUrls:[],replicationScopes:Object.keys(spaces),pending:[],lastConnected:0};
 // Moderation authority derives from signed group checkpoints, not hard-coded group objects.
 const previewContent=[
  {space:'art',type:'Art',title:'Some interesting visual experiments',text:'A small collection of sketches and procedural compositions. What should be explored next?',image:'../thumb/thumb11.jpg',fields:{media:'Image gallery',count:4},author:'maker'},
@@ -29,7 +30,7 @@ const newToast = msg => {
 };
 const nickname=author=>Object.entries(state.fixtureKeys).find(([,v])=>v.author===author)?.[0] || (author===state.identity?.author?'You':shortAuthor(author));
 function policy() {
-  return {...DEFAULT_POLICY,followedSpaces:Object.keys(spaces),showUnknown:state.showUnknown,
+  return {...DEFAULT_POLICY,followedSpaces:state.followedSpaces,showUnknown:state.showUnknown,
     trustedAuthors:[...new Set([state.identity.author,...Object.values(state.fixtureKeys).filter(x=>x.name!=='outsider').map(x=>x.author),...(state.userTrusted || [])])],
     groups:state.compiledGroups,subscriptions:state.subscribed,
     reviewerWeights:{[state.identity.author]:1}
@@ -42,6 +43,100 @@ async function addLocal(event){
   const answer=await state.replica.ingest(event);
   if(answer.accepted&&!answer.duplicate){state.localIds.push(event.id);await saveLocal();}
   return answer;
+}
+// Imported/mirrored records are local data, not automatic republications.
+// Only events authored through this UI join the durable outgoing queue.
+async function publishLocal(event){
+  const result=await addLocal(event);
+  if(!result.accepted)throw Error(result.reason||'local replica refused event');
+  if(!state.pending.some(x=>x.event.id===event.id)){
+    state.pending.push({event,ackedBy:[]});await persistNetwork();
+  }
+  state.mesh?.publish(event);
+  updateNetworkStatus();
+}
+async function persistNetwork(){
+  if(!state.db)return;
+  await Promise.all([
+    setItem(state.db,'outbox',state.pending),
+    setItem(state.db,'peer-urls',state.peerUrls),
+    setItem(state.db,'replicate-scopes',state.replicationScopes),
+    setItem(state.db,'followed-spaces',state.followedSpaces)
+  ]);
+}
+function ensureSpace(name){
+  if(typeof name!=='string'||!name||name.length>180)return;
+  if(!Object.prototype.hasOwnProperty.call(spaces,name)) {
+    spaces[name]=name;
+    const button=textEl('button','side-link','◈ '+name);
+    button.dataset.space=name;
+    button.onclick=()=>{followSpace(name);state.space=name;render();};
+    $('.side-section .side-link[data-space="all"]').parentElement.append(button);
+  }
+}
+function followSpace(name){
+  if(!name||name.length>180||/[\x00-\x1f]/.test(name))throw Error('Invalid namespace');
+  ensureSpace(name);
+  if(!state.followedSpaces.includes(name)) {
+    state.followedSpaces.push(name);void persistNetwork();
+  }
+}
+function updateNetworkStatus(){
+  const connected=state.mesh?.connected||0;
+  $('#statPeers').textContent=connected;
+  $('#networkSummary').textContent=connected
+    ? connected+' connected peer'+(connected===1?'':'s')+' · '+state.pending.length+' outgoing queued'
+    : 'Local mode · '+state.peerUrls.length+' peer address'+(state.peerUrls.length===1?'':'es')+' configured · '+state.pending.length+' queued';
+  $('#networkStatusBar').textContent=connected?'● '+connected+' PEER'+(connected===1?'':'S')+' CONNECTED':'● LOCAL / NO PEERS';
+  $('#networkStatusBar').classList.toggle('online',connected>0);
+  $('#notice').querySelector('.notice-message').textContent=connected
+    ? 'Connected to independent WebSocket-accessible OrbitDB peers. Records are signed and verified locally; peers cannot edit them or authorize namespaces. Transport peers can refuse to store or forward records.'
+    : 'No browser peer connected. Signed posts stay in local storage and your outgoing queue. Add independently operated WebSocket peer addresses to exchange records without an administrator.';
+}
+let groupRefreshTimer=null;
+async function setupNetwork(){
+  if(state.db){
+    state.pending=await getItem(state.db,'outbox')||[];
+    state.peerUrls=await getItem(state.db,'peer-urls')||[];
+    state.replicationScopes=await getItem(state.db,'replicate-scopes')||Object.keys(spaces);
+    state.followedSpaces=await getItem(state.db,'followed-spaces')||Object.keys(spaces);
+  }
+  for(const name of state.followedSpaces)ensureSpace(name);
+  $('#networkEndpoints').value=state.peerUrls.join('\n');
+  $('#networkScopes').value=state.replicationScopes.join(', ');
+  state.mesh=new BrowserPeerMesh({
+    securePage:location.protocol==='https:',
+    onEvent:async(event)=>{
+      const result=await addLocal(event);
+      if(!result.accepted||result.duplicate)return;
+      if(['group','proposal','vote'].includes(event.payload.kind)){
+        clearTimeout(groupRefreshTimer);
+        groupRefreshTimer=setTimeout(async()=>{await refreshGroups();render();},120);
+      } else render();
+    },
+    onAck:(id,url)=>{void (async()=>{
+      const item=state.pending.find(x=>x.event.id===id);
+      if(!item)return;
+      item.ackedBy=[...new Set([...item.ackedBy,url])];
+      if(state.peerUrls.length && state.peerUrls.every(peer=>item.ackedBy.includes(peer)))
+        state.pending=state.pending.filter(x=>x.event.id!==id);
+      await persistNetwork();updateNetworkStatus();
+    })().catch(error=>console.error('Outbox persistence',error));},
+    onStatus:({connected})=>{
+      if(connected>state.lastConnected)
+        for(const item of state.pending)if(!item.ackedBy.every(x=>state.peerUrls.includes(x)) || item.ackedBy.length<state.peerUrls.length)
+          state.mesh?.publish(item.event);
+      state.lastConnected=connected;updateNetworkStatus();
+    },
+    onError:(_url,error)=>{
+      $('#networkLastError').textContent='Peer: '+String(error).slice(0,180);
+    }
+  });
+  updateNetworkStatus();
+  if(state.peerUrls.length){
+    try{state.mesh.connect(state.peerUrls,{spaces:state.replicationScopes});}
+    catch(error){$('#networkLastError').textContent=error.message;}
+  }
 }
 async function init() {
   try {
@@ -80,7 +175,7 @@ async function init() {
     if((await state.replica.ingest(event)).accepted) state.localIds.push(event.id);
   }
   await refreshGroups();
-  state.policy=policy(); bindEvents();render();
+  bindEvents();await setupNetwork();render();
 }
 async function refreshGroups() {
   const events=state.replica.list(), compiled={},views=[];
@@ -161,7 +256,7 @@ function render(){
   const all=buildFeed(state.replica.list(),state.policy,state.identity.author);
   const visible=all.filter(x=>x.decision.visible).length,hidden=all.length-visible;
   $('#statVisible').textContent=visible;$('#statHidden').textContent=hidden;
-  $('#followedCount').textContent=Object.keys(spaces).length;
+  $('#followedCount').textContent=state.followedSpaces.length;
   const q=state.search.trim().toLowerCase();
   let results=all.filter(x=>(state.showFiltered||x.decision.visible))
     .filter(x=>state.space==='all'||x.event.payload.space===state.space)
@@ -190,6 +285,40 @@ function openDetail(event) {
   $('#detail').showModal();
 }
 function bindEvents(){
+  $('#managePeers').onclick=()=>{$('#peerSettings').hidden=!$('#peerSettings').hidden;};
+  $('#connectPeers').onclick=async()=>{
+    try{
+      const peers=parsePeerUrls($('#networkEndpoints').value,location.protocol==='https:');
+      const raw=$('#networkScopes').value.trim();
+      const scopes=raw==='*'?['*']:raw.split(/[\s,]+/).filter(Boolean);
+      if(!scopes.length||scopes.length>64||scopes.some(s=>s.length>180))throw Error('Invalid replication scopes');
+      state.peerUrls=peers;state.replicationScopes=scopes;
+      state.mesh.connect(peers,{spaces:scopes});await persistNetwork();
+      updateNetworkStatus();newToast('Configured '+peers.length+' independently operated peer endpoint(s).');
+    }catch(error){$('#networkLastError').textContent=error.message;newToast(error.message);}
+  };
+  $('#disconnectPeers').onclick=async()=>{
+    state.mesh.disconnect();state.peerUrls=[];await persistNetwork();updateNetworkStatus();
+    newToast('Disconnected. Local signed records are preserved.');
+  };
+  $('#followSpaceButton').onclick=()=>{
+    try{
+      const name=$('#followSpaceInput').value.trim();
+      followSpace(name);state.space=name;render();$('#followSpaceInput').value='';
+      newToast('Following '+name+' locally; update replication scopes to mirror it.');
+    }catch(error){newToast(error.message);}
+  };
+  $('#republishButton').onclick=()=>{
+    if(!state.mesh?.connected)return newToast('Connect a peer first.');
+    let count=0;
+    for(const id of state.localIds){
+      const event=state.replica.get(id);
+      if(event?.payload.author===state.identity.author){
+        state.mesh.publish(event);count++;
+      }
+    }
+    newToast('Reannounced '+count+' own signed event(s) to your connected peers.');
+  };
   const filter=$('#typeFilters');
   for(const name of types){const b=textEl('button','',name);b.dataset.type=name;b.onclick=()=>{state.type=name;render();};filter.append(b);}
   $$('.side-link[data-space]').forEach(b=>b.onclick=()=>{state.space=b.dataset.space;render();window.scrollTo({top:0,behavior:'smooth'});});
@@ -209,13 +338,13 @@ function bindEvents(){
       const name=$('#groupName').value.trim();
       const quorum={numerator:Number($('#groupThreshold').value),denominator:100};
       const charter=await signEvent(state.identity,{kind:'group',body:{name,quorum}});
-      await addLocal(charter);
+      await publishLocal(charter);
       if($('#selfReviewer').checked){
         const proposal=await signEvent(state.identity,{kind:'proposal',body:{
           group:charter.id,parent:charter.id,
           change:{type:'appoint-reviewer',author:state.identity.author,weight:1}}});
         const ballot=await signEvent(state.identity,{kind:'vote',body:{proposal:proposal.id,choice:'approve'}});
-        await addLocal(proposal);await addLocal(ballot);
+        await publishLocal(proposal);await publishLocal(ballot);
       }
       state.subscribed.push(charter.id);
       await refreshGroups();
@@ -257,7 +386,7 @@ function bindEvents(){
     try{
       const newIdentity=await generateIdentity({extractable:true});
       const linkage=await signEvent(state.identity,{kind:'endorse',body:{subject:newIdentity.author,action:'trust'}});
-      await addLocal(linkage);
+      await publishLocal(linkage);
       state.identity=newIdentity;if(state.db)await setItem(state.db,'identity',newIdentity);
       refreshIdentityUI();render();newToast('New identity created; back it up now. Old endorsement is in your signed records.');
     }catch(error){newToast('Migration failed: '+error.message);}
@@ -275,10 +404,8 @@ function bindEvents(){
       if(!fields || typeof fields!=='object' || Array.isArray(fields))throw Error('Fields must be a JSON object');
       fields.uiType=({discussion:'Discussion',art:'Art',event:'Event',offer:'Offer',project:'Project',job:'Job'})[$('#postKind').value];
       const event=await signEvent(state.identity,{space:$('#postSpace').value.trim(),body:{title:$('#postTitle').value,text:$('#postText').value,fields}});
-      await addLocal(event);
-      const newSpace=event.payload.space;if(!state.policy.followedSpaces.includes(newSpace)){
-        spaces[newSpace]=newSpace;const button=textEl('button','side-link','◈ '+newSpace);button.dataset.space=newSpace;button.onclick=()=>{state.space=newSpace;render();};$('.side-section .side-link[data-space="all"]').parentElement.append(button);
-      }
+      await publishLocal(event);
+      followSpace(event.payload.space);
       $('#composer').close();$('#composeForm').reset();state.space='all';state.type='All';render();newToast('Signed and saved locally. Export to share with independent peers.');
     }catch(error){$('#composeMessage').textContent=error.message;newToast('Cannot sign: '+error.message);}
   };
@@ -288,7 +415,7 @@ function bindEvents(){
   $('#flagEvent').onclick=async()=>{
     const target=state.selected;if(!target || target.payload.author===state.identity.author)return;
     const label=await signEvent(state.identity,{kind:'label',space:target.payload.space,body:{target:target.id,tag:'spam',reason:'Locally submitted label'}});
-    await addLocal(label);$('#detail').close();render();newToast('Signed label created. The source event remains intact.');
+    await publishLocal(label);$('#detail').close();render();newToast('Signed label created. The source event remains intact.');
   };
   $('#copyEvent').onclick=async()=>{if(!state.selected)return;try{await navigator.clipboard.writeText(JSON.stringify(state.selected,null,2));newToast('Portable signed event copied.');}catch{newToast('Clipboard unavailable in this browser. Use Export instead.');}};
   $('#exportButton').onclick=()=>{

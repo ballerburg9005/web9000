@@ -2,7 +2,7 @@
 
 This folder is the **replacement project**, built independently of the legacy single-file GunDB UI.
 
-## Offline interface
+## Browser interface with optional peers
 
 From the repository root:
 
@@ -11,7 +11,7 @@ python3 -m http.server 4173
 # http://localhost:4173/v2/
 ```
 
-Requires a modern browser with Ed25519 WebCrypto and IndexedDB. The UI displays an explicit **LOCAL PROTOTYPE** status because it does not yet connect to remote peers. It signs posts with a local browser key, validates signed incoming records, supports JSON import/export, shows configurable views and lets users flag posts without deleting the originals. The fixture content is fictional and generated locally as properly signed events. Its gallery images reference assets already in the repository.
+Requires a modern browser with Ed25519 WebCrypto and IndexedDB. The UI works locally and now connects to *user-configured* WebSocket bridges on independently operated OrbitDB/libp2p peers, with signature-checked event synchronization. It has **no mandatory default server**, public bootstrap service or browser-native libp2p transport yet. It signs posts with a local browser key, validates signed incoming records, supports JSON import/export, shows configurable views and lets users flag posts without deleting the originals. The fixture content is fictional and generated locally as properly signed events. Its gallery images reference assets already in the repository.
 
 Run deterministic protocol and policy tests (Node.js 22+):
 
@@ -22,7 +22,7 @@ npm test
 
 ## Experimental actual P2P peers
 
-A separate **Node-only**, manually dialed OrbitDB experiment is included:
+The **Node OrbitDB peer** includes an optional loopback WebSocket bridge (default `ws://127.0.0.1:8787`), usable by a browser served from any HTTP origin. Browser clients are transport clients rather than full libp2p nodes:
 
 ```bash
 cd v2/network
@@ -38,7 +38,7 @@ cd v2/network
 node node-peer.mjs ./peer-b 'PASTE_ORBITDB_ADDRESS_FROM_PEER_A' 'PASTE_REACHABLE_PEER_MULTIADDR'
 ```
 
-To publish, paste a signed WEB9000 envelope JSON on one line into either peer's stdin. The index accepts signatures from any author with any space name. Peers with the same OrbitDB address can synchronize records, assuming compatible network connections. This path **has not yet passed a live multi-peer interoperability test**, and the peer does not serve a browser UI or host IPFS media.
+To publish, paste a signed WEB9000 envelope JSON on one line into either peer's stdin. The index accepts signatures from any author with any space name. Peers with the same OrbitDB address can synchronize records, assuming compatible network connections. CI verifies both native two-peer OrbitDB synchronization **and** two browser-compatible WebSocket clients connecting through different peers, publishing bidirectionally, rejecting signature tampering, and fetching old records on reconnect. The peer still does not host IPFS media.
 
 The exact OrbitDB index address is a discovery hint, **not** a globally protected namespace. A peer can create another index, and can advertise events independently of any index. The proof-of-concept peer's stdout and local blockstore belong entirely to its operator.
 
@@ -64,3 +64,23 @@ New browser keys can be exported **only in encrypted form** using `core/identity
 ## Practical scope
 
 CI currently tests both the dependency-installed Node P2P sync and core cryptographic/policy unit tests. This is not a production security audit. The v2 browser UI remains an offline-only static demonstration; it can import/export fully signed event JSON but does not connect to the working Node peers yet. No static site must be appointed a network leader. Any operator may eventually host discovery/relay/pinning nodes, subject to locally chosen replication and applicable law.
+
+## Browser-to-peer transport (development)
+
+In a separate terminal, serve the static board (its HTTP host does not store posts):
+
+```bash
+python3 -m http.server 4173
+# open http://localhost:4173/v2/
+```
+
+In the peer terminal:
+
+```bash
+cd v2/network && npm install
+WEB9000_WS_HOST=127.0.0.1 WEB9000_WS_PORT=8787 node node-peer.mjs ./peer-a
+```
+
+Select **Manage peers** in the browser, enter `ws://127.0.0.1:8787`, then **Connect selected peers**. Posts, governance votes and labels created while offline are queued and sent when peers return. The client verifies all signed records and stores them in IndexedDB. You can configure up to eight independent peer endpoints; no endpoint has global space ownership. A node may still decline to accept or retain a publication. The browser supports separate **replication scopes** and **local display follows**; media CIDs are only metadata until explicitly fetched by a separate, future IPFS media workflow.
+
+For deployment on HTTPS websites, use `wss://` (TLS reverse proxy in front of the node's loopback WebSocket port). Set `WEB9000_WS_ORIGINS` to an optional comma-separated Origin allowlist, or leave it unset to accept embeds from any origin. Do not expose the unaudited development bridge to the public Internet without hardening, abuse controls, and operator-specific retention rules. Each websocket provider sees connecting IPs and the signed records requested. **This transport is not direct browser-to-browser libp2p**; replaceable WebSocket-accessible nodes are currently required for cross-domain networking, and a self-hosted peer can replace a missing one.
