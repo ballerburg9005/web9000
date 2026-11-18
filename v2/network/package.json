@@ -17,11 +17,13 @@
     "blockstore-level": "^3.0.2",
     "helia": "^6.0.22",
     "libp2p": "^3.5.1",
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "@libp2p/crypto": "^5.2.0"
   },
   "scripts": {
     "test:peers": "node smoke.mjs",
     "test:browser-bridge": "node smoke-browser.mjs",
-    "test:independent-indexes": "node smoke-islands.mjs"
+    "test:independent-indexes": "node smoke-islands.mjs",
+    "test:peer-identity": "node --test peer-identity.test.mjs"
   }
 }

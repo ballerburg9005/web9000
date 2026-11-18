@@ -33,6 +33,8 @@ jobs:
           node --check v2/network/smoke-browser.mjs
           node --check v2/network/smoke-islands.mjs
           node --check v2/network/mirror-policy.js
+          node --check v2/network/peer-identity.mjs
+          node --check v2/network/peer-identity.test.mjs
       - name: Protocol and view tests
         working-directory: v2
         run: npm test
@@ -48,6 +50,9 @@ jobs:
       - name: Install OrbitDB and libp2p experiment dependencies
         working-directory: v2/network
         run: npm install --no-audit --no-fund
+      - name: Persist and reload unique libp2p peer identities
+        working-directory: v2/network
+        run: npm run test:peer-identity
       - name: Two real Helia/libp2p peers replicate signed records
         working-directory: v2/network
         timeout-minutes: 3

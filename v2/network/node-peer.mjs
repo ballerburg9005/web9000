@@ -21,13 +21,19 @@ import {createOrbitDB} from '@orbitdb/core';
 import {openPublicIndex} from './orbit-index.js';
 import {Replica} from '../core/replica.js';
 import {createBrowserBridge} from './browser-bridge.mjs';
+import {loadOrCreatePeerKey} from './peer-identity.mjs';
 
 const dir=path.resolve(process.argv[2] || './.web9000-peer');
 const indexName=process.argv[3] || 'web9000-public-test';
 const remote=process.argv[4];
 await mkdir(dir,{recursive:true});
+const peerKey=await loadOrCreatePeerKey(dir);
+const p2pPort=process.env.WEB9000_P2P_PORT===undefined?0:Number(process.env.WEB9000_P2P_PORT);
+if(!Number.isSafeInteger(p2pPort)||p2pPort<0||p2pPort>65535)
+  throw Error('Invalid WEB9000_P2P_PORT');
 const libp2p=await createLibp2p({
-  addresses:{listen:['/ip4/0.0.0.0/tcp/0']},
+  privateKey:peerKey,
+  addresses:{listen:[`/ip4/0.0.0.0/tcp/${p2pPort}`]},
   transports:[tcp()],
   connectionEncrypters:[noise()],
   streamMuxers:[yamux()],
@@ -51,6 +57,7 @@ try {
     const result=await replica.ingest(ev);
     if(result.accepted&&!result.duplicate)console.log('RECEIVED',ev.id,'space',ev.payload.space,'local records',replica.size);
   });
+  console.log('PEER ID',libp2p.peerId.toString(),'persisted at',path.join(dir,'peer-private-key.pb'));
   console.log('INDEX',index.address);
   console.log('BROWSER',bridge.url,'(WebSocket, optional; expose through WSS reverse proxy for HTTPS sites)');
   console.log('WEB9000 bridge is not an authoritative registry or relay and does not serve media.');
