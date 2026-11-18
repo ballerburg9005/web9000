@@ -17,5 +17,8 @@
     "blockstore-level": "^3.0.2",
     "helia": "^6.0.22",
     "libp2p": "^3.5.1"
+  },
+  "scripts": {
+    "test:peers": "node smoke.mjs"
   }
 }

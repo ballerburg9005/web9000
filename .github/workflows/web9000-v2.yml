@@ -23,6 +23,25 @@ jobs:
           node --check v2/core/policy.js
           node --check v2/core/replica.js
           node --check v2/network/node-peer.mjs
+          node --check v2/core/governance.js
+          node --check v2/core/reputation.js
+          node --check v2/network/smoke.mjs
       - name: Protocol and view tests
         working-directory: v2
         run: npm test
+
+  peers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install OrbitDB and libp2p experiment dependencies
+        working-directory: v2/network
+        run: npm install --no-audit --no-fund
+      - name: Two real Helia/libp2p peers replicate signed records
+        working-directory: v2/network
+        timeout-minutes: 3
+        run: npm run test:peers
