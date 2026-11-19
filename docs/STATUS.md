@@ -1,3 +1,5 @@
+**2026-11-19 experimental IPFS media segmentation finished (NOT deployed):** 1/10/100 separate LevelDB blockstores behind a single Helia node; all 100 synthetic image/video objects (104.69 MiB) verified on readback. Also tested 1/10/100 full Helia/libp2p stacks, plus an independent Bitswap reader fetching 101/101 roots from 100 real distinct media peers with manifest-aware outbound quarantine. 100-source Bitswap: ~282 MiB Node RSS, ~43.7 s sequential transfer including 100 peer connections. **Missing:** actual shared-node tier-to-CID/DAG routing, physical resource isolation, stress testing, GC and verifiable reputation. See [IPFS-TIER-BENCHMARK-2026-11-19.md](IPFS-TIER-BENCHMARK-2026-11-19.md).
+
 **New architecture proposal 2026-11-19 (design only):** Karma-tier physical replication to survive deliberate bot spam, potentially many progressive bands; per-class retention and bandwidth, protected usable 0-karma entry, and separate optional Stake4Karma resources. No admission changes or thresholds deployed. See [KARMA-TIER-REPLICATION.md](KARMA-TIER-REPLICATION.md).
 
 # WEB9000 — one-screen project status

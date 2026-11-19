@@ -97,3 +97,8 @@ The header-only Debug console has a *collapsed* two-peer comparison control list
 The inventory-v1 digest serialization retains its originally deployed two-literal-byte backslash-plus-n separator per signed ID, rather than introducing a wire-incompatible LF change. Read-only clients must match that exact byte serialization. No signed event schema or original record changed. The separate operator CLI remains the sole explicit repair mechanism.
 
 The owner also requested one larger type step and an H2-like vertical breathing area inside actual Classic grid text previews, not just Mixed. CSS now enlarges text without resizing media tiles; computed browser geometry is covered by Chromium.
+
+
+### IPFS tier feasibility and remaining serving isolation (2026-11-19)
+
+Real local experiments found that 100 separately opened LevelDB media blockstores under one Helia/libp2p identity hold ~105 MiB of synthetic media with little storage-count overhead, while 100 separate local Helia network identities can independently hold it. A genuine 100-source Bitswap exercise streamed 101/101 CID objects to an independent reader under WEB9000 outbound media quarantine policy. **Neither architecture yet establishes hard spam isolation:** the one-node storage experiment has NO shared-node tier-aware block-serving adapter; the 100-node trial uses one Node.js process and lacks per-source OS-level CPU/RAM or bandwidth limits, and did not measure adversarial saturation. Post-close TLSSocket handles remain and need dedicated lifecycle investigation. Detailed evidence and commands: docs/IPFS-TIER-BENCHMARK-2026-11-19.md.

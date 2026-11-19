@@ -547,3 +547,10 @@ This means the actual seven-column Classic grid, not just the optional Mixed lay
 Follow-up clarification: "but is this really such a huge deal with modern bandwidth? I mean we are serving images and videos, so all this text-stuff it can't be that much bigger? The question is more about preventing failure and overload due to spam (which will happen), than it is to make the bandwidth slim in a world where spam does not exist. Spam is a massive huge issue that needs to be fixed hardline."
 
 The priority is **hard resource/failure isolation under adversarial traffic**, not ordinary-case metadata-bandwidth optimization. The proposed bands and coin-to-karma formula are *undecided*. See docs/KARMA-TIER-REPLICATION.md.
+
+
+## 2026-11-19 — owner explicitly requests IPFS media segmentation benchmark
+
+> "what about the IPFS that should also be segmented test that next"
+
+This extends the earlier 100-karma-tier OrbitDB exercise to **physical media/IPFS storage, serving and bandwidth isolation**. Do not report storage-only LevelDB partitions as full working shared-node Bitswap routing. Actual 1/10/100 physically separate media stores and 1/10/100 independent Helia/libp2p sources with local reads and real Bitswap transfers were measured on temporary test data. See docs/IPFS-TIER-BENCHMARK-2026-11-19.md. User has NOT approved a fixed karma threshold, a global admission requirement, a dollar-to-karma conversion, or a live media migration.

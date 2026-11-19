@@ -49,6 +49,10 @@ jobs:
           node --check v2/network/bridge-reconciliation.test.mjs
           node --check v2/network/peer-inventory-client.js
           node --check v2/network/peer-inventory-client.test.mjs
+          node --check v2/network/benchmark-orbitdb-tiers.mjs
+          node --check v2/network/benchmark-orbitdb-tier-sync.mjs
+          node --check v2/network/benchmark-ipfs-tiers.mjs
+          node --check v2/network/benchmark-ipfs-tier-bitswap.mjs
           node --check v2/network/smoke-browser.mjs
           node --check v2/network/smoke-islands.mjs
           node --check v2/network/mirror-policy.js

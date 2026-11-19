@@ -26,11 +26,11 @@ Avoid multiplying physical streams by every arbitrary namespace, creating unboun
 
 ## Current WEB9000 implementation gaps
 
-There is an unrestricted raw OrbitDB index; a voluntary qualified index exists but the running test peer explicitly admits no records without independent qualification. Local anti-spam scores/default thresholds are provisional and do not provide a deployed stake verifier. The Replica count cap does not equal durable OrbitDB/IPFS garbage collection. There is no actual tier-separated ingress scheduler or benchmark of dozens of databases.
+There is an unrestricted raw OrbitDB index; a voluntary qualified index exists but the running test peer explicitly admits no records without independent qualification. Local anti-spam scores/default thresholds are provisional and do not provide a deployed stake verifier. The Replica count cap does not equal durable OrbitDB/IPFS garbage collection. There is no actual tier-separated ingress scheduler. Reproducible 1/10/100 database experiments and genuine 1/10/100 IPFS media storage / Bitswap experiments were completed 2026-11-19. See ORBITDB-TIER-BENCHMARK-2026-11-19.md and IPFS-TIER-BENCHMARK-2026-11-19.md. They are **NOT** spam-flood or long-term retention tests.
 
 ## Next validation
 
-1. Benchmark 1 / 4 / 8 / 16 / 50 / 100 live databases and topics on the real Helia/libp2p stack. Measure memory, CPU, disk IOPS, start/sync latency and failure under churn, not only bytes.
+1. **Partially measured:** 1/10/100 live OrbitDB databases, 100/100 cross-peer signed records, 1/10/100 separate IPFS blockstores and Helia nodes with ~105 MiB verified local media, and 100/100 remote Bitswap sources each serving an image (plus 2 MiB video on source 0). **Still needed:** hardline attack floods, 4/8/16/50, millions of old records, cold restarts, disk IOPS, client/provider churn, strict per-tier CPU/storage/network enforcement, and fixing benchmark dependency shutdown handles. No legitimate media may auto-replicate into a new tier before reader/operator approval.
 2. Simulate a hostile low-tier bot flood and a wealthy/high-tier adversary concurrently with legitimate low- and high-tier users. Report which operations and records survive, not merely throughput.
 3. Prototype bounded, opt-in ingress queues and real per-class durable retention on an isolated test node. Do not enable money/karma-based admission on the existing live experimental peer without a verified proof protocol and owner-approved decisions.
 

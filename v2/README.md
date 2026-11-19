@@ -289,3 +289,8 @@ It reports missing signed IDs between those two observations; only an **explicit
 Text-only previews in the Classic seven-column grid use 14 px text and H2-height padding above and below, rather than the prior 12 px compact copy. In Mixed, wide text-first tiles use 16 px text and balanced vertical spacing. Image/video thumbnails stay unchanged. Browser tests inspect both computed styles.
 
 Under header-only Debug, a collapsed comparison panel offers a **read-only** inventory check between two reader-approved WebSocket peers, queried only after an explicit click. Scopes come from the reader's chosen namespace subscription; no media is downloaded, no signed metadata is repaired and the result is only a peer-reported local snapshot. See docs/PEER-RECONCILIATION.md.
+
+
+### Disposable OrbitDB and IPFS tier scalability benchmarks
+
+Run the scripts under v2/network/benchmark-orbitdb-tiers.mjs, benchmark-orbitdb-tier-sync.mjs, benchmark-ipfs-tiers.mjs and benchmark-ipfs-tier-bitswap.mjs **only in resource-limited, disposable containers**. They generate ephemeral signed event records and synthetic CID image/video payloads, not live WEB9000 user data. The IPFS tests distinguish 100 locally independent storage partitions from 100 independently identified Helia network nodes, including 101/101 actual Bitswap transfers to a separate reader with the current outbound quarantine policy. Neither mode enables karma qualification, IPFS GC, shared-node CID routing, tier-serving bandwidth limits or automatic browser pinning. Reports: docs/ORBITDB-TIER-BENCHMARK-2026-11-19.md and docs/IPFS-TIER-BENCHMARK-2026-11-19.md.
