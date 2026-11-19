@@ -283,3 +283,9 @@ The first read-only anti-entropy diagnostic can compare two explicitly selected 
     node reconcile-mirrors.mjs ws://HOST1:8787/ ws://HOST2:8787/ --space=demo
 
 It reports missing signed IDs between those two observations; only an **explicit** --repair-to=first|second|both option attempts to copy original verified signed text/metadata envelopes into a willing peer's normal publication path. It never pins or copies IPFS media, and neither peer's inventory is authoritative or proven complete. See [docs/PEER-RECONCILIATION.md](../docs/PEER-RECONCILIATION.md) for the exact wire commands, privacy caveats, budgets and tests.
+
+### Larger text in grid, optional peer Debug comparison
+
+Text-only previews in the Classic seven-column grid use 14 px text and H2-height padding above and below, rather than the prior 12 px compact copy. In Mixed, wide text-first tiles use 16 px text and balanced vertical spacing. Image/video thumbnails stay unchanged. Browser tests inspect both computed styles.
+
+Under header-only Debug, a collapsed comparison panel offers a **read-only** inventory check between two reader-approved WebSocket peers, queried only after an explicit click. Scopes come from the reader's chosen namespace subscription; no media is downloaded, no signed metadata is repaired and the result is only a peer-reported local snapshot. See docs/PEER-RECONCILIATION.md.

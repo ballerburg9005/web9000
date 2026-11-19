@@ -42,7 +42,8 @@ test('independent peer inventories reveal omissions and allow only explicit sign
   const escape=await a.request({type:'inventory-get',ids:[excluded.id]},'inventory-records');
   assert.deepEqual(escape.events,[],'cannot bypass scope by fetching known signed ID');
   await assert.rejects(a.request({type:'inventory',prefix:'!'},'inventory'),/invalid inventory prefix/);
-  await assert.rejects(a.request({type:'inventory-ids',prefix:'a',cursor:common.id},'inventory-ids'),
+  const outsidePrefix=common.id[7]==='a'?'b':'a';
+  await assert.rejects(a.request({type:'inventory-ids',prefix:outsidePrefix,cursor:common.id},'inventory-ids'),
    /invalid inventory range/);
   await assert.rejects(repairMirrorDifference(a,b,diff,{}),/explicit target/);
   assert.equal(sourceB.records.length,2,'reading inventories is never a publication');

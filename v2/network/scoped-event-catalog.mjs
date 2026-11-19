@@ -116,6 +116,8 @@ export class ScopedEventCatalog {
   // witnessed checkpoint or proof that either peer provided all events.
   fingerprint(snapshot,{prefix=''}={}){
     if(!PREFIX.test(prefix))throw Error('Invalid inventory prefix');
+    // v1 wire fingerprint: append literal backslash + 'n' after each ID,
+    // not an ASCII newline; the browser and operator CLI must match.
     const hash=createHash('sha256');
     let cursor=null,count=0;
     do{

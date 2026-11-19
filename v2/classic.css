@@ -549,21 +549,32 @@ dialog::backdrop{background:#000b}
 .grid.blog .post.has-icons .post-copy .post-headline{padding-right:min(29%,155px)}
 .grid.blog .post.has-icons .post-copy .post-description{padding-top:1px}
 
+/* Text has to compete with image tiles in the classic seven-column board.
+   Give each actual text preview one typography step and an H2-height of
+   breathing room above and below, without changing media thumbnails. */
+.grid.grid .post > .post-text-preview{
+  font-size:14px;
+  line-height:1.46;
+  padding:27px 12px 29px;
+  -webkit-line-clamp:6;
+}
+.grid.grid .post.has-icons > .post-text-preview{padding-top:37px}
+
 /* Reading should compete visually with pictures: only genuinely text-first
    posts span three grid cells. No global dimming layer over the imageboard. */
 .grid.mixed .post.text-only{
   grid-column:span 3;
-  min-height:185px;
+  min-height:205px;
   background:#27212a;
   box-shadow:inset 3px 0 0 #cbac6c,0 2px 7px #0005;
 }
 .grid.mixed .post.text-only .post-text-preview{
   aspect-ratio:auto;
-  min-height:157px;
-  max-height:248px;
-  -webkit-line-clamp:9;
-  padding:23px 24px 17px;
-  font-size:15px;
+  min-height:180px;
+  max-height:318px;
+  -webkit-line-clamp:10;
+  padding:33px 24px 34px;
+  font-size:16px;
   line-height:1.55;
   letter-spacing:.03px;
   color:#efe6ec;
@@ -579,11 +590,12 @@ dialog::backdrop{background:#000b}
   max-height:50px;
 }
 .grid.mixed .post.text-only[data-kind=text]{border-bottom:1px solid #58464e}
-.grid.mixed .post.text-only.has-icons .post-text-preview{padding-top:29px}
+.grid.mixed .post.text-only.has-icons .post-text-preview{padding-top:42px}
 @media(max-width:620px){
-  .grid.mixed .post.text-only{grid-column:1/-1;min-height:155px}
+  .grid.mixed .post.text-only{grid-column:1/-1;min-height:182px}
   .grid.mixed .post.text-only .post-text-preview{
-    min-height:148px;padding:17px 18px;font-size:14px;line-height:1.5}
+    min-height:170px;padding:28px 18px;font-size:15px;line-height:1.5}
+  .grid.mixed .post.text-only.has-icons .post-text-preview{padding-top:40px}
 }
 /* Clearly identifiable poll, distinct from arbitrary tags or nav tabs. */
 .expanded-body .poll-card{
@@ -775,6 +787,14 @@ dialog::backdrop{background:#000b}
 .debug-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
 .debug-filters label{display:flex;flex-direction:column;gap:3px;min-width:0;color:#c6b9cc;font-size:10px}
 .debug-dialog .debug-filters input,.debug-dialog .debug-filters select{width:100%;min-width:0;background:#1d1a20;color:#eee;border:1px solid #514553;padding:5px 6px;font:11px ui-monospace,monospace}
+.debug-peer-compare{border:1px solid #453b49;background:#201c25;padding:5px 7px;color:#cfc0d0;font-size:10px}
+.debug-peer-compare summary{cursor:pointer;color:#d9c49d;font-size:11px}
+.debug-peer-compare-row{display:flex;align-items:end;gap:6px;flex-wrap:wrap;margin-top:7px}
+.debug-peer-compare-row label{flex:1;min-width:135px;display:flex;flex-direction:column;gap:4px;font-size:10px}
+.debug-peer-compare-row select{width:100%;min-width:0;background:#1d1a20;color:#eee;border:1px solid #514553;font-size:10px;padding:5px}
+.debug-peer-compare-row button{background:#493b40;color:#f1e4dd;border:1px solid #765f53;padding:6px 10px;font-size:10px}
+.debug-peer-compare-row button:disabled{opacity:.5;cursor:not-allowed}
+.debug-peer-compare pre{max-height:140px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:10px/1.45 ui-monospace,monospace;background:#171419;padding:7px;margin:6px 0 0}
 .debug-post-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap;
  border:1px solid #463949;background:#201b24;padding:6px 8px}
 .debug-post-tools label{min-width:180px;flex:1;display:flex;align-items:center;

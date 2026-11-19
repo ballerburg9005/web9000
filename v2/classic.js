@@ -8,6 +8,7 @@ import {AGE_TIERS,RATING_AXES,DEFAULT_RATING_RULES,normalizeRatingRules,
   assessContentRatings,summarizeSpiderBackground} from './core/content-ratings.js';
 import {BrowserPeerMesh,parsePeerUrls,parseSyncSpaces,normalizeSyncSpaces} from './network/browser-mesh.js';
 import {readSiteContext} from './network/site-context.js';
+import {compareApprovedPeerInventories} from './network/peer-inventory-client.js';
 import {MockKarmaProvider} from './core/mock-karma.js';
 import {exportIdentityBackup,importIdentityBackup} from './core/identity-backup.js';
 import {searchPosts,tagCloud,availableSpaces,postKind} from './core/search.js';
@@ -313,8 +314,24 @@ function selectedDebugPost(){
   if(!life)throw Error("Selected post is not in this browser\'s signed records");
   return {event:life.root,lifecycle:life};
 }
+function refreshDebugPeerChoices(){
+  const first=$('debugCompareFirst'),second=$('debugCompareSecond');
+  const previous=[first.value,second.value];
+  for(const select of [first,second]){
+    select.replaceChildren();
+    for(const url of state.peers)select.append(new Option(url,url));
+  }
+  if(state.peers.includes(previous[0]))first.value=previous[0];
+  if(state.peers.includes(previous[1]))second.value=previous[1];
+  if(first.value===second.value&&state.peers.length>1)
+    second.value=state.peers.find(url=>url!==first.value);
+  $('debugComparePeers').disabled=state.peers.length<2;
+  if(state.peers.length<2)
+    $('debugPeerResult').textContent='Choose at least two independent WebSocket peers under Join Network before comparing their signed-record inventories.';
+}
 function openDebugConsole(source='network'){
   refreshDebugPostPicker();
+  refreshDebugPeerChoices();
   $('debugSource').value=source;
   for(const id of ['debugKind','debugSpace','debugAuthor','debugSearch'])$(id).value='';
   state.debugSelected=null;
@@ -3158,6 +3175,23 @@ function bind(){
     catch(error){toast('Clipboard unavailable: '+error.message);}
   };
   $('debugExport').onclick=downloadDebugJSON;
+  $('debugComparePeers').onclick=async()=>{
+    const button=$('debugComparePeers'),output=$('debugPeerResult');
+    const urls=[$('debugCompareFirst').value,$('debugCompareSecond').value];
+    if(urls.some(url=>!state.peers.includes(url))||urls[0]===urls[1])
+      return toast('Choose two different peers you already selected.');
+    button.disabled=true;
+    output.textContent='Comparing only the selected peers’ locally observed signed-record IDs. No records will be published or mirrored…';
+    try{
+      const comparison=await compareApprovedPeerInventories(urls,state.peerScopes,{
+        securePage:location.protocol==='https:'
+      });
+      output.textContent=JSON.stringify(comparison,null,2);
+    }catch(error){
+      output.textContent='Peer comparison unavailable: '+error.message+
+        '\\nNo remote repairs, trust changes or additional peers were authorized.';
+    }finally{button.disabled=state.peers.length<2;}
+  };
   $('enableImages').onclick=()=>void approveSuggestedMediaPeer();
   $('joinNetwork').onclick=()=>{renderMediaProviderSuggestions();modal('networkDialog');};$('closeNetwork').onclick=()=>close('networkDialog');
   $('suggestPeers').onclick=loadSuggestions;

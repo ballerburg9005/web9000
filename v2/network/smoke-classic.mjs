@@ -229,6 +229,44 @@ try{
  console.log('CLASSIC checkpoint 1: initial page ready and real database synced');
  assert.ok((await a.$$('.post')).length>=20,'original visual demo board');
  console.log('CLASSIC checkpoint 2: demo tile grid rendered');
+ // Text posts are an actual attraction in the classic image grid. Test the
+ // computed style rather than a CSS-string assertion (regression included
+ // the default classic grid rather than only the optional Mixed layout).
+ const classicTextStyle=await a.evaluate(()=>{
+   const preview=document.querySelector('.grid.grid .post .post-text-preview');
+   const media=document.querySelector('.grid.grid .post .post-thumb');
+   if(!preview||!media)return null;
+   const text=getComputedStyle(preview),image=getComputedStyle(media);
+   return {font:parseFloat(text.fontSize),top:parseFloat(text.paddingTop),
+     bottom:parseFloat(text.paddingBottom),mediaRatio:image.aspectRatio,
+     mediaPadding:image.paddingTop};
+ });
+ assert.ok(classicTextStyle?.font>=14&&classicTextStyle.top>=27&&
+   classicTextStyle.bottom>=27,
+   'classic imageboard text needs bigger type and H2-height vertical breathing room '+JSON.stringify(classicTextStyle));
+ assert.equal(classicTextStyle.mediaRatio,'1 / 1','media thumbnail remains square');
+ await a.evaluate(()=>{
+   document.getElementById('viewStyle').value='mixed';
+   document.getElementById('viewStyle').dispatchEvent(new Event('change',{bubbles:true}));
+ });
+ await eventually(()=>a.evaluate(()=>Boolean(
+   document.querySelector('.grid.mixed .post.text-only .post-text-preview'))),
+   'mixed layout rendered actual text-only cards');
+ const mixedTextStyle=await a.evaluate(()=>{
+   const preview=document.querySelector('.grid.mixed .post.text-only .post-text-preview');
+   if(!preview)return null;
+   const style=getComputedStyle(preview);
+   return {font:parseFloat(style.fontSize),top:parseFloat(style.paddingTop),
+     bottom:parseFloat(style.paddingBottom)};
+ });
+ assert.ok(mixedTextStyle?.font>=16&&mixedTextStyle.top>=33&&
+   mixedTextStyle.bottom>=33,
+   'mixed grid text should get larger type plus balanced paragraph padding '+JSON.stringify(mixedTextStyle));
+ await a.evaluate(()=>{
+   document.getElementById('viewStyle').value='grid';
+   document.getElementById('viewStyle').dispatchEvent(new Event('change',{bubbles:true}));
+ });
+ console.log('CLASSIC checkpoint 2a: classic/mixed text tiles enlarged and padded without changing image squares');
  const kinds=await a.$$eval('.post-icons',els=>els.map(e=>e.textContent));
  for(const expected of ['Meetup','Poll','Jobs','Offer','Project'])
    assert.ok(kinds.some(value=>value.includes(expected)), 'missing sample content icon: '+expected);
@@ -546,6 +584,10 @@ try{
  await b.click('#debugConsoleButton');
  assert.equal(await b.$eval('#debugDialog',el=>el.open),true);
  assert.equal(await b.$eval('#debugSource',el=>el.value),'network');
+ assert.equal(await b.$eval('#debugPeerCompare',el=>el.open),false,
+   'opt-in peer comparison remains collapsed and makes no background connection');
+ assert.equal(await b.$eval('#debugComparePeers',el=>el.disabled),true,
+   'comparison requires two reader-approved independent peers');
  const history=await b.$eval('#debugEntries .debug-record',el=>el.textContent);
  assert.match(history,/batch|subscribe|hello|event|ack|sync|publish/i,
    'top-right debug immediately displays buffered traffic from before it opened');
@@ -1569,8 +1611,9 @@ try{
    'otherRatingPage browser opens signed post',10000);
  await otherRatingPage.click('.expanded-body .spider-trigger');
  await eventually(()=>otherRatingPage.evaluate(()=>
-   !!document.querySelector('.spider-popup .spider-community')),
-   'remote first browser signature appears in gray background without trust',20000);
+   !document.querySelector('.spider-popup .spider-community')?.hidden &&
+   /1 other signed rater/.test(document.querySelector('.spider-popup .spider-coverage')?.textContent||'')),
+   'remote first browser signed rating is rendered in gray background without trust',20000);
  const otherInitial=await otherRatingPage.evaluate(()=>({
    coverage:document.querySelector('.spider-popup .spider-coverage')?.textContent,
    gray:document.querySelector('.spider-community')?.getAttribute('points'),

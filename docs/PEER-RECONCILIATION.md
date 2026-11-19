@@ -14,6 +14,12 @@ The optional WebSocket extension uses the *current explicitly subscribed namespa
 
 Prefixes accept 0–8 lowercase hexadecimal characters. The server advertises the optional capability read-only-reconciliation-v1, without changing existing client protocol behavior, publishing rights, or the default feed. No automatic binary/IPFS mirroring is introduced.
 
+## Opt-in browser view
+
+Expand the compact Compare section inside the top-right header Debug dialog. The dropdowns list only two WebSocket peers already selected via Join Network. Click Compare to start two temporary read-only inventory sessions with the browser's existing namespace subscriptions. Mere browsing/opening Debug does not make these requests. The client compares signed event ID lists only up to 256 records per peer, verifies claimed counts and digests, and rejects inconsistent responses. Larger sets show just the self-reported count/digest disparity; use the separately explicit operator CLI for bounded prefix analysis. No signed event bodies/media are fetched, nothing is repaired or pinned, and nothing becomes a global completeness verdict.
+
+Compatibility: The existing v1 wire digest appends literal backslash+n bytes after each event ID, rather than an ASCII newline, and the browser diagnostic uses precisely those bytes. This remains an unsigned, peer-asserted local observation, not a witness checkpoint.
+
 ## Operator tool
 
 With Node 22+ and network dependencies installed, run from v2/network:

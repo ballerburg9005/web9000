@@ -165,6 +165,15 @@
     <button type="button" id="debugDumpPost">Dump post</button>
     <button type="button" id="debugDumpComments">Dump comments</button>
   </div>
+  <details class="debug-peer-compare" id="debugPeerCompare">
+    <summary>Compare two selected peers · signed-record IDs (read-only)</summary>
+    <div class="debug-peer-compare-row">
+      <label>Peer 1 <select id="debugCompareFirst" aria-label="First already-selected peer"></select></label>
+      <label>Peer 2 <select id="debugCompareSecond" aria-label="Second already-selected peer"></select></label>
+      <button id="debugComparePeers" type="button">Compare inventories</button>
+    </div>
+    <pre id="debugPeerResult" role="status" aria-live="polite">No comparison requested. Only the two peers you choose will receive your namespace scopes, after clicking Compare.</pre>
+  </details>
   <div class="debug-actions">
     <label class="debug-live-toggle"><input id="debugLive" type="checkbox" checked> Live view</label>
     <button type="button" id="debugRefresh">Refresh</button>

@@ -43,3 +43,9 @@ Future work: independent/aggregated karma accounting, public social graph contro
 ## Automatic first-party imageboard media
 
 A later owner clarification requires that the page **never show "Images off · enable media gateway above" in the hosted first-party WEB9000 demo**. The active demo config explicitly declares `galleryPeer` as `https://syburg.my.to/web9000/media/`, which shares the page's exact origin. This site's own media can automatically render public signed imageboard previews, including posts by unknown authors. It is not an instruction for browsers to pin/serve those bytes or to visit any external host: cross-origin candidates and unrelated IPFS providers still require reader approval. Automatic site hosting is separate from `classic-media-approved-v1` and must not write a forged consent flag.
+
+## Explicit peer inventory comparison (2026-11-19)
+
+The Debug pop-up now includes one collapsed read-only comparison for **two already approved peers**. Opening Debug or expanding the section does not contact additional peers. The reader must click Compare to open short-lived WebSocket sessions to exactly those selected URLs under their existing namespace subscriptions. No record bodies or IPFS bytes are fetched, no missing records are published and no preferences, group authority or trust keys are modified.
+
+The browser returns locally claimed counts/digests and (if each set has at most 256 IDs) differing signed-record IDs; it rejects inconsistent hash/ID answers. An apparently matching inventory is not proof of universal history completeness, and missing IDs do not prove intent to censor.

@@ -533,3 +533,9 @@ Verbatim latest request:
 > "ok nice but I don't see the rating that I made in other browser as background, it should show this from all other users and in future only from extended federation of groups you trust"
 
 **Correct interpretation for the current UI:** The separate gray polygon is the local peer's observed **median of other signers' latest valid signed \`content-rating\` records**, independent of whether the current reader has explicitly trusted those signers. The editable pink polygon represents the viewer's own signed rating (or unsent draft). They must not be mixed: otherwise one's own vote can hide/dilute others' background. Viewer must see how many distinct outside signers contributed and whether any are trusted for filter actions. The gray polygon has **no enforcement weight or claim of network completeness**. A signed key is not proof of being a distinct real person. Once federated group trust membership, extensions and forks are independently verifiable, readers may restrict this background to such a voluntarily chosen federation, never a mandatory namespace authority. Code supplies the pure \`approved-authors\` selection hook but does NOT falsely claim real signed-federation discovery exists. The bug was the previous \`qualifiedCount\` requirement, which excluded valid outsider signed records from the visual reference.
+
+## 2026-11-19 — owner correction: text posts must compete with image tiles
+
+> "also this text of posts I told you to make it one size bigger in grid view because it competes with images and it needs 1 <h2>-ish sized padding above and below so it pops out more"
+
+This means the actual seven-column Classic grid, not just the optional Mixed layout. A text preview moves from 12 px to 14 px, with roughly 27–29 px top/bottom whitespace; Mixed uses 16 px and 33–34 px spacing. Preserve square media tiles, old-web UI density elsewhere, badge clearance and the media-first expanded view.
