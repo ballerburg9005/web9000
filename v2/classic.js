@@ -22,6 +22,7 @@ const $=id=>document.getElementById(id);
 const state={
   db:null,identity:null,replica:new Replica({maxEvents:25000}),saved:[],outbox:[],
   peers:[],mesh:null,suggested:[],mediaBase:null,mediaMirrors:[],
+  mediaApprovalV1:false,unconfirmedMediaURL:null,
   space:'commons',profileAuthor:null,sort:'new',view:'grid',search:'',showUnverified:false,
   ownerHint:null,respectOwner:true,respectWithdrawals:true,selected:null,trust:[],ignoredLabels:[],audit:false,showMedia:false,
   demo:[],demoVotes:new Map(),demoPollChoices:new Map(),demoReplies:new Map(),demoFlags:new Map(),demoTagVotes:new Map(),
@@ -106,6 +107,7 @@ function debugRecordEntries(source){
         }))}},
       {kind:'ipfs-media',space:'media',raw:{
         kind:'ipfs-media',preferredGateway:state.mediaBase,
+        mediaApprovalRecorded:state.mediaApprovalV1,
         voluntarilyApprovedBackups:[...state.mediaMirrors],
         automaticBrowserPinning:false,operatorIndependentStorage:true,
         note:'Viewing CID media does not make this browser a persistent IPFS mirror.'}},
@@ -892,6 +894,8 @@ async function store(){
     setItem(state.db,'classic-show-media',state.showMedia),
     setItem(state.db,'classic-media-url',state.mediaBase),
     setItem(state.db,'classic-media-mirrors',state.mediaMirrors),
+    setItem(state.db,'classic-media-approved-v1',state.mediaApprovalV1),
+    setItem(state.db,'classic-media-pending-url',state.unconfirmedMediaURL),
     setItem(state.db,'classic-mock-mode',state.mockMode),
     setItem(state.db,'classic-mock-scores',state.mockKarma?.snapshot()||{}),
     setItem(state.db,'classic-followed-spaces',state.followedSpaces),
@@ -2488,10 +2492,11 @@ async function loadSuggestions({silent=false}={}){
     state.suggested=data.peers;
     $('peerURLs').value=data.peers.map(x=>x.url).join('\n');
     if(data.peers[0]?.mediaUrl){
-      state.mediaBase=normalizeMediaBase(data.peers[0].mediaUrl);
-      $('mediaPeerUrl').value=state.mediaBase;
+      // This is merely a proposed operator URL. Do NOT silently promote
+      // it into state.mediaBase, persist it, or start fetching its bytes.
+      // Only Connect -> connectPeers() can grant that media-gateway consent.
+      $('mediaPeerUrl').value=normalizeMediaBase(data.peers[0].mediaUrl);
     }
-    await store();
     if(!silent)toast('Loaded '+data.peers.length+' voluntary peer suggestion(s). Review before connecting.');
   }catch(error){toast('Cannot load suggestions: '+error.message);}
 }
@@ -2504,6 +2509,10 @@ async function connectPeers(){
       securePage:location.protocol==='https:'});
     state.mediaBase=mediaBase;
     state.mediaMirrors=mediaMirrors.filter(url=>url!==mediaBase);
+    // Versioned consent record: old releases also stored unreviewed
+    // peer-suggestion URLs, so those cannot be implicitly grandfathered in.
+    state.mediaApprovalV1=true;
+    state.unconfirmedMediaURL=null;
     state.peers=urls;
     state.autoDemoPeerDisabled=false;
     state.mesh.connect(urls,{spaces:['*']});
@@ -2658,12 +2667,23 @@ async function init(){
   state.respectWithdrawals=await getItem(state.db,'classic-respect-withdrawals')!==false;
   state.view=await getItem(state.db,'classic-view')||'grid';
   state.showMedia=await getItem(state.db,'classic-show-media')===true;
-  state.mediaBase=await getItem(state.db,'classic-media-url')||null;
-  try{
+  const priorMediaURL=await getItem(state.db,'classic-media-url')||null;
+  // Earlier builds silently persisted suggestions as active media gateways.
+  // A stored URL without this consent version cannot prove reader approval.
+  // Force a one-time re-confirmation rather than auto-fetching unknown bytes.
+  state.mediaApprovalV1=await getItem(state.db,'classic-media-approved-v1')===true;
+  // Persist pending review separately; any unrelated store() during peer
+  // sync must not erase the URL the user may later decide to re-approve.
+  const pendingOldMediaURL=await getItem(state.db,'classic-media-pending-url')||null;
+  state.unconfirmedMediaURL=!state.mediaApprovalV1?
+    (pendingOldMediaURL||priorMediaURL):null;
+  state.mediaBase=state.mediaApprovalV1?priorMediaURL:null;
+  if(state.mediaApprovalV1)try{
     const savedMirrors=await getItem(state.db,'classic-media-mirrors');
     state.mediaMirrors=parseMediaGateways(Array.isArray(savedMirrors)?savedMirrors.join('\n'):'',
       {securePage:location.protocol==='https:'});
   }catch{state.mediaMirrors=[];}
+  else state.mediaMirrors=[];
   state.mockKarma=new MockKarmaProvider(await getItem(state.db,'classic-mock-scores')||{});
   state.mockMode=await getItem(state.db,'classic-mock-mode')===true;
   state.followedSpaces=await getItem(state.db,'classic-followed-spaces')||['demo','commons'];
@@ -2712,12 +2732,16 @@ async function init(){
   $('viewStyle').value=state.view;
   $('respectWithdrawals').checked=state.respectWithdrawals;
   $('peerURLs').value=state.peers.join('\n');
-  $('mediaPeerUrl').value=state.mediaBase||'';
+  $('mediaPeerUrl').value=state.mediaBase||state.unconfirmedMediaURL||'';
   $('mediaMirrorURLs').value=state.mediaMirrors.join('\n');
   bind();
   // Pre-fill independently replaceable peer suggestions, without connecting.
   // Consent is still required to open any WebSocket or upload images.
   if(!state.peers.length&&!state.mediaBase)await loadSuggestions({silent:true});
+  if(state.unconfirmedMediaURL){
+    $('mediaPeerUrl').value=state.unconfirmedMediaURL;
+    toast('Previously stored media gateway needs your approval again. Review it in Join Network and click Connect.');
+  }
   state.mesh=new BrowserPeerMesh({
     securePage:location.protocol==='https:',
     getPending:()=>state.outbox.map(x=>x.event),

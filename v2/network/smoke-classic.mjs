@@ -133,7 +133,79 @@ try{
  await a.goto(originA,{waitUntil:'domcontentloaded'});await ready(a);
  assert.equal(await a.$eval('#spaceName',e=>e.value),'demo','new sessions open the dedicated signed demo namespace');
  assert.equal(await a.$$eval('.post',e=>e.length),0,'no local fake fixture posts before a peer connects');
+ await a.evaluate(()=>{
+   document.querySelector('#debugConsoleButton').click();
+   document.querySelector('#debugSource').value='system';
+   document.querySelector('#debugSource').dispatchEvent(new Event('change'));
+ });
+ await a.waitForFunction(()=>document.querySelector('#debugEntries')?.textContent.includes('ipfs-media'));
+ const mediaBeforeConsent=await a.evaluate(()=>{
+   const entries=[...document.querySelectorAll('#debugEntries .debug-record')];
+   entries.find(b=>b.textContent.includes('ipfs-media')).click();
+   return JSON.parse(document.querySelector('#debugRaw').textContent);
+ });
+ assert.equal(mediaBeforeConsent.preferredGateway,null,
+   'peer suggestion must NOT silently approve media-download gateway');
+ assert.equal(mediaBeforeConsent.voluntarilyApprovedBackups.length,0);
+ assert.ok(await a.$eval('#mediaPeerUrl',e=>e.value.length>0),
+   'site may present media peer as an unapproved form suggestion');
+ await a.evaluate(()=>document.querySelector('#closeDebug').click());
+ // Migrate legacy persisted media URLs. Older releases saved form
+ // suggestions as approved preferences, with no evidence of consent.
+ const legacyMediaURL=await a.$eval('#mediaPeerUrl',el=>el.value);
+ await a.evaluate(async url=>{
+   const {openLocal,setItem}=await import('./core/persist.js');
+   const db=await openLocal();
+   try{
+     await setItem(db,'classic-media-url',url);
+     await setItem(db,'classic-media-approved-v1',false);
+   }finally{db.close();}
+ },legacyMediaURL);
+ await a.reload({waitUntil:'domcontentloaded'});await ready(a);
+ await a.evaluate(()=>{
+   document.querySelector('#debugConsoleButton').click();
+   document.querySelector('#debugSource').value='system';
+   document.querySelector('#debugSource').dispatchEvent(new Event('change'));
+   [...document.querySelectorAll('#debugEntries .debug-record')]
+     .find(b=>b.textContent.includes('ipfs-media')).click();
+ });
+ const migratedPolicy=await a.$eval('#debugRaw',el=>JSON.parse(el.textContent));
+ assert.equal(migratedPolicy.preferredGateway,null,
+   'legacy stored suggestions must not be treated as approved media hosts');
+ assert.equal(migratedPolicy.mediaApprovalRecorded,false);
+ assert.equal(await a.$eval('#mediaPeerUrl',el=>el.value),legacyMediaURL,
+   'old gateway URL remains visible for explicit reader review');
+ await a.evaluate(()=>document.querySelector('#closeDebug').click());
+ // Any state persistence before consent must save a pending URL WITHOUT
+ // resurrecting it as a media source or losing the visible review option.
+ await a.evaluate(()=>document.querySelector('#showUnverified').click());
+ await a.reload({waitUntil:'domcontentloaded'});await ready(a);
+ assert.equal(await a.$eval('#mediaPeerUrl',el=>el.value),legacyMediaURL,
+   'pending legacy URL survives unrelated store() and a second reload');
+ await a.evaluate(()=>{
+   document.querySelector('#debugConsoleButton').click();
+   document.querySelector('#debugSource').value='system';
+   document.querySelector('#debugSource').dispatchEvent(new Event('change'));
+   [...document.querySelectorAll('#debugEntries .debug-record')]
+     .find(b=>b.textContent.includes('ipfs-media')).click();
+ });
+ const afterPendingWrite=await a.$eval('#debugRaw',el=>JSON.parse(el.textContent));
+ assert.equal(afterPendingWrite.preferredGateway,null,
+   'unapproved URL remains inactive even after other preference writes');
+ await a.evaluate(()=>document.querySelector('#closeDebug').click());
  await connect(a,bridge.url);
+ await a.evaluate(()=>{
+   document.querySelector('#debugConsoleButton').click();
+   document.querySelector('#debugSource').value='system';
+   document.querySelector('#debugSource').dispatchEvent(new Event('change'));
+   [...document.querySelectorAll('#debugEntries .debug-record')]
+     .find(b=>b.textContent.includes('ipfs-media')).click();
+ });
+ const connectedPolicy=await a.$eval('#debugRaw',el=>JSON.parse(el.textContent));
+ assert.equal(connectedPolicy.preferredGateway,legacyMediaURL,
+   'Connect action must explicitly approve selected gateway');
+ assert.equal(connectedPolicy.mediaApprovalRecorded,true);
+ await a.evaluate(()=>document.querySelector('#closeDebug').click());
  await eventually(()=>a.evaluate(()=>document.querySelectorAll('.post').length===24),
    '24 signed seed posts replicated from independent OrbitDB peer');
  console.log('CLASSIC checkpoint 1: initial page ready and real database synced');
