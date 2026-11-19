@@ -25,6 +25,7 @@
   "scripts": {
     "test:peers": "node smoke.mjs",
     "test:signed-index": "node --test signed-access-controller.test.mjs raw-index-selection.test.mjs",
+    "test:migration": "node --test migrate-verified-events.test.mjs migrate-raw-index.test.mjs",
     "test:browser-bridge": "node smoke-browser.mjs",
     "test:independent-indexes": "node smoke-islands.mjs",
     "test:peer-identity": "node --test peer-identity.test.mjs",

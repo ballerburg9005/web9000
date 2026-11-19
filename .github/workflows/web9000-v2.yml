@@ -25,6 +25,8 @@ jobs:
           node --check v2/network/node-peer.mjs
           node --check v2/network/signed-access-controller.js
           node --check v2/network/raw-index-selection.mjs
+          node --check v2/network/migrate-verified-events.mjs
+          node --check v2/network/migrate-raw-index.mjs
           node --check v2/core/governance.js
           node --check v2/core/group-proof.js
           node --check v2/network/verify-group-proof.mjs
@@ -74,6 +76,10 @@ jobs:
         working-directory: v2/network
         timeout-minutes: 3
         run: npm run test:signed-index
+      - name: Offline legacy-to-signed migration dry-run, checkpoint verification and resume
+        working-directory: v2/network
+        timeout-minutes: 2
+        run: npm run test:migration
       - name: Two real Helia/libp2p peers replicate signed records
         working-directory: v2/network
         timeout-minutes: 3
