@@ -178,7 +178,16 @@ try{
  await a.evaluate(()=>document.querySelector('#closeDebug').click());
  // Any state persistence before consent must save a pending URL WITHOUT
  // resurrecting it as a media source or losing the visible review option.
- await a.evaluate(()=>document.querySelector('#showUnverified').click());
+ // Do NOT toggle the raw lane: later integration steps intentionally enable
+ // it to admit an unfamiliar author's comments.
+ await a.evaluate(()=>document.querySelector('#viewStyle').dispatchEvent(
+   new Event('change',{bubbles:true})));
+ await eventually(()=>a.evaluate(async expected=>{
+   const {openLocal,getItem}=await import('./core/persist.js');
+   const db=await openLocal();
+   try{return (await getItem(db,'classic-media-pending-url'))===expected;}
+   finally{db.close();}
+ },legacyMediaURL),'pending gateway persisted after unrelated preferences change');
  await a.reload({waitUntil:'domcontentloaded'});await ready(a);
  assert.equal(await a.$eval('#mediaPeerUrl',el=>el.value),legacyMediaURL,
    'pending legacy URL survives unrelated store() and a second reload');
@@ -466,7 +475,29 @@ try{
  await b.evaluate(()=>document.querySelector('.comment-form button').click());
  await eventually(()=>bridge.replica.list().some(e=>e.payload.kind==='reply' &&
    e.payload.body.text==='A separate, real signed comment'),'remote comment accepted by peer');
- await eventually(()=>a.evaluate(()=>[...document.querySelectorAll('.comment-text')].some(x=>x.textContent==='A separate, real signed comment')),'remote signed comment rendered');
+ try{
+   await eventually(()=>a.evaluate(()=>[...document.querySelectorAll('.comment-text')].some(x=>x.textContent==='A separate, real signed comment')),'remote signed comment rendered');
+ }catch(error){
+   const diag=await a.evaluate(async()=>{
+     const {openLocal,getItem}=await import('./core/persist.js');
+     const db=await openLocal();
+     const local=(await getItem(db,'records'))||[];
+     db.close();
+     return {
+       signedReplyInLocalStorage:local.some(e=>e.payload.kind==='reply'&&
+         e.payload.body.text==='A separate, real signed comment'),
+       localSignedRecords:local.length,
+       selectedPost:document.querySelector('.post.selected')?.dataset.id,
+       expandedPanel:!!document.querySelector('.post-container.expanded'),
+       renderedReplies:[...document.querySelectorAll('.comment-text')].map(e=>e.textContent.slice(0,80)),
+       peerStatus:document.querySelector('#peerStatus')?.textContent,
+       documentFocus:document.activeElement?.outerHTML?.slice(0,300),
+       commentThreadKey:document.querySelector('.comments-section')?.dataset.threadsKey
+     };
+   });
+   console.error('REMOTE COMMENT DELIVERY/RENDER DIAGNOSTICS',JSON.stringify(diag));
+   throw error;
+ }
  console.log('CLASSIC checkpoint 12: signed comment received');
  const reactionScrollBefore=await b.evaluate(()=>window.scrollY);
  await b.evaluate(()=>document.querySelector('.reactions .vote-max').click());
