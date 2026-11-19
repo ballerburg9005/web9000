@@ -6,6 +6,8 @@
 
 Labels: **P0** = security/data-integrity/design blocker before public production; **P1** = core protocol capability, useful next milestone; **P2** = completeness/UI/testing; **DESIGN** = open decision requiring an explicit recorded, revocable/ratified policy, not an excuse to invent hard-coded thresholds. Some issues combine several.
 
+**2026-11-19 gray-spider follow-up:** Fixed background to use all OTHER independently signed/received content ratings, each distinct signer once and latest event wins, with per-axis medians. Filter eligibility remains the existing strict independently recognized group/reader layer. **Still open:** reader-selected federated-group reputation/scope, recursive signed delegation membership, Sybil manipulation of raw descriptive medians, per-peer omission detection and trustworthy global statistical coverage.
+
 **2026-11-19 UI correction:** Done in the latest change: the huge in-article suitability dropdown was removed and replaced with one fixed draggable spider editor from a 🕸 icon beside popularity count. Exceptional democratic public-interest alerts are signed via ⚑ Report as separate labels and do not alter age/importance scores. The reader's Search & filters threshold preferences remain; statistical calibration and reliable anti-Sybil accuracy are still open.
 
 ## P0 — architectural and security blockers

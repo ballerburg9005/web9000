@@ -1547,6 +1547,81 @@ try{
      signed.at(-1).payload.body.axes.controversy===5;
  },'reader dragged and keyboard-edited real signed spider rating',15000);
  assert.equal(await f.$('.spider-popup'),null,'popup closes after signed submission');
+
+ // Real cross-browser rating background: a SEPARATE browser profile with a
+ // different Ed25519 identity receives the original rating, then publishes
+ // its own; neither browser trusts the other's key for moderation.
+ const isolated=await browser.createBrowserContext();
+ const otherRatingPage=await isolated.newPage();
+ otherRatingPage.on('pageerror',error=>errors.push('other-rating-browser: '+error.message));
+ await otherRatingPage.goto(originF,{waitUntil:'domcontentloaded'});await ready(otherRatingPage);
+ await eventually(()=>otherRatingPage.evaluate(title=>
+   [...document.querySelectorAll('#imageGrid .post')].some(tile=>
+     tile.querySelector('.post-headline')?.textContent===title),
+   sampleImage.title),'second isolated browser independently receives signed post',20000);
+ await otherRatingPage.evaluate(title=>{
+   const tile=[...document.querySelectorAll('#imageGrid .post')]
+     .find(tile=>tile.querySelector('.post-headline')?.textContent===title);
+   tile.click();
+ },sampleImage.title);
+ await eventually(()=>otherRatingPage.evaluate(()=>
+   !!document.querySelector('.expanded-body .spider-trigger')),
+   'otherRatingPage browser opens signed post',10000);
+ await otherRatingPage.click('.expanded-body .spider-trigger');
+ await eventually(()=>otherRatingPage.evaluate(()=>
+   !!document.querySelector('.spider-popup .spider-community')),
+   'remote first browser signature appears in gray background without trust',20000);
+ const otherInitial=await otherRatingPage.evaluate(()=>({
+   coverage:document.querySelector('.spider-popup .spider-coverage')?.textContent,
+   gray:document.querySelector('.spider-community')?.getAttribute('points'),
+   all:document.querySelector('.spider-source-list')?.textContent
+ }));
+ assert.match(otherInitial.coverage,/1 other signed rater/);
+ assert.match(otherInitial.coverage,/0 recognized for your filters/,
+   'unknown signer renders gray background but has no moderation standing');
+ assert.ok(otherInitial.gray?.length>30);
+ await otherRatingPage.$eval('.spider-handle[data-spider-axis="age"]',el=>el.focus());
+ await otherRatingPage.keyboard.press('End'); // separate author claims potential legal concern
+ await otherRatingPage.$eval('.spider-handle[data-spider-axis="controversy"]',el=>el.focus());
+ await otherRatingPage.keyboard.press('ArrowRight');
+ // Keep the FIRST viewer's popup OPEN while another browser publishes.
+ // Background should appear live without resetting the reader's pink draft.
+ await f.click('.expanded-body .spider-trigger');
+ const priorOutside=await f.evaluate(()=>({
+   grayHidden:document.querySelector('.spider-community')?.hidden,
+   otherCount:document.querySelector('.spider-coverage')?.textContent,
+   ownAge:document.querySelector('.spider-handle[data-spider-axis="age"]')
+     ?.getAttribute('aria-valuenow')
+ }));
+ assert.equal(priorOutside.grayHidden,true);
+ assert.match(priorOutside.otherCount,/0 other signed raters/);
+ assert.equal(priorOutside.ownAge,'3');
+ await otherRatingPage.click('.spider-submit');
+ await eventually(()=>f.evaluate(async()=>{
+   const {openLocal,getItem}=await import('./core/persist.js'),db=await openLocal();
+   try{return (await getItem(db,'records')||[]).filter(x=>
+     x.payload.kind==='content-rating').length>=2;}
+   finally{db.close();}
+ }), 'otherRatingPage browser signed rating reaches first browser over peer bridge',20000);
+ await eventually(()=>f.evaluate(()=>
+   !!document.querySelector('.spider-popup .spider-community:not([hidden])')&&
+   document.querySelector('.spider-coverage')?.textContent.includes('1 other signed rater')),
+   'first browser OPEN popup updates gray background from remote signer live',12000);
+ const otherVisible=await f.evaluate(()=>({
+   coverage:document.querySelector('.spider-popup .spider-coverage')?.textContent,
+   gray:document.querySelector('.spider-community')?.getAttribute('points'),
+   ownAge:document.querySelector('.spider-handle[data-spider-axis="age"]')
+     ?.getAttribute('aria-valuenow')
+ }));
+ assert.match(otherVisible.coverage,/1 other signed rater/);
+ assert.match(otherVisible.coverage,/1 recognized for your filters/,
+   'original viewer only recognizes itself, not the external visual reference');
+ assert.equal(otherVisible.ownAge,'3','gray reference never overwrites local draggable draft');
+ assert.ok(otherVisible.gray?.length>30);
+ await f.click('.spider-cancel');
+ await otherRatingPage.close();await isolated.close();
+ console.log('CLASSIC checkpoint 24b: isolated browser rating synchronizes as dashed gray background, excludes self, does not confer filter authority');
+
  // The exceptional democratic-public-interest alert belongs in Report, not
  // inside the five-dimensional spider editor, and must not modify age/axes.
  await f.click('.report-control > summary');
@@ -1571,8 +1646,8 @@ try{
      e.payload.body.tag==='public-interest-censorship-pressure');}
    finally{db.close();}
  }), 'signed public-interest warning as separate report menu label',12000);
- assert.equal((await ownRatings()).length,1,
-   'the public-interest flag MUST NOT create or overwrite an age/spider rating');
+ assert.equal((await ownRatings()).length,2,
+   'the public-interest flag MUST NOT create or overwrite the two independent spider ratings');
  assert.equal(await f.$eval('#ratingsEnable',el=>el.checked),false,
    'publishing a rating never silently enables censorship');
  await f.evaluate(()=>{

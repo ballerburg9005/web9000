@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {generateIdentity,signEvent,verifyEvent} from '../core/events.js';
 import {Replica} from '../core/replica.js';
 import {AGE_TIERS,RATING_AXES,DEFAULT_RATING_RULES,normalizeRatingRules,
- assessContentRatings} from '../core/content-ratings.js';
+ assessContentRatings,summarizeSpiderBackground} from '../core/content-ratings.js';
 
 const axes=(overrides={})=>({
  controversy:1,democraticUrgency:2,intellectualImportance:2,spamLikelihood:1,
@@ -174,4 +174,50 @@ test('public-interest alert in Report is a signed label, not an unintended all-a
   trustAuthors:[a.author]});
  assert.equal(untrusted.publicInterestAlerts,1);
  assert.equal(untrusted.textFirst,false,'one trusted alert cannot force democratic promotion');
+});
+
+
+test('spider background summarizes ALL OTHER signed authors, even untrusted, without hiding authority',async()=>{
+ const owner=await generateIdentity(),foreign=await generateIdentity(),third=await generateIdentity();
+ const subject=await post(owner),unrelated=await post(third);
+ const own=await rating(owner,subject.id,1,{time:1000,axes:{controversy:0,democraticUrgency:0}});
+ const a=await rating(foreign,subject.id,4,{time:1000,axes:{controversy:5,democraticUrgency:4}});
+ const latest=await rating(foreign,subject.id,6,{time:1002,axes:{
+   controversy:3,democraticUrgency:2,intellectualImportance:5,spamLikelihood:0}});
+ const earlier=await rating(third,subject.id,2,{time:1001,axes:{
+   controversy:1,democraticUrgency:4,intellectualImportance:3,spamLikelihood:4}});
+ const otherPost=await rating(third,unrelated.id,5,{time:1000});
+ const records=[own,a,latest,earlier,otherPost];
+ const summary=summarizeSpiderBackground(records,subject.id,{viewerAuthor:owner.author});
+ assert.equal(summary.count,2,'one other signer is one vote, latest event wins');
+ assert.equal(summary.scope,'all-signed');
+ assert.deepEqual(summary.signerIds.sort(),[foreign.author,third.author].sort());
+ assert.equal(summary.age,4,'median of 6 and 2, owner age 1 excluded');
+ assert.deepEqual(summary.axes,{controversy:2,democraticUrgency:3,
+   intellectualImportance:4,spamLikelihood:2});
+ assert.equal(summary.informationalOnly,true);
+ const decision=assessContentRatings(records,subject.id,{
+   selfAuthor:owner.author,rules:{...DEFAULT_RATING_RULES,active:true,blurVotes:1,hideVotes:2}});
+ assert.equal(decision.qualifiedCount,1,'untrusted other ratings cannot hide content');
+ assert.equal(decision.action,'clear','other-rater background has no enforcement power');
+ const sameOtherViewer=summarizeSpiderBackground(records,subject.id,{viewerAuthor:foreign.author});
+ assert.equal(sameOtherViewer.count,2);
+ assert.equal(sameOtherViewer.age,1.5,'excluded identity changes with browser');
+});
+test('future federation view accepts only preverified signer keys, never a claimed group',async()=>{
+ const publisher=await generateIdentity(),a=await generateIdentity(),b=await generateIdentity();
+ const group='sha256:'+'d'.repeat(64),p=await post(publisher);
+ const accepted=await rating(a,p.id,4,{group,time:1000});
+ const outsider=await rating(b,p.id,6,{group,time:1001});
+ const records=[accepted,outsider];
+ assert.equal(summarizeSpiderBackground(records,p.id,{
+   viewerAuthor:publisher.author}).count,2,'default is everyone signed, independent of group claim');
+ const restricted=summarizeSpiderBackground(records,p.id,{
+   viewerAuthor:publisher.author,mode:'approved-authors',approvedAuthors:[a.author]});
+ assert.equal(restricted.count,1);
+ assert.equal(restricted.age,4);
+ assert.equal(summarizeSpiderBackground(records,p.id,{
+   viewerAuthor:publisher.author,mode:'approved-authors',approvedAuthors:[]}).count,0);
+ assert.throws(()=>summarizeSpiderBackground(records,p.id,{mode:'federation-by-label'}),
+   /scope/);
 });

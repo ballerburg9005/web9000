@@ -93,6 +93,36 @@ function median(nums){
   return (s[Math.floor(m)]+s[Math.ceil(m)])/2;
 }
 /**
+ * Descriptive spider background — NOT a trusted moderation verdict.
+ *
+ * Default: every independently signed rating OBSERVED by this reader from
+ * OTHER authors. Latest valid event per author counts once. Explicit reader
+ * trust is intentionally irrelevant to this visual-only discovery view.
+ *
+ * Future "extended federation" filtering can supply a set of independently
+ * ratified trusted author keys using mode='approved-authors'. A claimed
+ * body.group, first-claimer namespace or numerical popularity cannot become
+ * a credential. Absence here proves nothing about network-wide completeness.
+ */
+export function summarizeSpiderBackground(signedEvents,target,{
+  viewerAuthor=null,mode='all-signed',approvedAuthors=[]
+}={}){
+  if(!digest(target))throw Error('Invalid signed content target');
+  if(!['all-signed','approved-authors'].includes(mode))
+    throw Error('Unsupported spider background scope');
+  const approved=new Set(approvedAuthors);
+  const ratings=recentByAuthor(signedEvents,target)
+    .filter(e=>e.payload.author!==viewerAuthor&&
+      (mode==='all-signed'||approved.has(e.payload.author)));
+  const age=median(ratings.map(e=>e.payload.body.age));
+  const axes=Object.fromEntries(Object.keys(RATING_AXES).map(key=>[
+    key,median(ratings.map(e=>e.payload.body.axes[key]))
+  ]));
+  return {scope:mode,count:ratings.length,age,axes,
+    signerIds:ratings.map(e=>e.payload.author),
+    informationalOnly:true};
+}
+/**
  * signedEvents: caller-supplied, previously verified signed records.
  * trustAuthors: reader-chosen public key list.
  * verifiedGroupReviewers: Map(groupId -> Set of signer IDs actually appointed

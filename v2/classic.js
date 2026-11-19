@@ -5,7 +5,7 @@ import {Replica} from './core/replica.js';
 import {openLocal,getItem,setItem} from './core/persist.js';
 import {buildFeed,DEFAULT_POLICY} from './core/policy.js';
 import {AGE_TIERS,RATING_AXES,DEFAULT_RATING_RULES,normalizeRatingRules,
-  assessContentRatings} from './core/content-ratings.js';
+  assessContentRatings,summarizeSpiderBackground} from './core/content-ratings.js';
 import {BrowserPeerMesh,parsePeerUrls,parseSyncSpaces,normalizeSyncSpaces} from './network/browser-mesh.js';
 import {readSiteContext} from './network/site-context.js';
 import {MockKarmaProvider} from './core/mock-karma.js';
@@ -1167,6 +1167,8 @@ async function ingest(e,{outgoing=false}={}){
       const id=e.payload.body.target;
       const existing=state.ratingRecordsByTarget.get(id)||[];
       existing.push(e);state.ratingRecordsByTarget.set(id,existing);
+      if(e.payload.kind==='content-rating'&&activeSpiderPopup?.postId===id)
+        activeSpiderPopup.refreshBackground?.();
     }
     state.saved.push(e);if(outgoing)state.outbox.push({event:e,ackedBy:[]});
     await store();scheduleRender();
@@ -1350,6 +1352,14 @@ function openSpiderPopup(post,trigger){
   if(activeSpiderPopup?.postId===post.id){closeSpiderPopup({restoreFocus:true});return;}
   closeSpiderPopup();
   const review=ratingAssessment(post.id);
+  // The visible gray reference is descriptive: all other signed raters the
+  // reader has replicated, whether trusted for enforcement or not. Future
+  // federation scoping can pass independently VERIFIED reviewer keys here.
+  const summarizeOutside=()=>summarizeSpiderBackground(
+    state.ratingRecordsByTarget.get(post.id)||[],post.id,{
+      viewerAuthor:state.identity.author,mode:'all-signed'
+    });
+  let background=summarizeOutside();
   const own=review.latest.find(e=>e.payload.author===state.identity.author)?.payload.body;
   const draft={
     age:own?.age??0,
@@ -1394,17 +1404,14 @@ function openSpiderPopup(post,trigger){
     const [x,y]=locationOf(i,keys[i].max);
     add('line',{x1:cx,y1:cy,x2:x,y2:y,stroke:'#675968','stroke-width':.85});
   }
-  // The dashed gray shape represents recognized other opinions, NOT a
-  // consensus verdict and not a second spider UI.
-  if(review.qualifiedCount){
-    const ageExpanded=review.ages.flatMap((count,i)=>Array(count).fill(i));
-    const middle=ageExpanded.length?
-      ageExpanded[Math.floor((ageExpanded.length-1)/2)]:0;
-    const previous=keys.map(k=>k.key==='age'?middle:(review.axes[k.key]??0));
-    add('polygon',{class:'spider-community',
-      points:previous.map((value,i)=>toPoint(locationOf(i,value))).join(' '),
-      fill:'none',stroke:'#aca0b6','stroke-dasharray':'4 3','stroke-width':1.4});
-  }
+  // One visible gray shape = median of all other independently signed
+  // ratings OBSERVED by this browser, not trusted authority or a global poll.
+  // Allocate the background node even when empty; it remains hidden until
+  // another independent signed rating is observed. This permits live peer
+  // updates without dismissing the reader's unsaved foreground draft.
+  const gray=add('polygon',{class:'spider-community',
+    points:'',fill:'#abaeb8','fill-opacity':.19,stroke:'#bdc2ce',
+    'stroke-dasharray':'5 3','stroke-width':2});
   const polygon=add('polygon',{class:'spider-draft',points:'',
     fill:'#d7a2c3','fill-opacity':.23,stroke:'#f0badc','stroke-width':2.2});
   let activeIndex=0,dragIndex=null;
@@ -1412,8 +1419,10 @@ function openSpiderPopup(post,trigger){
   const titleLine=element('div','spider-explanation-title');
   const description=element('div','spider-explanation');
   const count=element('div','spider-coverage',
-    review.qualifiedCount+' recognized ratings · '+review.untrustedCount+
-    ' other signed ratings'+(review.disputed?' · age opinions conflict':''));
+    background.count+' other signed rater'+(background.count===1?'':'s')+
+    ' observed'+(background.count?' · gray median background':' · no other ratings received yet')+
+    ' · '+review.qualifiedCount+' recognized for your filters'+
+    (review.disputed?' · age opinions conflict':''));
   const explanations=element('div','spider-explanation-box');
   explanations.setAttribute('aria-live','polite');
   explanations.append(titleLine,description);
@@ -1499,8 +1508,30 @@ function openSpiderPopup(post,trigger){
   svg.addEventListener('pointercancel',release);
   svg.addEventListener('lostpointercapture',release);
   popup.append(svg,explanations,count);
-  const legend=element('p','spider-legend',
-    review.qualifiedCount?'Pink: your draft · dashed: recognized ratings':'Pink: your draft · no recognized reference yet');
+  const legend=element('p','spider-legend');
+  legend.title='For now the gray reference uses all signed records this browser has received. '
+    +'In a future group federation, its source list can be restricted to independently verified trusted signers. '
+    +'Neither scope implies an authoritative verdict.';
+  function refreshBackground(){
+    if(!popup.isConnected)return;
+    background=summarizeOutside();
+    gray.hidden=background.count===0;
+    if(background.count){
+      const values=keys.map(k=>k.key==='age'?background.age:background.axes[k.key]);
+      gray.setAttribute('points',values.map((value,i)=>toPoint(locationOf(i,value))).join(' '));
+      gray.setAttribute('aria-label',
+        'Observed median from '+background.count+' other signed raters');
+    }
+    const currentReview=ratingAssessment(post.id);
+    count.textContent=background.count+' other signed rater'+(background.count===1?'':'s')+
+      ' observed'+(background.count?' · gray median background':' · no other ratings received yet')+
+      ' · '+currentReview.qualifiedCount+' recognized for your filters'+
+      (currentReview.disputed?' · age opinions conflict':'');
+    legend.textContent=background.count?
+      'Pink: your rating · gray dashed: median of OTHER signed ratings (informational only)':
+      'Pink: your rating · no OTHER signed ratings observed yet';
+    positionSpider();
+  }
   popup.append(legend);
   // Retain independent reviewer audit and explicit trust/ignore capability,
   // while removing the enormous in-article dropdown and list of sliders.
@@ -1552,20 +1583,21 @@ function openSpiderPopup(post,trigger){
   footer.append(submit,button('Cancel',()=>closeSpiderPopup({restoreFocus:true}),'spider-cancel'));
   popup.append(footer);
   document.body.append(popup);
-  const anchor=trigger.getBoundingClientRect();
-  // Use a fixed popover, anchored near the score, never expand the article.
-  // It flips above on short screens and clamps horizontally on mobile.
-  const popupWidth=Math.min(324,innerWidth-12);
-  const left=Math.max(6,Math.min(anchor.left,innerWidth-popupWidth-6));
-  // Width changes line wrapping. Apply it before measuring the HEIGHT;
-  // otherwise the popover can spill below the viewport on small screens.
-  Object.assign(popup.style,{width:popupWidth+'px',left:left+'px'});
-  const height=Math.min(popup.getBoundingClientRect().height,innerHeight-12);
-  const below=anchor.bottom+7;
-  const above=anchor.top-height-7;
-  const topY=below+height>innerHeight-6&&above>=6?above:
-    Math.max(6,Math.min(below,innerHeight-height-6));
-  popup.style.top=topY+'px';
+  // Measure AFTER updating the coverage line and legend. Both may reflow
+  // when a peer's new rating arrives, especially at 600px viewport height.
+  function positionSpider(){
+    if(!popup.isConnected)return;
+    const anchor=trigger.isConnected?trigger.getBoundingClientRect():
+      {left:6,top:6,bottom:6};
+    const width=Math.min(324,innerWidth-12);
+    const left=Math.max(6,Math.min(anchor.left,innerWidth-width-6));
+    Object.assign(popup.style,{width:width+'px',left:left+'px'});
+    const height=Math.min(popup.getBoundingClientRect().height,innerHeight-12);
+    const below=anchor.bottom+7,above=anchor.top-height-7;
+    const top=below+height>innerHeight-6&&above>=6?above:
+      Math.max(6,Math.min(below,innerHeight-height-6));
+    popup.style.top=top+'px';
+  }
   const onOutside=event=>{
     if(!popup.contains(event.target)&&event.target!==trigger)closeSpiderPopup();
   };
@@ -1579,11 +1611,12 @@ function openSpiderPopup(post,trigger){
   // viewport while a reader is dragging a handle. Outside click/Escape close.
   document.addEventListener('pointerdown',onOutside,true);
   document.addEventListener('keydown',onEscape,true);
-  activeSpiderPopup={postId:post.id,popup,trigger,cleanup:()=>{
+  activeSpiderPopup={postId:post.id,popup,trigger,refreshBackground,cleanup:()=>{
     document.removeEventListener('pointerdown',onOutside,true);
     document.removeEventListener('keydown',onEscape,true);
   }};
   renderShape();
+  refreshBackground();
   popup.focus({preventScroll:true});
 }
 
