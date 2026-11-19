@@ -21,6 +21,10 @@ jobs:
           node --check v2/app.js
           node --check v2/core/events.js
           node --check v2/core/policy.js
+          node --check v2/core/content-ratings.js
+          node --check v2/core/reviewer-reputation.js
+          node --check v2/test/content-ratings.test.js
+          node --check v2/test/reviewer-reputation.test.js
           node --check v2/core/replica.js
           node --check v2/network/node-peer.mjs
           node --check v2/network/signed-access-controller.js

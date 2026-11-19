@@ -48,6 +48,24 @@
         <label>Only attribute name (optional)<input id="searchCustomField" placeholder="e.g. price, license, role"></label>
       </div>
     </details>
+    <details id="ratingPreferences" class="rating-preferences">
+      <summary>Content ratings · age/controversy thresholds</summary>
+      <p class="fine">Reader-only rules; never delete signed posts. Only ratings from reviewers you explicitly trust or your chosen group's ratified reviewers can affect image visibility. Political disagreement is not a legal finding.</p>
+      <label><input type="checkbox" id="ratingsEnable"> Apply recognized age ratings to image previews</label>
+      <div class="rating-threshold-grid">
+        <label>Age tier
+          <select id="ratingsMinAge">
+            <option value="2">13+</option><option value="3">18+</option>
+            <option value="4">Extreme / disturbing</option><option value="5">Graphic gore</option>
+            <option value="6">Potential legal concern (unverified)</option>
+          </select>
+        </label>
+        <label>Blur after independent ratings <input id="ratingsBlurVotes" type="number" min="1" max="100" value="2"></label>
+        <label>Hide preview after ratings <input id="ratingsHideVotes" type="number" min="1" max="100" value="5"></label>
+        <label>Clear restriction if credible counter-ratings ≥ <input id="ratingsDissentVotes" type="number" min="1" max="100" value="2"></label>
+      </div>
+      <p class="fine" id="ratingRulesNote">Defaults are provisional. Incompatible future versions will not silently replace your choices.</p>
+    </details>
     <div class="search-type-label">Popular tags in this space <small>click = include · Shift+click = exclude</small></div>
     <div id="tagCloud" class="tag-cloud"></div>
     <div class="search-foot"><button type="button" id="resetSearch">Reset filters</button><span id="searchCount"></span></div>

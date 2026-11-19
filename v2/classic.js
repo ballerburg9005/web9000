@@ -4,6 +4,8 @@ import {generateIdentity,signEvent,shortAuthor} from './core/events.js';
 import {Replica} from './core/replica.js';
 import {openLocal,getItem,setItem} from './core/persist.js';
 import {buildFeed,DEFAULT_POLICY} from './core/policy.js';
+import {AGE_TIERS,RATING_AXES,DEFAULT_RATING_RULES,normalizeRatingRules,
+  assessContentRatings} from './core/content-ratings.js';
 import {BrowserPeerMesh,parsePeerUrls,parseSyncSpaces,normalizeSyncSpaces} from './network/browser-mesh.js';
 import {readSiteContext} from './network/site-context.js';
 import {MockKarmaProvider} from './core/mock-karma.js';
@@ -17,6 +19,7 @@ import {mediaItems,primaryMedia,choosePrimaryMediaIndex,categoryForType,
 import {parseMediaGateways,claimsFromVerifiedEvents,chooseMediaGateways} from './core/media-discovery.js';
 import {normalizeRelations,setRelation,relationFor} from './core/social-relations.js';
 import {discussionRecords,filterDebugEntries,summarizeSignedEvents,DebugTrace} from './core/debug-console.js';
+import {groupReputation,reviewerConduct} from './core/reviewer-reputation.js';
 
 const $=id=>document.getElementById(id);
 const state={
@@ -30,6 +33,8 @@ const state={
   followedSpaces:['demo','commons'],showGroupSpaces:true,groupSubscriptions:[],groupViews:[],groupHeads:{},
   searchFilters:{attribute:'all',includeTags:[],excludeTags:[],excludeKinds:[],minScore:0,customField:''},
   relations:Object.create(null),debugTrace:new DebugTrace(),debugDump:null,debugItems:[],debugSelected:null,
+  ratingRules:{...DEFAULT_RATING_RULES},ratingTrustedAuthors:[],ratingReveals:new Set(),
+  ratingRecordsByTarget:new Map(),
   replyDrafts:new Map(),expandedTags:new Set(),editingPostId:null,editingMedia:[],editingFields:null,lastError:'',renderPending:false
 };
 const safeSpace=s=>typeof s==='string'&&s.length>0&&s.length<=180&&!/[\x00-\x1f]/.test(s);
@@ -462,6 +467,26 @@ function choosePolicy(){
     subscriptions:state.groupSubscriptions,ignoredLabelIds:state.ignoredLabels};
 }
 const allEvents=()=>state.replica.list();
+function recognizedRatingReviewers(){
+  const groups=new Map();
+  for(const entry of state.groupViews){
+    if(!state.groupSubscriptions.includes(entry.id)||entry.result?.ambiguous)continue;
+    const reviewerKeys=Object.keys(entry.result?.state?.reviewers||{});
+    if(reviewerKeys.length)groups.set(entry.id,new Set(reviewerKeys));
+  }
+  return groups;
+}
+function ratingAssessment(id,{media=true,records=null}={}){
+  // Incremental target-local index: don't scan up to 25,000 unrelated
+  // signed events again for EACH of seven columns of media tiles.
+  const relevant=records??state.ratingRecordsByTarget.get(id)??[];
+  return assessContentRatings(relevant,id,{
+    rules:state.ratingRules,trustAuthors:state.ratingTrustedAuthors,
+    subscribedGroups:state.groupSubscriptions,
+    verifiedGroupReviewers:recognizedRatingReviewers(),
+    selfAuthor:state.identity?.author,media
+  });
+}
 const currentPosts=()=>{
   const records=allEvents(),policy=choosePolicy();
   if(state.profileAuthor){
@@ -730,7 +755,13 @@ function tile(item,i,replyCounts){
   card.dataset.author=p.author;card.dataset.socialLabel=relationFor(state.relations,p.author)||'';
   card.tabIndex=0;card.setAttribute('role','button');card.setAttribute('aria-label',b.title||'Post');
   const demoMedia=signedDemoMedia(p);
-  if(demoMedia?.type==='audio'){
+  const rating=ratingAssessment(item.event.id,{media:!!(b.media?.length||item.thumb||demoMedia)});
+  const locallyHidden=rating.action==='hide'&&!state.ratingReveals.has(item.event.id);
+  // A hidden preview MUST NOT fetch its CID media just to obscure the bytes.
+  // The reader can still open its signed metadata and explicitly reveal.
+  if(locallyHidden){
+    card.append(element('div','post-reveal','Preview hidden by your local age rule · open to review'));
+  }else if(demoMedia?.type==='audio'){
     card.append(miniAudio(demoMedia.src,{compact:true}));
     card.classList.add('sound-tile');
   }else if(demoMedia?.type==='video'){
@@ -821,10 +852,33 @@ function tile(item,i,replyCounts){
     }
     card.append(box);
   }
+  // Reader-selected age thresholds affect the *presentation of media*, not
+  // the underlying signed post or an independent peer's right to retain it.
+  if(!state.ratingReveals.has(item.event.id)&&rating.action!=='clear'){
+    card.classList.add('rating-media-'+rating.action);
+    card.append(element('span','rating-media-notice',
+      (rating.action==='hide'?'Preview hidden':'Preview blurred')+
+      ' · '+rating.high+' recognized age ratings · open to review'));
+  }
+  if(rating.textFirst)card.classList.add('rating-text-priority');
+  // Cosmetic red flag only when one of this READER's followed, ratified
+  // groups really appointed the signing reviewer. Unverified flags and
+  // self-nominations never produce a moderator badge/visible warning.
+  const groupReviewers=recognizedRatingReviewers();
+  const adoptedFlag=allEvents().find(e=>e.payload.kind==='label'&&
+    e.payload.body.target===item.event.id&&
+    [...groupReviewers.values()].some(members=>members.has(e.payload.author)));
+  if(adoptedFlag){
+    const badge=element('span','rating-flag-marker','⚑');
+    badge.title='A reviewer appointed by a group you follow signed a report. '+
+      'This is advice, not a platform ban or independent proof: '+
+      adoptedFlag.payload.body.tag;
+    card.append(badge);
+  }
   if(p.space==='demo'&&p.author===state.demoAuthor&&b.fields?.demo)
     card.append(element('div','post-small demo-label','EXAMPLE · SIGNED'));
   else if(!item.decision?.visible)card.append(element('div','post-small','FILTERED · AUDIT'));
-  addDemoVideoHover(card,p);
+  if(!locallyHidden)addDemoVideoHover(card,p);
   card.addEventListener('click',()=>{ if(state.selected===item.event.id)closeSelected();else expand(item.event.id); });
   return card;
 }
@@ -884,6 +938,74 @@ function renderProfileHeader(){
   if(!state.mockMode)actions.append(element('span','profile-status',
     'Karma/stake not independently verified on this experimental network.'));
   header.append(actions);
+  // A group reviewer is recognized ONLY on a reader-selected RATIFIED
+  // charter branch. Self-nomination and an unverified group claim never
+  // create a universal moderator badge.
+  const reviewerGroups=state.groupViews.filter(g=>
+    !g.result.ambiguous&&state.groupSubscriptions.includes(g.id)&&
+    Object.hasOwn(g.result.state.reviewers||{},author));
+  const moderatorAudit=reviewerConduct(allEvents(),author);
+  if(reviewerGroups.length||moderatorAudit.activity.length||moderatorAudit.opinions.length){
+    const panel=element('section','reviewer-profile-audit');
+    panel.append(element('strong','',
+      'Reviewer activity · public audit, not platform authority'));
+    if(reviewerGroups.length){
+      const badges=element('div','reviewer-badges');
+      for(const group of reviewerGroups)
+        badges.append(element('span','reviewer-badge',
+          'Reviewer · '+group.result.state.name));
+      panel.append(badges);
+    }else panel.append(element('p','rating-caveat',
+      'No reviewer authority established by a ratified group you follow.'));
+    panel.append(element('p','rating-caveat',
+      moderatorAudit.activity.length+' observed signed review actions · '+
+      moderatorAudit.concerns+' individual distrust opinion(s) · '+
+      moderatorAudit.commendations+' commendation(s). '+
+      'No opinion automatically removes a group member or author.'));
+    const visible=moderatorAudit.activity.slice(0,20);
+    for(const record of visible){
+      const b=record.payload.body;
+      const subject=allEvents().find(e=>e.id===b.target)?.payload.body.title||
+        'Content '+String(b.target||'').slice(7,19);
+      panel.append(element('div','reviewer-audit-item',
+        formatDate(record.payload.time)+' · '+
+        (record.payload.kind==='content-rating'?
+          'Age rating: '+AGE_TIERS[b.age]:
+          'Signed flag: '+b.tag)+
+        ' · '+subject));
+    }
+    for(const opinion of moderatorAudit.opinions.slice(0,16)){
+      panel.append(element('div','reviewer-audit-opinion',
+        who(opinion.payload.author)+' · '+
+        (opinion.payload.body.value<0?'Distrust':'Commend')+
+        ' reviewer conduct · '+opinion.payload.body.reason));
+    }
+    if(reviewerGroups.length&&author!==state.identity.author){
+      const form=element('details','reviewer-feedback-panel');
+      form.append(element('summary','','Assess this reviewer’s conduct'));
+      const groupLabel=element('label','',"Reviewer’s ratified group");
+      const pick=document.createElement('select');
+      for(const g of reviewerGroups)pick.append(new Option(g.result.state.name,g.id));
+      groupLabel.append(pick);form.append(groupLabel);
+      const reason=element('textarea');
+      reason.placeholder='Specific conduct, not an ideological disagreement alone';
+      reason.maxLength=500;reason.rows=2;form.append(reason);
+      const options=element('div','group-actions');
+      for(const [label,value] of [['Commend',1],['Report misconduct',-1]]){
+        options.append(button(label,async()=>{
+          if(reason.value.trim().length<3)return toast('Describe the conduct you observed.');
+          try{
+            await publish('reviewer-conduct',{group:pick.value,
+              reviewer:author,value,reason:reason.value.trim()},{space:'groups'});
+            render();
+            toast('Signed personal conduct opinion published. No reviewer role was revoked.');
+          }catch(error){toast('Reviewer conduct report: '+error.message);}
+        }));
+      }
+      form.append(options);panel.append(form);
+    }
+    header.append(panel);
+  }
 }
 function showProfile(author){
   if(!/^ed25519:[A-Za-z0-9_-]{43}$/.test(author))return toast('Invalid signing identity');
@@ -1025,6 +1147,8 @@ async function store(){
     setItem(state.db,'classic-followed-spaces',state.followedSpaces),
     setItem(state.db,'classic-group-subscriptions',state.groupSubscriptions),
     setItem(state.db,'classic-group-heads',state.groupHeads),
+    setItem(state.db,'classic-reader-rating-rules-v1',state.ratingRules),
+    setItem(state.db,'classic-trusted-rating-authors-v1',state.ratingTrustedAuthors),
     setItem(state.db,'classic-show-group-spaces',state.showGroupSpaces),
     setItem(state.db,'classic-auto-demo-peer-disabled',state.autoDemoPeerDisabled)
   ]);
@@ -1033,6 +1157,11 @@ async function ingest(e,{outgoing=false}={}){
   const response=await state.replica.ingest(e);
   if(!response.accepted)return response;
   if(!response.duplicate){
+    if(e.payload.kind==='content-rating'){
+      const id=e.payload.body.target;
+      const existing=state.ratingRecordsByTarget.get(id)||[];
+      existing.push(e);state.ratingRecordsByTarget.set(id,existing);
+    }
     state.saved.push(e);if(outgoing)state.outbox.push({event:e,ackedBy:[]});
     await store();scheduleRender();
   }
@@ -1166,6 +1295,196 @@ function renderReplies(body,post){
   addCommentForm(section,post);
   body.append(section);
 }
+
+const SVG_NS='http://www.w3.org/2000/svg';
+function contentRatingRadar(axes){
+  const wrap=element('div','rating-radar-wrap');
+  const svg=document.createElementNS(SVG_NS,'svg');
+  svg.setAttribute('class','rating-radar');
+  svg.setAttribute('viewBox','0 0 240 205');
+  svg.setAttribute('role','img');
+  svg.setAttribute('aria-label','Spider chart: '+Object.entries(RATING_AXES)
+    .map(([key,label])=>label+' '+(axes[key]===null?'unrated':axes[key]+'/5')).join(', '));
+  const center=[120,99],radius=72,keys=Object.keys(RATING_AXES);
+  const point=(idx,value)=>{
+    const angle=-Math.PI/2+idx*2*Math.PI/keys.length;
+    const r=radius*(value/5);
+    return (center[0]+Math.cos(angle)*r).toFixed(1)+','+
+      (center[1]+Math.sin(angle)*r).toFixed(1);
+  };
+  const add=(tag,attrs)=>{
+    const node=document.createElementNS(SVG_NS,tag);
+    for(const [name,value] of Object.entries(attrs))node.setAttribute(name,String(value));
+    svg.append(node);return node;
+  };
+  for(const r of [1,2,3,4,5]){
+    add('polygon',{points:keys.map((_,i)=>point(i,r)).join(' '),
+      fill:'none',stroke:'#615666','stroke-width':.75});
+  }
+  for(const [i,key] of keys.entries()){
+    add('line',{x1:center[0],y1:center[1],
+      x2:point(i,5).split(',')[0],y2:point(i,5).split(',')[1],
+      stroke:'#73647a','stroke-width':.9});
+  }
+  const values=keys.map(key=>axes[key]??0);
+  add('polygon',{points:values.map((value,i)=>point(i,value)).join(' '),
+    fill:'#d395bf','fill-opacity':.29,stroke:'#f1acd1','stroke-width':2});
+  const labels=[['Controversy',120,13],['Democracy',191,103],['Intellectual',120,191],['Spam',47,103]];
+  for(const [text,x,y] of labels){
+    const t=add('text',{x,y,'text-anchor':'middle',fill:'#d9c3d6','font-size':10});
+    t.textContent=text;
+  }
+  wrap.append(svg);
+  return wrap;
+}
+function renderContentRatingPanel(post){
+  const review=ratingAssessment(post.id,{media:!!post.payload.body.media?.length});
+  const panel=element('details','content-rating-panel');
+  panel.setAttribute('aria-label','Independent content rating and reader decisions');
+  panel.append(element('summary','',
+    'Suitability & importance · '+review.allSignedCount+' signed rating'+
+      (review.allSignedCount===1?'':'s')+' · '+review.qualifiedCount+' recognized'));
+  const content=element('div','rating-panel-content');
+  content.append(element('p','rating-caveat',
+    'Independent opinions about this post — not flags against other groups or their decisions. '+
+    'Ratings are not verdicts, age certification or legal findings. Popularity is separate.'));
+  content.append(contentRatingRadar(review.axes));
+  const stats=element('div','rating-axis-stats');
+  for(const [key,name] of Object.entries(RATING_AXES)){
+    stats.append(element('div','rating-axis-row',
+      name+' · '+(review.axes[key]===null?'not assessed':review.axes[key]+'/5')));
+  }
+  content.append(stats);
+  const high=review.high,low=review.low;
+  content.append(element('p','rating-caveat',
+    review.qualifiedCount+' recognized independent signer'+(review.qualifiedCount===1?'':'s')+
+    ', '+review.untrustedCount+' unrecognized · '+
+    high+' above age threshold, '+low+' below'+
+    (review.disputed?' · CONFLICT: no automatic restriction':'')+
+    ' · media action: '+review.action.toUpperCase()));
+  // Show groups' independent numerical summaries side by side. No group
+  // claims authority to challenge or overturn another group's decision.
+  const groupsCompared=Object.entries(review.groupComparisons);
+  if(groupsCompared.length){
+    const comparisons=element('div','rating-group-comparisons');
+    comparisons.append(element('strong','','Independent group ratings · compare without adjudicating'));
+    for(const [groupId,observed] of groupsCompared){
+      const group=state.groupViews.find(entry=>entry.id===groupId);
+      comparisons.append(element('div','rating-group-comparison',
+        (group?.result?.state.name||groupId.slice(7,21))+
+        ' · '+observed.count+' recognized signer'+(observed.count===1?'':'s')+
+        ' · median age '+(Number.isInteger(observed.ageMedian)?
+          AGE_TIERS[observed.ageMedian]:
+          Number(observed.ageMedian).toFixed(1)+'/6')+
+        ' · urgency '+observed.axes.democraticUrgency+'/5'));
+    }
+    content.append(comparisons);
+  }
+  if(review.publicInterestAlerts){
+    content.append(element('p','rating-interest',
+      review.publicInterestAlerts+' recognized public-interest/censorship-pressure alert'+
+      (review.publicInterestAlerts===1?'':'s')+
+      '. Alerts alone do not force highlighting or bypass spam filters.'));
+  }
+  const ageSummary=element('div','rating-age-summary');
+  for(let n=0;n<AGE_TIERS.length;n++){
+    if(review.ages[n])ageSummary.append(element('span','rating-age-chip',
+      AGE_TIERS[n]+' · '+review.ages[n]));
+  }
+  if(ageSummary.children.length)content.append(ageSummary);
+  if(review.latest.length){
+    const details=element('details','rating-audit-entries');
+    details.append(element('summary','','Signed individual assessments · inspect / trust reviewers'));
+    for(const entry of review.latest.slice(0,80)){
+      const b=entry.payload.body,author=entry.payload.author;
+      const trusted=review.qualified.some(x=>x.payload.author===author);
+      const row=element('div','rating-audit-row');
+      row.append(element('span','',
+        who(author)+' · '+AGE_TIERS[b.age]+
+        (b.publicInterestAlert?' · public-interest alert':'')+
+        (b.group?' · claimed group '+b.group.slice(7,19):'')+
+        (trusted?' · recognized':' · not used for automatic filtering')));
+      if(b.note)row.append(element('div','rating-audit-note',b.note));
+      if(author!==state.identity.author){
+        const individuallyTrusted=state.ratingTrustedAuthors.includes(author);
+        row.append(button(individuallyTrusted?'Stop trusting ratings':'Trust this rater',async()=>{
+          state.ratingTrustedAuthors=individuallyTrusted?
+            state.ratingTrustedAuthors.filter(x=>x!==author):
+            [...new Set([...state.ratingTrustedAuthors,author])].slice(0,1000);
+          await store();redrawCurrentWithoutScroll(post.id);
+        },'rating-trust'));
+      }
+      details.append(row);
+    }
+    content.append(details);
+  }
+  const form=element('form','rating-submit-form');
+  form.append(element('strong','','Rate this content (signed; public)'));
+  const own=review.latest.find(e=>e.payload.author===state.identity.author)?.payload.body;
+  const ageLabel=element('label','','Age / extreme-content category');
+  const age=document.createElement('select');age.name='age';age.setAttribute('aria-label','Age suitability rating');
+  for(const [i,name] of AGE_TIERS.entries()){
+    const option=new Option(name,String(i));
+    if(i===(own?.age??0))option.selected=true;
+    age.append(option);
+  }
+  ageLabel.append(age);form.append(ageLabel);
+  const sliders=new Map();
+  for(const [key,name] of Object.entries(RATING_AXES)){
+    const label=element('label','rating-slider-label',name);
+    const range=document.createElement('input');range.type='range';
+    range.min='0';range.max='5';range.step='1';
+    range.value=String(own?.axes?.[key]??0);
+    range.setAttribute('aria-label',name);
+    const number=element('output','rating-slider-output',range.value+'/5');
+    range.oninput=()=>number.textContent=range.value+'/5';
+    label.append(range,number);form.append(label);sliders.set(key,range);
+  }
+  const alert=element('label','rating-alert-label');
+  const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.checked=own?.publicInterestAlert===true;
+  alert.append(checkbox,document.createTextNode(
+    ' Public-interest / censorship-pressure alert (news, democracy, reporting; not meme promotion)'));
+  form.append(alert);
+  const groupChoices=state.groupViews.filter(g=>
+    state.groupSubscriptions.includes(g.id)&&!g.result.ambiguous&&
+    Object.hasOwn(g.result.state.reviewers||{},state.identity.author));
+  const groupLabel=element('label','','Publish this assessment');
+  const group=document.createElement('select');group.setAttribute('aria-label','Rating attribution');
+  group.append(new Option('My own signed opinion (no group endorsement)',''));
+  for(const entry of groupChoices)group.append(new Option(
+    'As ratified reviewer for '+entry.result.state.name,entry.id));
+  if(own?.group&&groupChoices.some(x=>x.id===own.group))group.value=own.group;
+  groupLabel.append(group);form.append(groupLabel);
+  const reason=element('textarea','rating-note');
+  reason.maxLength=500;reason.rows=2;
+  reason.placeholder='Optional evidence or explanation (not an attack on another group’s decision)';
+  reason.value=own?.note||'';
+  form.append(reason);
+  form.append(element('p','rating-caveat',
+    'One most-recent signed rating per signing key per post. Claimed group membership is ignored unless its reviewer appointment is independently ratified.'));
+  const send=element('button','rating-submit','Publish signed assessment');send.type='submit';
+  form.append(send);
+  form.onsubmit=async e=>{
+    e.preventDefault();send.disabled=true;
+    try{
+      const axes=Object.fromEntries([...sliders.entries()].map(([key,range])=>
+        [key,Number(range.value)]));
+      await publish('content-rating',{
+        target:post.id,age:Number(age.value),axes,
+        ...(checkbox.checked?{publicInterestAlert:true}:{}),
+        ...(group.value?{group:group.value}:{}),
+        ...(reason.value.trim()?{note:reason.value.trim()}:{} )
+      },{space:post.payload.space});
+      toast('Your independent signed rating was published. Reader controls remain local.');
+      redrawCurrentWithoutScroll(post.id);
+    }catch(error){toast('Rating failed: '+error.message);}
+    finally{send.disabled=false;}
+  };
+  content.append(form);
+  panel.append(content);
+  return panel;
+}
+
 function renderReportControl(post){
   const report=element('details','report-control');
   const toggle=element('summary','','⚑ Report');
@@ -1410,11 +1729,16 @@ function redrawCurrentWithoutScroll(id){
 function expand(id,{focus=true}={}){
   const feed=effectiveFeed(),index=feed.findIndex(x=>x.event.id===id);
   if(index<0)return;
-  state.selected=id;
   const current=feed[index],p=current.event.payload,b=current.displayBody||p.body;
+  // Network updates may change the feed between a user click and a redraw.
+  // Resolve by immutable event ID, never by a now-stale list index.
+  const cards=[...document.querySelectorAll('#imageGrid > .post')];
+  const card=cards.find(el=>el.dataset.id===id);
+  if(!card){state.selected=null;return;}
+  const visualIndex=cards.indexOf(card);
+  state.selected=id;
   for(const container of document.querySelectorAll('.post-container'))container.remove();
   for(const tile of document.querySelectorAll('.post.selected'))tile.classList.remove('selected');
-  const cards=[...document.querySelectorAll('.post')],card=cards[index];
   card.classList.add('selected');
   const panel=element('div','post-container expanded'),row=element('div','expanded-row');
   panel.dataset.displayId=current.lifecycle?.display.id||id;
@@ -1456,23 +1780,39 @@ function expand(id,{focus=true}={}){
       metadata.append(marker);
     }
   }
-  if(signedDemoMedia(p)?.type==='audio'){
-    const player=miniAudio(signedDemoMedia(p).src);
-    mediaRoot.append(player);
-  }
-  if(current.thumb&&!signedDemoMedia(p)){
-    const region=element('div','attachments'),img=document.createElement('img');
-    img.src=current.thumb;img.alt=b.title||'Demo image';img.loading='eager';img.decoding='async';region.append(img);mediaRoot.append(region);
-  }else if(!signedDemoMedia(p))showMedia(mediaRoot,current.lifecycle?.display||current.event);
-  // Earlier example video events accidentally contained unrelated photo CIDs;
-  // they remain in the signed event for audit, never presented as video art.
-
-  const demoVideo=signedDemoMedia(p)?.type==='video'?signedDemoMedia(p).src:null;
-  if(demoVideo){
-    const region=element('div','attachments');
-    region.append(miniVideo(demoVideo));mediaRoot.append(region);
+  const displayDemoMedia=signedDemoMedia(p);
+  const ratingAtDisplay=ratingAssessment(id,{media:!!(b.media?.length||current.thumb||displayDemoMedia)});
+  const hiddenBeforeFetch=ratingAtDisplay.action==='hide'&&!state.ratingReveals.has(id);
+  if(hiddenBeforeFetch){
+    mediaRoot.append(element('div','rating-hidden-placeholder',
+      'Media not fetched · your local age threshold hides this preview'));
+  }else{
+    if(displayDemoMedia?.type==='audio'){
+      mediaRoot.append(miniAudio(displayDemoMedia.src));
+    }
+    if(current.thumb&&!displayDemoMedia){
+      const region=element('div','attachments'),img=document.createElement('img');
+      img.src=current.thumb;img.alt=b.title||'Demo image';img.loading='eager';img.decoding='async';
+      region.append(img);mediaRoot.append(region);
+    }else if(!displayDemoMedia)showMedia(mediaRoot,current.lifecycle?.display||current.event);
+    // A demo video never substitutes an unrelated signed photo CID.
+    if(displayDemoMedia?.type==='video'){
+      const region=element('div','attachments');
+      region.append(miniVideo(displayDemoMedia.src));mediaRoot.append(region);
+    }
   }
   if(!mediaRoot.children.length)mediaRoot.remove();
+  if(ratingAtDisplay.action!=='clear'&&!state.ratingReveals.has(id)&&mediaRoot.parentElement){
+    mediaRoot.classList.add('rating-media-'+ratingAtDisplay.action);
+    const reveal=element('div','rating-reveal-control');
+    reveal.append(element('span','',
+      'Your chosen age policy '+(ratingAtDisplay.action==='hide'?'hid':'blurred')+
+      ' this media preview. Source opinion remains inspectable.'));
+    reveal.append(button('Reveal media in this session',()=>{
+      state.ratingReveals.add(id);redrawCurrentWithoutScroll(id);
+    }));
+    mediaRoot.before(reveal);
+  }
   if(b.text)body.append(element('p','',b.text));
   const field=b.fields||{};
   if(field.schedule){
@@ -1613,6 +1953,7 @@ function expand(id,{focus=true}={}){
       votes.append(action);
     }
     votes.append(renderReportControl(current.event));
+    body.append(renderContentRatingPanel(current.event));
     votes.append(button(state.audit?'− Audit':'⚖ Audit',()=>{
       state.audit=!state.audit;expand(id,{focus:false});
     },'audit-action'));
@@ -1669,7 +2010,7 @@ function expand(id,{focus=true}={}){
   row.append(left,body,right);panel.append(row);
   // Insert below the *actual rendered CSS grid row*, including mixed tiles.
   const top=card.offsetTop;let end=card;
-  for(const next of cards.slice(index+1)){
+  for(const next of cards.slice(visualIndex+1)){
     if(next.offsetTop!==top)break;end=next;
   }
   end.after(panel);
@@ -1945,6 +2286,99 @@ function renderGroupList(){
       catch(error){toast('Could not request membership: '+error.message);}
     }));
     section.append(controls);
+    // These are independent signed recommendations about group reliability,
+    // not votes that can ban a group or its members.
+    const groupStats=groupReputation(allEvents(),id);
+    const trustStatus=element('div','group-reputation-summary',
+      'Public group reliability opinions · '+groupStats.counts.trust+' trust · '+
+      groupStats.counts.distrust+' distrust · '+groupStats.count+' distinct signers'+
+      ' · signed opinions only, no automatic member penalty');
+    section.append(trustStatus);
+    const reputation=element('details','group-reputation-panel');
+    reputation.append(element('summary','','Assess group reliability / see signed opinions'));
+    const form=element('form','group-feedback-form');
+    const reason=element('textarea','');
+    reason.placeholder='Specific behavior or evidence behind this opinion';
+    reason.maxLength=500;reason.rows=2;reason.required=true;
+    form.append(reason);
+    const actions=element('div','group-actions');
+    for(const [label,value] of [['Trust this group',1],['Distrust this group',-1]]){
+      actions.append(button(label,async()=>{
+        if(reason.value.trim().length<3)return toast('Provide a reason (at least 3 characters).');
+        try{
+          await publish('group-rating',{group:id,value,reason:reason.value.trim()},{space:'groups'});
+          await refreshGroups();renderGroupList();
+          toast('Signed group opinion published; no member was blocked or penalized.');
+        }catch(error){toast('Group opinion failed: '+error.message);}
+      }));
+    }
+    form.append(actions);reputation.append(form);
+    for(const opinion of groupStats.opinions.slice(0,20)){
+      const b=opinion.payload.body;
+      reputation.append(element('p','group-opinion-row',
+        who(opinion.payload.author)+' · '+(b.value>0?'Trust':'Distrust')+
+        ' · '+b.reason));
+    }
+    section.append(reputation);
+    // Self-nominations are public but carry NO permissions. Signed charter
+    // votes are required for any reviewer appointment or removal.
+    const selfCandidate=groupStats.candidates.find(x=>
+      x.payload.author===state.identity.author);
+    const alreadyReviewer=Object.hasOwn(result.state.reviewers||{},state.identity.author);
+    if(!alreadyReviewer){
+      controls.append(button(selfCandidate?'Withdraw reviewer offer':'+ Volunteer to review',async()=>{
+        try{
+          await publish('reviewer-candidacy',{group:id,
+            action:selfCandidate?'withdraw':'volunteer',
+            reason:selfCandidate?'':'I volunteer for community review; this is not a ratified appointment.'},
+          {space:'groups'});
+          renderGroupList();
+          toast('Signed candidacy updated. Appointment still requires the group charter.');
+        }catch(error){toast('Reviewer candidacy: '+error.message);}
+      }));
+    }
+    if(groupStats.candidates.length){
+      const candidates=element('div','group-candidate-list');
+      candidates.append(element('strong','','Unratified reviewer volunteers'));
+      for(const candidate of groupStats.candidates.slice(0,15)){
+        const row=element('div','group-request',who(candidate.payload.author));
+        if(result.state.members.includes(state.identity.author)&&!result.ambiguous){
+          row.append(button('Propose appointment',async()=>{
+            try{
+              const proposal=await publish('proposal',{group:id,parent:result.selectedHead,
+                change:{type:'appoint-reviewer',author:candidate.payload.author,weight:1}},{space:'groups'});
+              await publish('vote',{proposal:proposal.id,choice:'approve'},{space:'groups'});
+              await refreshGroups();
+              toast('Reviewer appointment proposed, not active before quorum.');
+            }catch(error){toast('Reviewer proposal: '+error.message);}
+          }));
+        }
+        candidates.append(row);
+      }
+      section.append(candidates);
+    }
+    const ratifiedReviewers=Object.keys(result.state.reviewers||{});
+    if(ratifiedReviewers.length){
+      const recognized=element('div','group-reviewer-list');
+      recognized.append(element('strong','','Ratified reviewers on this selected branch'));
+      for(const reviewer of ratifiedReviewers.slice(0,30)){
+        const row=element('div','group-request',who(reviewer));
+        row.append(button('View audit',()=>{ $('clansDialog').close();showProfile(reviewer); }));
+        if(result.state.members.includes(state.identity.author)&&!result.ambiguous){
+          row.append(button('Propose removal',async()=>{
+            try{
+              const proposal=await publish('proposal',{group:id,parent:result.selectedHead,
+                change:{type:'remove-reviewer',author:reviewer}},{space:'groups'});
+              await publish('vote',{proposal:proposal.id,choice:'approve'},{space:'groups'});
+              await refreshGroups();
+              toast('Removal proposed; reviewer retains role until quorum-backed ratification.');
+            }catch(error){toast('Reviewer removal: '+error.message);}
+          }));
+        }
+        recognized.append(row);
+      }
+      section.append(recognized);
+    }
     if(result.ambiguous)section.append(element('p','',
       'Different branches have quorum-backed signatures. This browser shows the founding charter until you choose a branch; no universal winner exists.'));
     if(result.ratifications.length){
@@ -2346,6 +2780,28 @@ function bind(){
   }
   for(const checkbox of document.querySelectorAll('[data-exclude-kind]'))
     checkbox.onchange=()=>{readSearchFilters();render();};
+  function updateRatingPreferences(){
+    try{
+      const prev=state.ratingRules;
+      const next=normalizeRatingRules({
+        ...prev,active:$('ratingsEnable').checked,
+        minAgeTier:Number($('ratingsMinAge').value),
+        blurVotes:Number($('ratingsBlurVotes').value),
+        hideVotes:Number($('ratingsHideVotes').value),
+        dissentVotes:Number($('ratingsDissentVotes').value)
+      });
+      state.ratingRules=next;
+      $('ratingRulesNote').textContent='Saved locally · only independently recognized signed opinions count. '+
+        'Conflicting opinions block automatic filtering. These settings do not change signed records.';
+      void store();
+      render();
+    }catch(error){
+      $('ratingRulesNote').textContent=error.message+' · settings unchanged until corrected.';
+    }
+  }
+  for(const id of ['ratingsEnable','ratingsMinAge','ratingsBlurVotes',
+    'ratingsHideVotes','ratingsDissentVotes'])
+    $(id).addEventListener('change',updateRatingPreferences);
   $('resetSearch').onclick=()=>{
     state.search='';$('searchPosts').value='';
     for(const id of ['searchIncludeTags','searchExcludeTags','searchCustomField'])$(id).value='';
@@ -2793,7 +3249,13 @@ async function init(){
     await setItem(state.db,'identity',state.identity);
   }
   state.saved=await getItem(state.db,'records')||[];
-  for(const event of state.saved)await state.replica.ingest(event);
+  for(const event of state.saved){
+    const accepted=await state.replica.ingest(event);
+    if(accepted.accepted&&event.payload.kind==='content-rating'){
+      const id=event.payload.body.target,items=state.ratingRecordsByTarget.get(id)||[];
+      items.push(event);state.ratingRecordsByTarget.set(id,items);
+    }
+  }
   state.outbox=await getItem(state.db,'outbox')||[];
   state.peers=await getItem(state.db,'peer-urls')||[];
   try{
@@ -2828,6 +3290,17 @@ async function init(){
   state.mockMode=await getItem(state.db,'classic-mock-mode')===true;
   state.followedSpaces=await getItem(state.db,'classic-followed-spaces')||['demo','commons'];
   state.groupSubscriptions=await getItem(state.db,'classic-group-subscriptions')||[];
+  try{
+    state.ratingRules=normalizeRatingRules(
+      await getItem(state.db,'classic-reader-rating-rules-v1')||null);
+  }catch(error){
+    state.ratingRules={...DEFAULT_RATING_RULES,active:false};
+    console.warn('Unsupported local rating policy remains inactive:',error.message);
+  }
+  const ratingTrusted=await getItem(state.db,'classic-trusted-rating-authors-v1')||[];
+  state.ratingTrustedAuthors=Array.isArray(ratingTrusted)?
+    [...new Set(ratingTrusted.filter(k=>typeof k==='string'&&
+      /^ed25519:[a-zA-Z0-9_-]{43}$/.test(k)))].slice(0,1000):[];
   const groupHeads=await getItem(state.db,'classic-group-heads');
   state.groupHeads=groupHeads&&typeof groupHeads==='object'&&!Array.isArray(groupHeads)?
     Object.fromEntries(Object.entries(groupHeads).filter(([group,head])=>
@@ -2872,6 +3345,11 @@ async function init(){
   $('mockEnabled').checked=state.mockMode;
   $('viewStyle').value=state.view;
   $('respectWithdrawals').checked=state.respectWithdrawals;
+  $('ratingsEnable').checked=state.ratingRules.active;
+  $('ratingsMinAge').value=String(state.ratingRules.minAgeTier);
+  $('ratingsBlurVotes').value=String(state.ratingRules.blurVotes);
+  $('ratingsHideVotes').value=String(state.ratingRules.hideVotes);
+  $('ratingsDissentVotes').value=String(state.ratingRules.dissentVotes);
   $('peerURLs').value=state.peers.join('\n');
   $('peerScopes').value=state.peerScopes.join('\n');
   $('mediaPeerUrl').value=state.mediaBase||state.unconfirmedMediaURL||'';
@@ -2899,7 +3377,7 @@ async function init(){
     onPacket:tracePeer,
     onEvent:async e=>{
       const result=await ingest(e);
-      if(result.accepted&&['group','proposal','vote','membership'].includes(e.payload.kind))
+      if(result.accepted&&['group','proposal','vote','membership','group-rating','reviewer-candidacy'].includes(e.payload.kind))
         void refreshGroups();
       if(result.accepted&&e.payload.kind==='media-provider'&&$('networkDialog').open)
         renderMediaProviderSuggestions();

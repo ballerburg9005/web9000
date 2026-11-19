@@ -1,63 +1,80 @@
-# WEB9000 — composable adversarial review and recognition
-**Design clarification from owner · 2026-11-19 · NOT an enacted default policy**
+# WEB9000 — independent group scoring, reader filters and reviewer accountability
 
-## Intent
+**Owner-corrected design · November 19, 2026. Parts are implemented experimentally; no central moderator authority is enacted.**
 
-WEB9000 groups suggest review rules to willing readers. They do **not** own a namespace, delete another author's signed record, or receive global publication/moderation rights. The owner expects many people attracted to moderation to have conflicts of interest, ambitions for status, strong ideological commitments, or incentives to overflag dissent. **Do not assume reviewers are neutral.** Make even biased reviewers useful as *evidence sources* by allowing independent, conflicting review signals to cancel unwarranted negative assessments.
+## The actual principle: groups judge content independently
 
-The owner's example is a censorious politically extreme group flagging ideologically opposed speech as harmful. An opposing group may issue a positive **greenlight** for the same content; a mainstream reader/community can combine both signed assessment streams rather than taking either group whole. This must work for **all** viewpoints and content categories, not hard-code ideological labels or any empirical "90% true / 10% false" claim. Those proportions were an intuitive example of why rejecting every output from a biased group throws away useful signals, not verified statistics or a protocol parameter.
+Each group defines and publishes **its own signed content ratings and suggested thresholds**. Groups **do not flag, invalidate or directly greenlight another group's individual decisions**. There is no system of groups filing appeals against each other's review records.
 
-## Independent signed review inputs
+Instead, readers (or willing groups) choose several independent sources and extract useful patterns from the **statistical differences** among their opinions. An ideologically biased organization can nevertheless supply useful spam or safety evidence. A disagreement between competing groups is a reason to **avoid suppressing** controversial or legitimate material, not evidence that either group is correct.
 
-- **Negative assessment:** a group/member's signed recommendation to warn, demote, hide from that reader's feed, or decline media replication under a particular identified rule. References exact post/event/CID, evidence, authorship, adopted group charter branch/rule version, reason, issuing scope, publication time (self-reported until independently witnessed), and signed reversal or expiry. **An allegation is not evidence of truth.**
-- **Positive assessment / greenlight:** a signed, target-specific declaration that the issuer reviewed a post/CID and considers a specified negative finding unwarranted under a stated rule, or positively recommends it. It does **not** change the original post or erase its negative assessments.
-- **Unreviewed / abstained:** distinct from either approval or condemnation. Qualified spam admission is a separate verifier layer; silence does not equal clean content.
-- **Reader's preferences:** independently chosen subscriptions to none/one/many groups and their charter branches, plus personal per-author, content and tag rules. A subscribed group is not a universal administrator. No group may change another person's subscriptions, defaults, raw audit access or personal filter.
+"10% lies mixed with 90% truth" in the earlier example is a qualitative threat model, **not** a verified proportion, rule constant, or hard-coded political classification. Review quality and group trust are to be measured by reader-chosen, auditable evidence rather than automatically inferred ideology.
 
-## Two plausible composition strategies — NOT equivalent; user has NOT chosen a mandatory one
+The owner corrected the earlier "explicit challenges to another group's negative assessments" interpretation: **do not implement it**. The previous cross-greenlight subtraction/consensus-negative proposal is superseded. A single group independently assesses the underlying content; a reader may compare multiple groups' independent ratings of **the same post**, without either one targeting the other group's votes.
 
-**A. Cross-greenlight subtraction:** for a reader explicitly adopting groups A and B, compute
-`effectiveNegatives(A) = negatives(A) - positiveGreenlights(B)` and
-`effectiveNegatives(B) = negatives(B) - positiveGreenlights(A)`.
-The remaining negative assessments feed the reader's chosen hide/downrank/warn rule. This retains a one-sided flag *unless* an opposing subscribed reviewer specifically clears it.
+## Signed content-rating dimensions
 
-**B. Cross-group negative consensus:** automatically hide only when independent subscribed reviewers *both* issue an applicable negative assessment; otherwise keep the record visible with disputed/unchecked labels. This is stricter about false positives but less protective against actual spam missed by one group.
+**Popularity remains independent of suitability and importance.** A meme may be popular and intellectually trivial, while a graphic news report may be of high democratic importance.
 
-Both require explicit local adoption, condition-specific semantics, transparent signed provenance and appeal. A malicious greenlighter could rubber-stamp every objection, just as a malicious flagger could flag every political opponent. **Neither signal is automatically truthful merely because it came from an ideological adversary**. The user may also configure a more complex ruleset (e.g. specialist malware and abuse-review groups, activity-specific confidence, advisory-only warning versus hide, personal veto), but do not hard-code a numeric weight or "extremist" classification.
+One signed `content-rating` event targets an original signed post ID and carries the following independent values:
 
-*Example truth table for option A, assuming A and B are both subscribed and the reader treats surviving negatives as suggestions:*
-
-| A flag | B greenlight targeting that flag | Result for A's flag |
+| Field | Domain | Meaning |
 |---|---|---|
-| yes | yes | Cancel/mark explicitly disputed; original flag remains auditable |
-| yes | no / abstain | Flag remains an advisory recommendation |
-| no | yes | Positive note only; no negative flag existed to cancel |
-| no | no | Unreviewed, **not** verified clean |
+| Age/suitability tier | 0–6 ordinal | 0 All audiences; 1 PG; 2 age 13+; 3 age 18+; 4 extreme/disgusting adult material; 5 graphic gore (including news); 6 potential legal concern — an **unverified allegation**, never a legal verdict |
+| Controversy/censorship pressure | 0–5 | The content is likely to attract strong disagreement, contested suppression, or heightened review pressure |
+| Democratic urgency | 0–5 | Importance of timely reporting for civic or democratic participation |
+| Intellectual importance | 0–5 | Seriousness, educational or analytical value, distinct from upvote popularity |
+| Spam/low-value likelihood | 0–5 | Independent assessment of low-value/automated/spam characteristics |
+| Public-interest censorship-pressure alert | Boolean, **special purpose** | **Only** for news/reporting, politically controversial speech under heavy suppression pressure or matters foundational to democratic discourse; not ordinary memes/attention-seeking |
 
-For the reverse direction swap group roles. If **both flag**, neither independently cancels the other's flag, and their disagreement/confidence/appeal history can be displayed. If **both greenlight** a dangerous item, readers and operators still retain separate local legal/safety refusal policies.
+These dimensions are not necessarily objective. Every rating must retain provenance, signer and optional reason. Group affiliation may be **claimed** in a signed payload, but no extra authority is attached unless that signer is a ratified reviewer on a **selected, subscribed group charter branch**. Self-claims do not count as group approval.
 
-**Safety boundary:** the reader's chosen feed composition must **not** automatically compel a peer to serve, download, or retain forbidden or legally risky media. Operator quarantine and signed-media legal review are distinct from ordinary speech recommendations and individual feed preferences.
+**Radar/spider chart:** display the four 0–5 axes for recognized signed assessments, plus a clearly separate age-category distribution and popularity votes. Untrusted claims remain available to audit but cannot silently manipulate the authoritative-looking radar or automatic filtering. The special public-interest flag does not automatically make a story trend; it is an advisory indicator requiring multiple credible independent opinions and an elevated democratic/intellectual axis value before any text-first visual emphasis.
 
-## Reputation, status and deliberately *limited* reviewer privileges
+**Legality warning is not an age certification or moderation command.** Potentially unlawful material is complicated, contextual and jurisdiction-dependent. Reader-selected visibility and operators' lawful storage/quarantine decisions remain separate. An age-tier vote alone does not automatically condemn an author or require a storage peer to fetch forbidden media.
 
-The user proposes making accurate reviewers *look and feel recognized* through visible status and a few symbolic/presentational privileges, without creating a coercive moderation hierarchy. Candidate privileges to test (not automatically granted):
-- Small **reviewer badge** beside the name, explicitly attributed to an elected/ratified group branch and **visible only where the reader has adopted that group**.
-- Tiny **red flag** marker on reviewed posts, with source, scope, reason and contest/appeal controls. This is a **recommendation**, not a platform-wide infraction or proof of wrongdoing.
-- An optional **featured reviewer post** or highlight for a bounded, reader-approved quota. Any such highlight must be labeled and turn-off-able, not a right to force placement, obscure dissent, or outrank user-stated display preferences.
-- Recognition rewards based on **reviewer correctness as independently assessed by affected readers or verifiable appeal outcomes**, not raw volume of flags, alignment with one ideology, automatic transitive kudos or which faction won a popularity contest.
+## Threshold-based local interpretation; disagreement is a protection
 
-**Never misleadingly claim that symbolic reviewer privileges are site-wide enforcement authority.** The design uses status incentives, not fake sanctions or a secret moderator caste. People can leave, unfollow, appeal, choose another specialist, or inspect the underlying signed events. Do not give cosmetic review status the ability to change guild membership, capture a namespace, ban publishing, or remove signed evidence.
+The owner explicitly rejected **group agreement as a universal prerequisite** because small communities may have only one useful reviewer group. Use adjustable **counts of independently recognized assessments**, not a rigid unanimity requirement.
 
-## Protocol and attack-review tasks before implementation
+The owner's illustrative defaults:
 
-1. Define signed positive and negative *assessment* envelopes, distinct from existing `label`, `report`, `reviewer`, and governance change events. Specify explicit `target`, provenance, group ID + charter branch, rule, evidence, expiration, reversals and version. Design consent and identity/replay protections. No mutable global "latest".
-2. Independently verify that the claimed reviewer was actually ratified/appointed for that **specific scope and time** at the cited parent branch; avoid granting standing to fake/expired branch positions.
-3. Provide a **local, deterministic, auditable** composition engine with selectable rule presets (cross-greenlight subtraction, consensus-negative, advisory-only, personal filters), keeping all original signed negative and positive records inspectable.
-4. Prevent unilateral publisher/curator groups from rewriting defaults or hiding counter-signals. A gateway's proposed moderation subscriptions are **suggestions**, not auto-enrolled peer authority.
-5. Account for collusion, coordinated rubber-stamp greenlighting, malicious mass flagging, brigading, reviewer self-promotion, sock puppets, status farming, retaliatory reports, long-term reputation gaming and quorum takeover. Include reversal/appeal evidence and accountability.
-6. Retain cryptographic signed snapshot completeness caveats: seeing no opposing endorsement might simply mean it was withheld by the selected mirror. Do not confuse `no greenlight received` with proof no greenlight exists.
-7. Test independent peer disagreement, group fork/charter changes, per-reader overrides, offline propagation, scoped media legal refusal, display badges without global authority and local ability to turn off all group review suggestions.
+- Two qualified age-18+ assessments may **blur a media preview**.
+- Five qualified age-18+ assessments may **hide that preview in the reader's view** (never delete its signed post).
+- A case with **ten high-age assessments from group A and two credible below-18 ratings from group B** should normally remain **unblurred**, because credible disagreement is a protection against malicious censorship. The opposing group did not need to target or overturn any review decision.
+- The user can reveal their locally hidden/blurred media; the original signed event, text, replies and audit history remain available where lawful. **A preview that is set to HIDE is not fetched at all before reveal; a BLUR must fetch media bytes to render it blurred.** A browser may already hold bytes from a previous view/cached session; a later hide cannot undo earlier downloads.
+- A new or untrusted key cannot automatically impose or lift restrictions: signed identity ≠ Sybil resistance. To affect automatic presentation, a signer must be individually selected by the reader or independently verified as a reviewer of a reader-subscribed group. Duplicate/new ratings from a key do not multiply votes; its latest signed rating supersedes its own earlier rating in the local projection.
 
-### Implementation status
+These numbers are **provisional**, not adopted network-wide defaults. A reader's rules are versioned (`v1`), stored locally, and **disabled for automatic media hiding until explicitly enabled**. Controversy, political importance and age are separate axes; political urgency must never become an automatic feed-spam bypass.
 
-**This file records owner direction only, NOT an automatic group filter, enacted cross-greenlight subtraction rule, earned review rights or reviewer-ranking algorithm.** Current v2 code mainly supports negative local `label` interpretations, local reviewer weights, simple delegated group reviewer inheritance and optional group hide tags; it does not have ratified positive-greenlight votes, transparent reviewer accuracy scores, standing proof with evidence completeness, or the requested cross-opposition composition. The UI should not imply they already work. These are future features to design, test and present for owner review; the ongoing backend indexed-sync change does not alter group policy.
+A mismatch among many reviewers may indicate strategic flagging, source capture, incomplete replication, or genuine subjectivity. Readers may view per-group distributions; the software should later offer *suggestions* to tune thresholds based on size, trusted review volume, variance, independent downstream outcomes and changing network conditions. Group charters may recommend updated values. Existing users must **not** have preferences silently replaced by incompatible values, nor become stuck on an obsolete version: provide explicit upgrades/migrations, visibility of proposals, simple rollback, and careful budgeted defaults. No automatic calibration or proven accuracy scoring exists yet.
+
+## Groups, moderator incentives and accountability
+
+Members may volunteer/self-nominate as reviewers, without acquiring authority by doing so. Where a group's charter requires election, appointment, term or vote, the role begins **only** after independently verifiable ratification on a selected branch. A group can remove misbehaving reviewers via ordinary quorum-backed amendments; competing signed forks remain inspectable.
+
+Moderators/reviewers should have public, readable activity logs **on their profiles**, including their own signed ratings and negative flags and other people's signed conduct assessments (with optional evidence IDs). Their behavior receives more scrutiny than ordinary publishing. Peers and readers can separately publish **group trust/distrust** ratings as signed opinions; those may inform voluntary recommendations about the group's reliability. They cannot magically punish all members, erase group records, create legal liability or create global sanctions. Any future inherited-group reputation penalty must be explicitly opted into and carefully bounded against collective punishment, retaliation and Sybils.
+
+A reviewer can receive:
+- A small **ratified-group badge** next to their name, visible only where that group/branch is voluntarily recognized.
+- A tiny, attributed red flag on posts their adopted group has reviewed.
+- A limited, reader-chosen opportunity to visually highlight their own posts; status incentives must not become hidden advertising, post deletion, mandatory ordering, or coercive power.
+
+Recognition may reward **verified useful review behavior**, not simply report quantity, ideological agreement, follower count or the ability to mass flag. The symbolic power is intentionally limited and clearly labeled as presentation, **not falsely advertised as a site-wide enforcement role**.
+
+## Actual implementation boundary (2026-11-19)
+
+Implemented experimental:
+- Portable signed `content-rating` events with numeric age + radar axes, independent special public-interest alert, optional claimed group, optional explanation.
+- Independent signed `group-rating`, `reviewer-conduct` and `reviewer-candidacy` events; signed group opinions never edit another group's rating event. Group-candidacy is not automatic reviewer eligibility.
+- Pure local rating projection deduplicates by signer, differentiates untrusted from selected reviewers, and applies versioned local 2/5/2 age threshold/dissent example without modifying or deleting any signed event.
+- Compact browser controls to sign ratings, view the spider chart and selected/ignored sources, locally tune thresholds and trust particular raters.
+- Group reputation display, reviewer self-candidacy, quorum-backed appointment/removal proposals, and readable activity reports on reviewer profiles.
+
+**Not yet implemented or guaranteed:** cryptographically robust stake/earned-karma score, accurate statistical reviewer quality, adaptive threshold recommendations, independent anti-Sybil aggregation, a proven cross-peer completeness guarantee, private-group filtering, automatic moderator term expiry, cross-group governance elections beyond the existing prototype, reviewer recognition quotas/automatic promotions, or actual legal adjudication. Cosmetic permissions cannot become automatic authority. Verified participant counts describe **this peer's signed observation**, not all records in the network.
+
+## Adversarial tests and future requirements
+
+Test: (1) 10 high-age vs 2 independently credible low-age ratings from distinct groups; (2) only one small group and no requirement for a second group; (3) forged group affiliation confers zero added weight; (4) new Sybil keys do not force blurring; (5) reversing a reviewer endorsement doesn't erase evidence; (6) review changes cannot mutate signed content or other groups' decisions; (7) a reviewer volunteer cannot become appointed without charter ratification; (8) personal audit actions cannot remove or globally censor; (9) malicious "democratic urgency" promotions cannot bypass spam/stake gating; (10) future settings versions do not silently overwrite choices; (11) evidence withheld by a peer is never interpreted as proof of consensus.
+
+For implementation status see `docs/OPEN-ISSUES.md`; foundational authority constraints remain in `docs/PRODUCT-REQUIREMENTS.md` and `docs/GROUP-GOVERNANCE.md`.

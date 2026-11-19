@@ -1463,6 +1463,110 @@ try{
    'same-origin image still auto loads after reload',20000);
  console.log('CLASSIC checkpoint 24: same-origin real IPFS thumbnails load on first visit without clicks, third-party peer suggestions stay opt-in');
 
+ // Multi-axis content ratings are signed and independent of popularity,
+ // and age restrictions remain a reader-selected VISUAL policy.
+ await f.evaluate(title=>{
+   const tile=[...document.querySelectorAll('#imageGrid .post')]
+     .find(x=>x.querySelector('.post-headline')?.textContent===title);
+   tile.click();
+ },sampleImage.title);
+ await eventually(()=>f.evaluate(()=>!!document.querySelector('.content-rating-panel .rating-radar')),
+   'rating panel contains an accessible spider chart',10000);
+ const initialRating=await f.evaluate(()=>{
+   const d=document.querySelector('.content-rating-panel');
+   return {axes:d.querySelectorAll('svg.rating-radar line').length,
+     optIn:document.querySelector('#ratingsEnable').checked,
+     hasForm:!!d.querySelector('form.rating-submit-form')};
+ });
+ assert.deepEqual(initialRating,{axes:4,optIn:false,hasForm:true});
+ await f.evaluate(()=>{
+   const d=document.querySelector('.content-rating-panel');
+   d.open=true;
+   d.querySelector('[aria-label="Age suitability rating"]').value='3';
+   const values={controversy:5,democraticUrgency:5,
+     intellectualImportance:4,spamLikelihood:1};
+   for(const [name,value] of Object.entries(values)){
+     const labels=[...d.querySelectorAll('.rating-slider-label')];
+     const label=labels.find(x=>x.textContent.includes({
+       controversy:'Controversy',democraticUrgency:'Democratic urgency',
+       intellectualImportance:'Intellectual importance',spamLikelihood:'Spam'
+     }[name]));
+     label.querySelector('input[type=range]').value=String(value);
+   }
+   d.querySelector('input[type=checkbox]').checked=true;
+   d.querySelector('form.rating-submit-form').requestSubmit();
+ });
+ const ownRatings=async()=>f.evaluate(async()=>{
+   const {openLocal,getItem}=await import('./core/persist.js');
+   const db=await openLocal();
+   try{return (await getItem(db,'records')||[])
+     .filter(x=>x.payload.kind==='content-rating');}
+   finally{db.close();}
+ });
+ await eventually(async()=>{
+   const signed=await ownRatings();return signed.length>0&&signed.at(-1).payload.body.age===3;
+ },'reader published genuine signed age/controversy rating',15000);
+ assert.equal(await f.$eval('#ratingsEnable',el=>el.checked),false,
+   'publishing a rating never silently enables censorship');
+ await f.evaluate(()=>{
+   document.querySelector('#ratingsBlurVotes').value='1';
+   document.querySelector('#ratingsHideVotes').value='2';
+   const enable=document.querySelector('#ratingsEnable');
+   enable.checked=true;enable.dispatchEvent(new Event('change',{bubbles:true}));
+ });
+ await eventually(()=>f.evaluate(title=>[...document.querySelectorAll('#imageGrid .post')]
+   .some(tile=>tile.querySelector('.post-headline')?.textContent===title&&
+     tile.classList.contains('rating-media-blur')),sampleImage.title),
+   'one viewer-approved signed 18+ vote blurs under reader-adjusted threshold',10000);
+ const savedRules=await f.evaluate(async()=>{
+   const {openLocal,getItem}=await import('./core/persist.js');
+   const db=await openLocal();
+   try{return await getItem(db,'classic-reader-rating-rules-v1');}
+   finally{db.close();}
+ });
+ assert.equal(savedRules.active,true);
+ assert.equal(savedRules.blurVotes,1);
+ assert.equal(savedRules.hideVotes,2);
+ // Hide must prevent a media fetch, not merely cover bytes already loaded.
+ await f.evaluate(()=>{
+   const el=document.querySelector('#ratingsHideVotes');
+   el.value='1';el.dispatchEvent(new Event('change',{bubbles:true}));
+ });
+ await eventually(()=>f.evaluate(title=>{
+   const tile=[...document.querySelectorAll('#imageGrid .post')]
+     .find(x=>x.querySelector('.post-headline')?.textContent===title);
+   return tile?.classList.contains('rating-media-hide')&&
+     !tile.querySelector('img.post-thumb')&&
+     !!document.querySelector('.rating-hidden-placeholder')&&
+     !document.querySelector('.post-main-media img');
+ },sampleImage.title),'hidden age-rated media is not fetched for local preview',10000);
+ await f.click('.rating-reveal-control button');
+ await eventually(()=>f.evaluate(()=>!!document.querySelector('.post-main-media img')),
+   'local explicit reveal restores media without altering signed record',10000);
+ const rootRating=await ownRatings();
+ assert.ok(rootRating[0].id.startsWith('sha256:'));
+ // Group reputation & self-nomination stay public but have no automatically
+ // delegated reviewer rights or punishment of an entire group's members.
+ await f.click('#clansButton');
+ await eventually(()=>f.evaluate(()=>document.querySelectorAll('#groupList .group-entry').length>=2),
+   'independently signed groups visible for voluntary review',10000);
+ assert.ok(await f.$eval('#groupList .group-entry',el=>
+   !!el.querySelector('.group-reputation-panel')&&
+   [...el.querySelectorAll('button')].some(x=>/Volunteer to review/.test(x.textContent))));
+ await f.$eval('#groupList .group-entry',el=>{
+   const button=[...el.querySelectorAll('button')].find(x=>/Volunteer to review/.test(x.textContent));
+   button.click();
+ });
+ await eventually(()=>f.evaluate(async()=>{
+   const {openLocal,getItem}=await import('./core/persist.js');
+   const db=await openLocal();
+   try{return (await getItem(db,'records')||[])
+     .some(e=>e.payload.kind==='reviewer-candidacy');}
+   finally{db.close();}
+ }), 'signed reviewer candidacy without role authority',10000);
+ await f.click('#closeClans');
+ console.log('CLASSIC checkpoint 25: signed 4-axis age/urgency ratings and radar, opt-in blur thresholds, group reputation and self-candidacy');
+
  console.log('PASS classic board, threads, audit, attributes, identity portability and append-only revision/withdrawal');
 }finally{
  try{await browser?.close();}catch{}

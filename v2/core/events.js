@@ -1,7 +1,8 @@
 // WEB9000/2 portable signed events. No transport, server, namespace owner or gatekeeper.
+import {validateRatingBody} from './content-ratings.js';
 export const DOMAIN = 'WEB9000/event/v1';
 const utf8 = new TextEncoder();
-const kinds = new Set(['post','reply','label','endorse','group','policy','membership','invitation','retraction','proposal','vote','accept','reaction','tag-vote','poll-choice','profile','media-provider']);
+const kinds = new Set(['post','reply','label','endorse','group','policy','membership','invitation','retraction','proposal','vote','accept','reaction','tag-vote','poll-choice','profile','media-provider','content-rating','group-rating','reviewer-conduct','reviewer-candidacy']);
 const toB64 = a => typeof Buffer !== 'undefined' ? Buffer.from(a).toString('base64url') : btoa(String.fromCharCode(...a)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 const fromB64 = s => {
   if (typeof s !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(s)) throw Error('Invalid encoding');
@@ -93,6 +94,39 @@ export function validatePayload(p) {
     if (!(/^sha256:[0-9a-f]{64}$/.test(p.body.target || '') || /^ipfs:\/\/[A-Za-z0-9]{20,120}$/.test(p.body.target || '')) ||
         typeof p.body.tag !== 'string' || !/^[a-z0-9._:/-]{1,100}$/.test(p.body.tag) ||
         typeof p.body.reason !== 'string' || p.body.reason.length > 500) throw Error('Invalid moderation label');
+  }
+  if(p.kind==='content-rating')validateRatingBody(p.body);
+  if(p.kind==='group-rating'){
+    // Trust/distrust of a whole group by a signer. It neither owns group
+    // decisions nor edits/rejects any other group's individual assessments.
+    const b=p.body;
+    if(!/^sha256:[0-9a-f]{64}$/.test(b.group||'')||
+       ![-2,-1,1,2].includes(b.value)||
+       typeof b.reason!=='string'||b.reason.length<3||b.reason.length>500||
+       Object.keys(b).some(k=>!['group','value','reason'].includes(k)))
+      throw Error('Invalid signed group reputation statement');
+  }
+  if(p.kind==='reviewer-conduct'){
+    // Individuals may attach evidence when scrutinizing a ratified reviewer.
+    // Any signed opinion is inspectable; it never revokes a reviewer role.
+    const b=p.body;
+    if(!/^sha256:[0-9a-f]{64}$/.test(b.group||'')||
+       !/^ed25519:[a-zA-Z0-9_-]{43}$/.test(b.reviewer||'')||
+       ![-2,-1,1,2].includes(b.value)||
+       typeof b.reason!=='string'||b.reason.length<3||b.reason.length>500||
+       (b.evidence!==undefined&&!/^sha256:[0-9a-f]{64}$/.test(b.evidence))||
+       Object.keys(b).some(k=>!['group','reviewer','value','reason','evidence'].includes(k)))
+      throw Error('Invalid signed reviewer conduct assessment');
+  }
+  if(p.kind==='reviewer-candidacy'){
+    // A self-nominated candidate has NO authority until the group explicitly
+    // recognizes them on a ratified charter branch.
+    const b=p.body;
+    if(!/^sha256:[0-9a-f]{64}$/.test(b.group||'')||
+       !['volunteer','withdraw'].includes(b.action)||
+       (b.reason!==undefined&&(typeof b.reason!=='string'||b.reason.length>500))||
+       Object.keys(b).some(k=>!['group','action','reason'].includes(k)))
+      throw Error('Invalid reviewer candidacy');
   }
   // Governance identifiers reference immutable signed events, not claimable names.
   const digest = x => typeof x === 'string' && /^sha256:[0-9a-f]{64}$/.test(x);
