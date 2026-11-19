@@ -11,7 +11,7 @@
 | Priority | Gap | Why it matters |
 |---|---|---|
 | P0 | Real independently checked Stake4Karma / earned reputation | Current score and qualified index are deliberately nonfunctional simulations |
-| P0 | Media refusal at **IPFS block-serving layer**, safe ingest/auth | HTTP quarantine may not cover P2P retrieval; crafted or illegal bytes and unbounded storage remain operator risks |
+| P0 (Bitswap mitigated) | Media refusal across P2P transports, safe ingest/auth | **New verified outbound Bitswap-only policy** checks the operator manifest, every raw/UnixFS child CID and revocable local quarantine, refuses unknown media and malformed policy. Real independent peer requests fail for quarantined bytes but signed OrbitDB metadata keeps syncing. Broader P2P transfer-path audit, signed provider withdrawal, safe local GC, upload abuse and compliance controls remain open. |
 | P0 (mitigated for new indexes) | Raw OrbitDB append-validation and resource limits | Legacy direct writes can insert invalid records into the physical log. **New signed index** rejects forged/tampered/oversized entries. **Offline migration CLI** now supports a reviewed fingerprint, exact signed-record copy and safe resume with no automatic cutover; the live raw index remains legacy, and complete/continuous network reconciliation and residual DoS protection remain unfinished. |
 | P0 | Witnessed time, group checkpoint integrity, signing-key custody | Backdated/missing votes, website-controlled browser keys and unverifiable claim of latest group history |
 | P1 | Verified karma + **approved membership tenure** to **start proposals** | Latest owner direction; follow/subscription is not group membership. Signed member karma/anti-karma and membership votes unimplemented |

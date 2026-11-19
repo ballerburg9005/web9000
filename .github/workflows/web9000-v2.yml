@@ -46,6 +46,7 @@ jobs:
           node --check v2/classic.js
           node --check v2/network/smoke-classic.mjs
           node --check v2/network/media-node.mjs
+          node --check v2/network/media-bitswap-policy.mjs
           node --check v2/network/mirror-media.mjs
           node --check v2/network/media-quarantine.mjs
           node --check v2/network/announce-media.mjs
@@ -104,6 +105,10 @@ jobs:
         working-directory: v2/network
         timeout-minutes: 3
         run: npm run test:media
+      - name: Reject quarantined raw and UnixFS child blocks via real libp2p Bitswap
+        working-directory: v2/network
+        timeout-minutes: 3
+        run: npm run test:media-bitswap
       - name: Signed voluntary media-provider announcements through replaceable peer bridge
         working-directory: v2/network
         run: npm run test:media-providers

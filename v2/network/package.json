@@ -9,7 +9,9 @@
   "dependencies": {
     "@chainsafe/libp2p-noise": "^17.0.0",
     "@chainsafe/libp2p-yamux": "^8.0.1",
+    "@helia/block-brokers": "5.2.4",
     "@helia/unixfs": "^8.0.9",
+    "@ipld/dag-pb": "4.2.0",
     "@libp2p/crypto": "^5.2.0",
     "@libp2p/gossipsub": "^17.2.1",
     "@libp2p/identify": "^4.1.18",
@@ -34,7 +36,8 @@
     "test:media": "node --test media-node.test.mjs",
     "test:media-providers": "node --test announce-media.test.mjs",
     "test:qualified": "node smoke-qualified.mjs",
-    "test:live-ui": "node live-ui-qa.mjs"
+    "test:live-ui": "node live-ui-qa.mjs",
+    "test:media-bitswap": "node --test media-bitswap-policy.test.mjs"
   },
   "devDependencies": {
     "puppeteer-core": "^24.23.0"

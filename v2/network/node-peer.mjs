@@ -25,6 +25,7 @@ import {Replica} from '../core/replica.js';
 import {createBrowserBridge} from './browser-bridge.mjs';
 import {loadOrCreatePeerKey} from './peer-identity.mjs';
 import {createImageGateway} from './media-node.mjs';
+import {createMediaBitswapPolicy} from './media-bitswap-policy.mjs';
 import {openQualifiedIndex} from './qualified-index.js';
 
 const dir=path.resolve(process.argv[2] || './.web9000-peer');
@@ -52,7 +53,17 @@ const libp2p=await createLibp2p({
   streamMuxers:[yamux()],
   services:{identify:identify(),pubsub:gossipsub({allowPublishToZeroTopicPeers:true})}
 });
-const ipfs=await createHelia({libp2p,blockstore:new LevelBlockstore(path.join(dir,'blocks'))});
+const localBlockstore=new LevelBlockstore(path.join(dir,'blocks'));
+const mediaBitswapPolicy=process.env.WEB9000_MEDIA_SERVER==='1'?
+  createMediaBitswapPolicy({
+    manifestFile:path.join(dir,'media-manifest.json'),
+    localBlockstore
+  }):null;
+// Critical: Bitswap has its own P2P outbound block path, independent from
+// HTTP gateway checks. Restrict media bytes at the serving broker, not
+// the full Helia blockstore, so OrbitDB signed metadata remains available.
+const ipfs=await createHelia({libp2p,blockstore:localBlockstore,
+  ...(mediaBitswapPolicy?{blockBrokers:mediaBitswapPolicy.blockBrokers}:{})});
 // An OrbitDB identity created with a random id would silently change the
 // qualified index's address after every restart. Bind the index-curator
 // identity to this peer's persisted libp2p identity instead.
@@ -108,6 +119,9 @@ try {
       trustedProxyAddress:process.env.WEB9000_MEDIA_TRUST_PROXY||null,
       maxTotal:storageMiB*1024*1024});
     console.log('MEDIA GATEWAY',media.host+':'+media.port,'uploads enabled:',media.uploadEnabled);
+    console.log('MEDIA BITSWAP POLICY',
+      JSON.stringify(await mediaBitswapPolicy.info()),
+      '(local manifest allows eligible blocks; unknown media and quarantined roots refused)');
   }
   console.log('WEB9000 bridge is not an authoritative registry or relay and does not serve media.');
   for(const addr of libp2p.getMultiaddrs())console.log('PEER',addr.toString());
