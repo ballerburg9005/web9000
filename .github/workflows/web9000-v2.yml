@@ -23,6 +23,8 @@ jobs:
           node --check v2/core/policy.js
           node --check v2/core/replica.js
           node --check v2/network/node-peer.mjs
+          node --check v2/network/signed-access-controller.js
+          node --check v2/network/raw-index-selection.mjs
           node --check v2/core/governance.js
           node --check v2/core/group-proof.js
           node --check v2/network/verify-group-proof.mjs
@@ -68,6 +70,10 @@ jobs:
       - name: Persist and reload unique libp2p peer identities
         working-directory: v2/network
         run: npm run test:peer-identity
+      - name: Reject forged direct OrbitDB appends with optional signed index controller
+        working-directory: v2/network
+        timeout-minutes: 3
+        run: npm run test:signed-index
       - name: Two real Helia/libp2p peers replicate signed records
         working-directory: v2/network
         timeout-minutes: 3

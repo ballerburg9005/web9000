@@ -19,6 +19,8 @@ import {LevelBlockstore} from 'blockstore-level';
 import {createHelia} from 'helia';
 import {createOrbitDB} from '@orbitdb/core';
 import {openPublicIndex} from './orbit-index.js';
+import {openVerifiedPublicIndex} from './signed-access-controller.js';
+import {verifyRawIndexSelection} from './raw-index-selection.mjs';
 import {Replica} from '../core/replica.js';
 import {createBrowserBridge} from './browser-bridge.mjs';
 import {loadOrCreatePeerKey} from './peer-identity.mjs';
@@ -27,8 +29,17 @@ import {openQualifiedIndex} from './qualified-index.js';
 
 const dir=path.resolve(process.argv[2] || './.web9000-peer');
 const indexName=process.argv[3] || 'web9000-public-test';
+// This changes the index address: never migrate an existing log implicitly.
+const rawAccess=process.env.WEB9000_RAW_SIGNED_INDEX||'0';
+if(!['0','1'].includes(rawAccess))
+  throw Error('WEB9000_RAW_SIGNED_INDEX must be 0 (legacy) or 1 (signed append verification)');
+const signedRaw=rawAccess==='1';
 const remote=process.argv[4];
 await mkdir(dir,{recursive:true});
+// Fail closed *before* creating or loading libp2p keys / OrbitDB data.
+// The signed index produces a different address and must not silently
+// replace a legacy peer's stored records just because env was toggled.
+await verifyRawIndexSelection({dir,nameOrAddress:indexName,signed:signedRaw});
 const peerKey=await loadOrCreatePeerKey(dir);
 const p2pPort=process.env.WEB9000_P2P_PORT===undefined?0:Number(process.env.WEB9000_P2P_PORT);
 if(!Number.isSafeInteger(p2pPort)||p2pPort<0||p2pPort>65535)
@@ -50,7 +61,8 @@ const orbitdb=await createOrbitDB({ipfs,id:curatorIdentityId,directory:path.join
 let index,bridge,media,qualified,qualifiedBridge;
 try {
   if(remote) await libp2p.dial(multiaddr(remote));
-  index=await openPublicIndex(orbitdb,indexName);
+  index=signedRaw?await openVerifiedPublicIndex(orbitdb,indexName):
+    await openPublicIndex(orbitdb,indexName);
   const replica=new Replica({maxEvents:200000});
   const initial=await index.loadInto(replica);
   const origins=process.env.WEB9000_WS_ORIGINS?.split(',').map(x=>x.trim()).filter(Boolean)||null;
@@ -65,7 +77,10 @@ try {
     if(result.accepted&&!result.duplicate)console.log('RECEIVED',ev.id,'space',ev.payload.space,'local records',replica.size);
   });
   console.log('PEER ID',libp2p.peerId.toString(),'persisted at',path.join(dir,'peer-private-key.pb'));
-  console.log('INDEX',index.address,'(permissionless RAW lane)');
+  console.log('INDEX',index.address,
+    signedRaw?
+      '(signature-validated OrbitDB append, public authors/spaces; new address)':
+      '(LEGACY public raw index: signature verified in application, not underlying OrbitDB append)');
   if(process.env.WEB9000_QUALIFIED_INDEX==='1'){
     qualified=await openQualifiedIndex(orbitdb,process.env.WEB9000_QUALIFIED_NAME||'web9000-qualified-v1');
     // A qualified index is a separate, opt-in operator CURATION. This peer

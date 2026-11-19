@@ -1,6 +1,6 @@
 # WEB9000 — one-screen project status
 
-**2026-11-19 · `overhaul/orbitdb-trust-v2` · draft PR #1 · `main` untouched**
+**2026-11-19 · `main` is the active development branch · former PR #1 merged by fast-forward with owner approval**
 
 **Start here when resuming work.** For detailed tasks and links see [OPEN-ISSUES.md](./OPEN-ISSUES.md); for discovered technical/design mismatches see [BACKEND-AUDIT.md](./BACKEND-AUDIT.md); all exact owner constraints are in [PRODUCT-REQUIREMENTS.md](./PRODUCT-REQUIREMENTS.md) and dated [CHAT-DECISIONS.md](./CHAT-DECISIONS.md). **AGENTS.md is mandatory for new instances.**
 
@@ -12,7 +12,7 @@
 |---|---|---|
 | P0 | Real independently checked Stake4Karma / earned reputation | Current score and qualified index are deliberately nonfunctional simulations |
 | P0 | Media refusal at **IPFS block-serving layer**, safe ingest/auth | HTTP quarantine may not cover P2P retrieval; crafted or illegal bytes and unbounded storage remain operator risks |
-| P0 | Raw OrbitDB append-validation and resource limits | `write:['*']` may allow remote DB writers to bypass wrapper signature verification and fill the physical log |
+| P0 (mitigated for new indexes) | Raw OrbitDB append-validation and resource limits | **Confirmed** legacy direct writes can insert unsigned events into physical log; **NEW opt-in signed-event append controller** rejects forged/tampered/oversized entries directly, without author/namespace ownership. Existing live raw index still legacy and not silently migrated; a persistent per-directory signed-index mode binding prevents accidental reinterpretation of legacy data; residual libp2p DoS/resource limits unresolved. |
 | P0 | Witnessed time, group checkpoint integrity, signing-key custody | Backdated/missing votes, website-controlled browser keys and unverifiable claim of latest group history |
 | P1 | Verified karma + **approved membership tenure** to **start proposals** | Latest owner direction; follow/subscription is not group membership. Signed member karma/anti-karma and membership votes unimplemented |
 | P1 | Scoped nested-group specialized moderation and appeals | Current `delegate` inheritance is coarse; no categories, expiry, auditable specialist authority or challenge |

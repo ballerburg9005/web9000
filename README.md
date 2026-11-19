@@ -1,3 +1,5 @@
+> **WEB9000 decentralized v2 is now maintained on `main`.** Start with [v2/README.md](v2/README.md), the mandatory [AGENTS.md](AGENTS.md), the [short status](docs/STATUS.md), and the [open-issues backlog](docs/OPEN-ISSUES.md). The existing root page below is retained as the earlier UI; [the current classic v2 test board](https://syburg.my.to/web9000/v2/) is separate. The experimental raw peer is not automatically migrated to the new signed-append index.
+
 # WEB9000
 
 Permissionless, portable content publishing with self-governing communities, local moderation policies and independently mirrored records.

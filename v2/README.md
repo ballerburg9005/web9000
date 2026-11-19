@@ -218,3 +218,20 @@ The owner's new proposal eligibility requirement is *future work*: karma plus a 
 Start at [docs/STATUS.md](../docs/STATUS.md) for the one-screen status, followed by [docs/OPEN-ISSUES.md](../docs/OPEN-ISSUES.md) for the prioritized unresolved engineering/design work. The corresponding code-based risk and user-vision comparison is [docs/BACKEND-AUDIT.md](../docs/BACKEND-AUDIT.md); Nostr/NIP/Blossom protocol lessons and anti-patterns are in [docs/NOSTR-RESEARCH.md](../docs/NOSTR-RESEARCH.md). Every new development session must also read the repository root [AGENTS.md](../AGENTS.md), owner requirements and dated chat decision ledger; prototype implementation choices do not imply owner approval.
 
 2026-11-19 consent fix: peer suggestions prefill the network/media form **without** activating the suggested media gateway. Only an explicit Connect action can promote a suggestion to an approved gateway for potential media retrieval. **Migration:** old browser-stored gateway URLs without a `classic-media-approved-v1` marker are preserved as **inactive pending-review** URLs and require a new Connect click, even if the reader had approved them in an earlier release; old storage did not distinguish a manual approval from an auto-saved suggestion. Pending URLs survive saves/reloads. Cross-origin Chromium tests cover fresh consent, migration, persistence and explicit reapproval.
+
+
+### Opt-in signed append validation at the OrbitDB storage boundary (2026-11-19)
+
+The original `openPublicIndex` uses OrbitDB's public IPFS access controller (`write:['*']`). It verifies WEB9000 Ed25519 before its own `publish` method and when importing into the `Replica`, but a malicious OrbitDB writer can call the underlying database's `add()` directly and physically append invalid data. This is **confirmed** by a two-peer adversarial test and is not the same as granting content validity/namespace ownership.
+
+New, independently created peers may explicitly opt into the **versioned signed-event append controller**:
+
+```sh
+cd v2/network
+WEB9000_RAW_SIGNED_INDEX=1 node node-peer.mjs ./peer-signed web9000-public-signed-v1
+npm run test:signed-index
+```
+
+The controller type `web9000-signed-v1` uses the ordinary public `write:['*']` writer identities, but additionally checks the **full signed WEB9000 v1 event** in OrbitDB's `canAppend` on both local operations and incoming log merges. Any independently signed author can publish into **any** public namespace. Forged, tampered or oversized direct entries cannot enter compliant signed indexes. The 48 KiB wire-event bound is a fixed part of this v1 index's replica rules (not an operator-specific quorum).
+
+**Compatibility and migration:** this changes the OrbitDB address. A signed-mode peer requires a **fresh data directory**. The `raw-index-selection.mjs` guard stores `.web9000-signed-raw-index-v1.json` with mode/index identity and refuses reusing an existing legacy peer directory, changing the signed index name, or downgrading a previously signed directory. These are deliberate safety errors, not a request to delete data. A new signed peer can restart on its originally selected directory/index normally. Existing raw indexes, including the hosted test peer with its persistent signed events, remain on the legacy format by default; setting `WEB9000_RAW_SIGNED_INDEX=1` against an old OrbitDB address explicitly fails instead of silently mislabeling it as protected. Future migration must deliberately publish each *independently verified* old signed event into a new index, show both addresses to readers until they adopt the new one, and preserve local backups. There is no automatic data copy, forced network join, re-signing by the curator or censorship of alternate legacy indexes. The controller does not eliminate CPU/bandwidth attacks, invalid IPFS block requests or all storage abuses; don't describe it as full DoS protection.
