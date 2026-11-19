@@ -35,3 +35,8 @@ There is an unrestricted raw OrbitDB index; a voluntary qualified index exists b
 3. Prototype bounded, opt-in ingress queues and real per-class durable retention on an isolated test node. Do not enable money/karma-based admission on the existing live experimental peer without a verified proof protocol and owner-approved decisions.
 
 References: docs/OPEN-ISSUES.md, docs/BACKEND-AUDIT.md, v2/network/qualified-index.js, v2/core/anti-spam.js.
+
+
+## 2026-11-19 owner correction: source compartments within proof classes
+
+Location-based and infrastructure-based segmentation is **not a guilty verdict or permanent IP ban**. Independent local source failure domains can exist for countries, coarse IP ranges, ASN, VPN, hosting/datacenter or relay classifications, also within low and higher verified reputation classes. A source compartment can accept ordinary signed traffic until its resource budget is exhausted, while other compartments stay functional and its future admission reopens with available capacity. The owner explicitly anticipates the untrusted zero-karma pool may fail under eventually inevitable massive Sybil attacks; the network must protect the voluntarily proven lanes and independently consenting peers. Experimental code and real signed physical directory restart tests are described in ADAPTIVE-SEGMENTATION.md. None of these are default live policies, no global country censorship has been approved, and a relay's observed network origin must not be confused with the author's nationality.

@@ -4,6 +4,7 @@
 import {createHash,randomBytes} from 'node:crypto';
 import {IPFSAccessController} from '@orbitdb/core';
 import {verifyEvent} from '../core/events.js';
+import {classifyNetworkObservation} from './source-compartments.mjs';
 
 const AUTHOR=/^ed25519:[A-Za-z0-9_-]{43}$/;
 const ID=/^sha256:[0-9a-f]{64}$/;
@@ -59,12 +60,18 @@ export function summarizeAttestedOpinions(votes=[],trustedGroupWeights=new Map()
 // The events inside retain their ORIGINAL independently verified authors.
 // This protects the local operator's admissions; it cannot own a namespace,
 // invalidate raw records elsewhere, or authorize a universal publication gate.
-export async function openLocalAdaptiveShard(orbitdb,name){
+export async function openLocalAdaptiveShard(orbitdb,name,{address=null}={}){
   if(!/^w9-adaptive-[a-z0-9-]{1,120}$/.test(name)||
      !orbitdb?.identity?.id)throw Error('Invalid local shard configuration');
-  const db=await orbitdb.open(name,{
+  if(address!==null&&
+     (typeof address!=='string'||!/^\/orbitdb\/[a-zA-Z0-9]{16,220}$/.test(address)))
+    throw Error('Invalid pinned shard address');
+  const db=await orbitdb.open(address||name,{
     type:'events',AccessController:IPFSAccessController({write:[orbitdb.identity.id]})
   });
+  if(address!==null&&db.address!==address){
+    await db.close();throw Error('Shard address changed unexpectedly');
+  }
   return {
     address:db.address,name,
     async publish(event){
@@ -86,6 +93,7 @@ export class AdaptiveTierRouter {
   #openShards=new Map();#opening=new Map();#used=new Map();
   #cohorts=new Set();#authors=new Set();#window=-1;#rejected=0;
   #lastSplitEpoch=-1;#quietWindows=0;
+  #boxes=new Map();#maxBoxes;#boxCap;
   #inFlight=0;#maxInFlight;#classCaps;#sourceCap;#authorCap;
   #cached=new Map();#pendingAttestations=0;#maxPendingAttestations;
   #verificationCap;#verificationSourceCap;#cacheTtlMs;
@@ -96,6 +104,7 @@ export class AdaptiveTierRouter {
     namePrefix='w9-adaptive-test',entryBudget=80,
     sponsoredBudget=50,establishedBudget=150,
     sourceBudget=12,authorBudget=6,maxInFlight=12,
+    maxBoxes=24,entryCompartmentBudget=24,
     maxPendingAttestations=2,verificationBudget=24,
     verificationSourceBudget=3,cacheTtlMs=300000,
     secret=randomBytes(32)}={}){
@@ -111,6 +120,8 @@ export class AdaptiveTierRouter {
       [verificationSourceBudget,'verificationSourceBudget']])
       bounded(val,100000,'budget '+key,1);
     bounded(cacheTtlMs,300000,'cacheTtlMs',1000);
+    bounded(maxBoxes,100,'maxBoxes',1);
+    bounded(entryCompartmentBudget,100000,'entryCompartmentBudget',1);
     if(!/^w9-adaptive-[a-z0-9-]{1,70}$/.test(namePrefix))
       throw Error('Unsafe shard name prefix');
     if(!Buffer.isBuffer(secret)||secret.length<16)throw Error('Invalid secret');
@@ -120,6 +131,7 @@ export class AdaptiveTierRouter {
     this.#classCaps={entry:entryBudget,sponsored:sponsoredBudget,
       established:establishedBudget};
     this.#sourceCap=sourceBudget;this.#authorCap=authorBudget;
+    this.#maxBoxes=maxBoxes;this.#boxCap=entryCompartmentBudget;
     this.#maxPendingAttestations=maxPendingAttestations;
     this.#verificationCap=verificationBudget;
     this.#verificationSourceCap=verificationSourceBudget;
@@ -128,6 +140,10 @@ export class AdaptiveTierRouter {
   get status(){
     return {
       active:Object.fromEntries(this.#active),
+      compartments:[...this.#boxes].map(([bucket,box])=>({
+        bucket,activePartitions:box.width,rejections:box.rejected,
+        observations:box.sources.size
+      })),
       shards:[...this.#openShards].map(([name,db])=>({name,address:db.address})),
       counts:{...this.#summary},windowRejected:this.#rejected,
       distinctObservedSources:this.#cohorts.size,
@@ -147,6 +163,17 @@ export class AdaptiveTierRouter {
           this.#quietWindows=0;
           // Older records remain in prior, independently indexed logs.
         }
+      }
+      for(const box of this.#boxes.values()){
+        if(this.#window>=0&&epoch>this.#window){
+          box.quiet=box.rejected===0?
+            box.quiet+Math.min(3,epoch-this.#window):0;
+          if(box.quiet>=3&&box.width>1){
+            box.width=Math.max(1,Math.ceil(box.width/2));
+            box.quiet=0;
+          }
+        }
+        box.sources.clear();box.rejected=0;
       }
       this.#window=epoch;this.#used.clear();
       this.#cohorts.clear();this.#authors.clear();this.#rejected=0;
@@ -198,6 +225,53 @@ export class AdaptiveTierRouter {
     this.#cohorts.add(hash);
     return hash;
   }
+  #compartment(observation){
+    if(!observation)return 'general';
+    const result=classifyNetworkObservation(observation,{secret:this.#secret});
+    if(!result.observationAccepted)return 'general';
+    if(this.#boxes.has(result.bucket))return result.bucket;
+    // Only an admitted, VERIFIED event creates a new compartment entry.
+    // Bad signatures / bogus network reports cannot exhaust all box slots.
+    if(this.#boxes.size>=this.#maxBoxes)return 'overflow';
+    return result.bucket;
+  }
+  #activateBox(box){
+    if(box==='general'||box==='overflow')return;
+    if(!this.#boxes.has(box)){
+      if(this.#boxes.size>=this.#maxBoxes)return;
+      this.#boxes.set(box,{width:1,rejected:0,quiet:0,
+        lastSplitEpoch:-1,sources:new Set()});
+    }
+  }
+  #entryWidth(box){
+    if(box==='general')return this.#active.get('entry');
+    return this.#boxes.get(box)?.width||1;
+  }
+  #activeTotal(){
+    return this.#active.get('entry')+
+      [...this.#boxes.values()].reduce((sum,box)=>sum+box.width,0)+
+      1; // reserve the overflow compartment for future distinct sources
+  }
+  #recordCompartmentRejection(box,source){
+    if(box==='general'){
+      this.#rejected++;
+      this.#maybeAdapt();
+      return;
+    }
+    const entry=this.#boxes.get(box);
+    if(!entry)return; // Never provision a compartment from rejected traffic.
+    entry.rejected++;
+    if(entry.sources.size<256)entry.sources.add(source);
+    // One rejected isolated compartment never forces other compartments
+    // to split or stop accepting new legitimate records.
+    if(entry.rejected>=20&&entry.sources.size>=2&&
+        entry.lastSplitEpoch!==this.#window&&this.#activeTotal()<this.#maxShards){
+      entry.width=Math.min(entry.width*2,
+        entry.width+this.#maxShards-this.#activeTotal());
+      entry.lastSplitEpoch=this.#window;
+      entry.rejected=0;entry.quiet=0;
+    }
+  }
   #authorKey(author){
     if(!this.#authors.has(author)&&this.#authors.size>=8192)
       return 'overflow-authors';
@@ -216,7 +290,7 @@ export class AdaptiveTierRouter {
     this.#opening.set(name,promise);
     try{return await promise;}finally{this.#opening.delete(name);}
   }
-  async offer(event,{sourceCohort=''}={}){
+  async offer(event,{sourceCohort='',sourceObservation=null}={}){
     const receipt=this.#now();
     if(!Number.isSafeInteger(receipt)||receipt<0)
       throw Error('Invalid local observer clock');
@@ -235,7 +309,13 @@ export class AdaptiveTierRouter {
     }
     // Source origin is provided only by local transport observation, NEVER
     // by a field carried in a signed post or purported geolocation.
-    const group=this.#sourceKey(sourceCohort);
+    // The source/geo classification is from the OPERATOR network boundary,
+    // not JSON from a post. An ordinary signed author has no such field.
+    const box=this.#compartment(sourceObservation);
+    const networkSource=sourceObservation?.provenance==='operator-observed'?
+      String(sourceObservation.networkPrefix||sourceObservation.asn||box):
+      sourceCohort;
+    const group=this.#sourceKey(networkSource);
     if(this.#inFlight>=this.#maxInFlight){
       this.#summary.limited++;this.#rejected++;
       return {accepted:false,reason:'bounded-verifier-queue'};
@@ -246,16 +326,18 @@ export class AdaptiveTierRouter {
       const channel=FEEDBACK.has(event.payload.kind)?'feedback':'content';
       const limits=[
         ['tier:'+cls+':'+channel,this.#classCaps[cls]],
+        // A hosting/VPN/country/ASN compartment has its own ceiling, so
+        // one box can saturate without shutting down unrelated boxes.
+        ['box:'+cls+':'+box+':'+channel,
+          cls==='entry'?this.#boxCap:this.#classCaps[cls]],
         ['source:'+cls+':'+group+':'+channel,this.#sourceCap],
         ['author:'+cls+':'+this.#authorKey(author)+':'+channel,this.#authorCap]
       ];
       if(limits.some(([key,cap])=>(this.#used.get(key)||0)>=cap)){
         this.#summary.limited++;
-        if(cls==='entry'){
-          this.#rejected++;
-          this.#maybeAdapt();
-        }
-        return {accepted:false,className:cls,reason:'bounded-ingress-budget'};
+        if(cls==='entry')this.#recordCompartmentRejection(box,group);
+        return {accepted:false,className:cls,
+          compartment:box,reason:'bounded-ingress-budget'};
       }
       // All three reservations happen before Ed25519/OrbitDB append.
       for(const [key] of limits)this.#used.set(key,(this.#used.get(key)||0)+1);
@@ -267,16 +349,30 @@ export class AdaptiveTierRouter {
         this.#summary.invalid++;
         return {accepted:false,reason:'invalid-signature',className:cls};
       }
-      const width=this.#active.get(cls);
+      this.#activateBox(box);
+      const width=cls==='entry'?this.#entryWidth(box):this.#active.get(cls);
       const hash=createHash('sha256').update(this.#secret).update(group).digest();
       const shardIndex=hash.readUInt32BE(0)%width;
-      const name=this.#prefix+'-'+cls+'-s'+String(shardIndex).padStart(3,'0');
+      // Opaque compartment IDs keep country/ASN/network private.
+      const suffix=box!=='general'?'-'+box:'';
+      const name=this.#prefix+'-'+cls+suffix+
+        '-s'+String(shardIndex).padStart(3,'0');
+      // Hard physical resource ceiling across ALL classes and compartments.
+      // Decline this operator's new shard; preserve the signed record's
+      // portability to independently willing indexes.
+      if(!this.#openShards.has(name)&&!this.#opening.has(name)&&
+          this.#openShards.size+this.#opening.size>=this.#maxShards){
+        this.#summary.limited++;
+        return {accepted:false,className:cls,compartment:box,
+          reason:'operator-shard-capacity'};
+      }
       const db=await this.#database(name);
       await db.publish(event);
       this.#seen.add(event.id);
       if(this.#seen.size>2048)this.#seen.delete(this.#seen.values().next().value);
       this.#summary.accepted++;
-      return {accepted:true,className:cls,shard:name,address:db.address};
+      return {accepted:true,className:cls,compartment:box,
+        shard:name,address:db.address};
     }finally{this.#inFlight--;}
   }
   // AUTOMATIC entry pressure splitting is bounded to one split per
@@ -285,8 +381,9 @@ export class AdaptiveTierRouter {
   #maybeAdapt(){
     let width=this.#active.get('entry');
     if(this.#rejected>=20&&this.#cohorts.size>=2&&
-       this.#lastSplitEpoch!==this.#window&&width<this.#maxShards){
-      width=Math.min(this.#maxShards,Math.max(width+1,width*2));
+       this.#lastSplitEpoch!==this.#window&&this.#activeTotal()<this.#maxShards){
+      width=Math.min(width+this.#maxShards-this.#activeTotal(),
+        Math.max(width+1,width*2));
       this.#active.set('entry',width);
       this.#lastSplitEpoch=this.#window;
       this.#quietWindows=0;
