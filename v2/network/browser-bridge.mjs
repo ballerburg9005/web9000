@@ -4,6 +4,7 @@
 import {WebSocketServer, WebSocket} from 'ws';
 import {verifyEvent} from '../core/events.js';
 import {Replica} from '../core/replica.js';
+import {ScopedEventCatalog} from './scoped-event-catalog.mjs';
 
 const MAX_INBOUND = 48 * 1024;
 const MAX_BUFFERED = 2 * 1024 * 1024;
@@ -33,6 +34,10 @@ export async function createBrowserBridge({
   if (!index?.publish || !index?.loadInto || !index?.onUpdate) throw Error('Active OrbitDB index required');
   if(!Number.isSafeInteger(port)||port<0||port>65535)throw Error('Invalid browser bridge port');
   await index.loadInto(replica);
+  // Build once from locally verified immutable records. Future index updates
+  // are added incrementally; no more O(all records) clone/filter/sort on
+  // every 32-item browser pagination request.
+  const catalog=new ScopedEventCatalog(replica.list());
   const server=new WebSocketServer({
     host,port,perMessageDeflate:false,maxPayload:MAX_INBOUND,clientTracking:true,
     verifyClient(info,done) {
@@ -72,17 +77,22 @@ export async function createBrowserBridge({
   }
   async function receive(event) {
     const result=await replica.ingest(event);
-    if(result.accepted && !result.duplicate)announce(event);
+    if(result.accepted && !result.duplicate){
+      catalog.add(event);
+      announce(event);
+    }
     return result;
   }
   const unsubscribe=index.onUpdate(event=>{receive(event).catch(err=>console.error('Bridge update error',err));});
   server.on('connection',(ws,request)=>{
-    const session={ws,spaces:null,window:Date.now(),received:0,chain:Promise.resolve()};
+    const session={ws,spaces:null,snapshot:null,
+      window:Date.now(),received:0,chain:Promise.resolve()};
     sessions.add(session);
     ws.on('close',()=>sessions.delete(session));
     ws.on('error',()=>{});
     wire(ws,{type:'hello',protocol:'web9000-ws/1',index:index.address,
-      peer:'independent-browser-bridge',maxSync:MAX_SYNC});
+      peer:'independent-browser-bridge',maxSync:MAX_SYNC,
+      capabilities:['scoped-id-index-v1','local-observation-snapshot-v1']});
     ws.on('message',raw=>{
       const now=Date.now();
       if(now-session.window>=60000){session.window=now;session.received=0;}
@@ -99,6 +109,9 @@ export async function createBrowserBridge({
             wire(ws,{type:'error',error:'invalid spaces'});return;
           }
           session.spaces=new Set(msg.spaces);
+          // A fresh subscription begins a new local observation snapshot.
+          // New signed events remain visible via live updates.
+          session.snapshot=null;
           wire(ws,{type:'subscribed',spaces:[...session.spaces]});
           return;
         }
@@ -107,13 +120,14 @@ export async function createBrowserBridge({
           const cursor=msg.cursor===null||msg.cursor===undefined?null:msg.cursor;
           if(cursor!==null&&!VALID_ID.test(cursor)){wire(ws,{type:'error',error:'invalid cursor'});return;}
           const limit=Number.isInteger(msg.limit)?Math.min(Math.max(msg.limit,1),MAX_SYNC):MAX_SYNC;
-          // Stable ID ordering makes pagination idempotent across reconnects.
-          // This is bounded temporary metadata, never an authorization list.
-          const rows=replica.list().filter(event=>allow(session,event))
-            .filter(event=>cursor===null||event.id>cursor).sort((a,b)=>a.id.localeCompare(b.id));
-          const page=rows.slice(0,limit);
-          const next=rows.length>page.length?page[page.length-1].id:null;
-          wire(ws,{type:'batch',events:page,next});
+          // Capture exactly one LOCAL observation revision per subscription.
+          // A concurrent append is delivered via a live 'event' frame, but
+          // cannot destabilize this history walk by changing its pages.
+          if(!session.snapshot)session.snapshot=catalog.capture([...session.spaces]);
+          const result=catalog.page(session.snapshot,{cursor,limit});
+          const page=result.ids.map(id=>replica.get(id)).filter(Boolean);
+          wire(ws,{type:'batch',events:page,next:result.next,
+            snapshotRevision:result.revision});
           return;
         }
         if(msg.type==='publish'){
@@ -137,7 +151,7 @@ export async function createBrowserBridge({
     });
   });
   return {
-    replica,index: index.address,
+    replica,catalog,index: index.address,
     host,port:server.address().port,
     url:'ws://'+(host.includes(':')?'['+host+']':host)+':'+server.address().port+'/',
     async close(){

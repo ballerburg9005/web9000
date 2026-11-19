@@ -1307,8 +1307,19 @@ try{
    return {placeholder:!!tile.querySelector('.post-reveal'),title:tile.textContent.slice(0,80)};
  },sampleImage.title);
  assert.ok(candidate.placeholder,'unapproved media is not downloaded merely from an IPFS CID');
- await e.evaluate(title=>[...document.querySelectorAll('#imageGrid .post')]
-   .find(el=>el.querySelector('.post-headline')?.textContent===title).click(),sampleImage.title);
+ // Live signed events can trigger a full grid render between clicking a
+ // tile and finding its expanded content. Retry the real user gesture until
+ // the intended post is expanded, rather than racing that render.
+ await eventually(()=>e.evaluate(title=>{
+   const expanded=document.querySelector('.expanded-body .media-ref button');
+   if(expanded)return true;
+   const tile=[...document.querySelectorAll('#imageGrid .post')]
+     .find(el=>el.querySelector('.post-headline')?.textContent===title);
+   if(!tile)return false;
+   const selected=tile.getAttribute('aria-expanded')==='true'||tile.classList.contains('selected');
+   if(!selected)tile.click();
+   return false;
+ },sampleImage.title),'explicitly selected image post has manual load control',12000);
  const manualLabel=await e.$eval('.expanded-body .media-ref button',button=>button.textContent);
  assert.match(manualLabel,/Load image from /,'manual load names the proposed gateway');
  await e.evaluate(()=>document.querySelector('.expanded-body .media-ref button').click());
