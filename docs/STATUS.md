@@ -1,3 +1,5 @@
+**New architecture proposal 2026-11-19 (design only):** Karma-tier physical replication to survive deliberate bot spam, potentially many progressive bands; per-class retention and bandwidth, protected usable 0-karma entry, and separate optional Stake4Karma resources. No admission changes or thresholds deployed. See [KARMA-TIER-REPLICATION.md](KARMA-TIER-REPLICATION.md).
+
 # WEB9000 — one-screen project status
 
 **2026-11-19 · `main` is the active development branch · former PR #1 merged by fast-forward with owner approval**
