@@ -10,6 +10,7 @@ const MAX_INBOUND = 48 * 1024;
 const MAX_BUFFERED = 2 * 1024 * 1024;
 const MAX_SYNC = 32;
 const VALID_ID = /^sha256:[0-9a-f]{64}$/;
+const VALID_PREFIX = /^[0-9a-f]{0,8}$/;
 const VALID_SPACE = v => typeof v==='string' && v.length>0 && v.length<=180 && !/[\x00-\x1f]/.test(v);
 const wire = (ws, object) => {
   if (ws.readyState!==WebSocket.OPEN) return false;
@@ -86,13 +87,13 @@ export async function createBrowserBridge({
   const unsubscribe=index.onUpdate(event=>{receive(event).catch(err=>console.error('Bridge update error',err));});
   server.on('connection',(ws,request)=>{
     const session={ws,spaces:null,snapshot:null,
-      window:Date.now(),received:0,chain:Promise.resolve()};
+      window:Date.now(),received:0,chain:Promise.resolve(),inventoryMemo:new Map()};
     sessions.add(session);
     ws.on('close',()=>sessions.delete(session));
     ws.on('error',()=>{});
     wire(ws,{type:'hello',protocol:'web9000-ws/1',index:index.address,
       peer:'independent-browser-bridge',maxSync:MAX_SYNC,
-      capabilities:['scoped-id-index-v1','local-observation-snapshot-v1']});
+      capabilities:['scoped-id-index-v1','local-observation-snapshot-v1','read-only-reconciliation-v1']});
     ws.on('message',raw=>{
       const now=Date.now();
       if(now-session.window>=60000){session.window=now;session.received=0;}
@@ -112,6 +113,7 @@ export async function createBrowserBridge({
           // A fresh subscription begins a new local observation snapshot.
           // New signed events remain visible via live updates.
           session.snapshot=null;
+          session.inventoryMemo.clear();
           wire(ws,{type:'subscribed',spaces:[...session.spaces]});
           return;
         }
@@ -128,6 +130,48 @@ export async function createBrowserBridge({
           const page=result.ids.map(id=>replica.get(id)).filter(Boolean);
           wire(ws,{type:'batch',events:page,next:result.next,
             snapshotRevision:result.revision});
+          return;
+        }
+        // Read-only, range-bounded inventory reconciliation. Neither the
+        // digest nor record list is a signed completeness or timestamp proof.
+        // Keep the same local observation snapshot as the current history walk.
+        if(['inventory','inventory-ids','inventory-get'].includes(msg.type)){
+          if(!session.spaces){wire(ws,{type:'error',error:'subscribe first'});return;}
+          if(!session.snapshot)session.snapshot=catalog.capture([...session.spaces]);
+          const snapshot=session.snapshot;
+          if(msg.type==='inventory-get'){
+            if(!Array.isArray(msg.ids)||msg.ids.length>8||
+               msg.ids.some(id=>typeof id!=='string'||!VALID_ID.test(id))){
+              wire(ws,{type:'error',error:'invalid requested ids'});return;
+            }
+            const events=msg.ids.filter(id=>catalog.inSnapshot(snapshot,id))
+              .map(id=>replica.get(id)).filter(Boolean);
+            wire(ws,{type:'inventory-records',events,snapshotRevision:snapshot.revision});
+            return;
+          }
+          if(typeof msg.prefix!=='string'||!VALID_PREFIX.test(msg.prefix)){
+            wire(ws,{type:'error',error:'invalid inventory prefix'});return;
+          }
+          if(msg.type==='inventory'){
+            let result=session.inventoryMemo.get(msg.prefix);
+            if(!result){
+              result=catalog.fingerprint(snapshot,{prefix:msg.prefix});
+              if(session.inventoryMemo.size>=64)session.inventoryMemo.clear();
+              session.inventoryMemo.set(msg.prefix,result);
+            }
+            wire(ws,{type:'inventory',...result});
+            return;
+          }
+          const cursor=msg.cursor??null;
+          if(cursor!==null&&!VALID_ID.test(cursor)){
+            wire(ws,{type:'error',error:'invalid inventory cursor'});return;
+          }
+          try{
+            const result=catalog.page(snapshot,{cursor,prefix:msg.prefix,limit:MAX_SYNC});
+            wire(ws,{type:'inventory-ids',prefix:msg.prefix,...result});
+          }catch{
+            wire(ws,{type:'error',error:'invalid inventory range'});
+          }
           return;
         }
         if(msg.type==='publish'){

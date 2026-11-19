@@ -1,5 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {ScopedEventCatalog} from './scoped-event-catalog.mjs';
 
 const id=n=>'sha256:'+n.toString(16).padStart(64,'0');
@@ -78,4 +79,27 @@ test('large scoped history returns bounded pages in sorted order without scannin
  assert.ok(pageCount.pages<=Math.ceil(expected.length/32));
  assert.equal(catalog.size,total);
  assert.equal(walk(catalog,catalog.capture(['missing-public-space'])).ids.length,0);
+});
+
+test('bounded prefix reconciliation exposes exact scoped IDs, snapshot-stable fingerprints and no unrelated records',()=>{
+ const padded=(prefix,n)=>'sha256:'+prefix+n.toString(16).padStart(64-prefix.length,'0');
+ const make=(prefix,n,space)=>({id:padded(prefix,n),payload:{space}});
+ const a=make('a',3,'demo'),b=make('a',5,'other'),c=make('b',8,'demo');
+ const catalog=new ScopedEventCatalog([a,b,c]);
+ const shot=catalog.capture(['demo']);
+ const expected=createHash('sha256').update(a.id+'\\n').digest('hex');
+ assert.deepEqual(catalog.fingerprint(shot,{prefix:'a'}),{
+  prefix:'a',count:1,digest:expected,revision:3});
+ assert.deepEqual(catalog.page(shot,{prefix:'a',limit:1}).ids,[a.id]);
+ assert.deepEqual(catalog.page(shot,{prefix:'b',limit:1}).ids,[c.id]);
+ assert.equal(catalog.inSnapshot(shot,b.id),false,'unselected namespace cannot be fetched');
+ assert.equal(catalog.inSnapshot(shot,a.id),true);
+ const newcomer=make('a',9,'demo');
+ catalog.add(newcomer);
+ assert.deepEqual(catalog.page(shot,{prefix:'a'}).ids,[a.id],
+  'new live arrival is excluded from previous inventory');
+ assert.deepEqual(catalog.page(catalog.capture(['demo']),{prefix:'a'}).ids,[a.id,newcomer.id]);
+ assert.throws(()=>catalog.fingerprint(shot,{prefix:'!'}),/prefix/);
+ assert.throws(()=>catalog.page(shot,{prefix:'a',cursor:c.id}),/outside inventory prefix/);
+ assert.throws(()=>catalog.page(shot,{prefix:'a'.repeat(9)}),/prefix/);
 });
