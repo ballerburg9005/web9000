@@ -273,7 +273,7 @@ try{
  assert.ok((await a.$$eval('.reactions button',els=>els.length))>=5,'sample preview has voting and flagging bar');
  assert.ok((await a.$$eval('.comment-form textarea',els=>els.length))===1,'sample has comment form');
  const beforeScore=await a.$eval('.reactions .score',e=>Number(e.textContent));
- await a.evaluate(()=>document.querySelector('.reactions button').click());
+ await a.evaluate(()=>document.querySelector('.reactions .vote-max').click());
  await eventually(()=>a.evaluate(before=>Number(document.querySelector('.reactions .score')?.textContent)===before+2,beforeScore), 'signed demo reaction applied');
  assert.equal(await a.evaluate(()=>document.querySelector('.reactions .vote-max')?.classList.contains('selected')),true,
    'the selected vote has persistent highlighted styling');
@@ -1470,32 +1470,71 @@ try{
      .find(x=>x.querySelector('.post-headline')?.textContent===title);
    tile.click();
  },sampleImage.title);
- await eventually(()=>f.evaluate(()=>!!document.querySelector('.content-rating-panel .rating-radar')),
-   'rating panel contains an accessible spider chart',10000);
+ await eventually(()=>f.evaluate(()=>!!document.querySelector('.expanded-body .spider-trigger')),
+   'compact spider button sits by signed reaction score',10000);
+ assert.equal(await f.$('.content-rating-panel'),null,
+   'old massive in-article rating dropdown must be removed entirely');
+ const triggerRow=await f.$eval('.expanded-body .reactions',row=>{
+   const score=row.querySelector('.score'),spider=row.querySelector('.spider-trigger');
+   return {scoreIndex:[...row.children].indexOf(score),
+     spiderIndex:[...row.children].indexOf(spider),
+     icon:spider?.textContent};
+ });
+ assert.equal(triggerRow.spiderIndex,triggerRow.scoreIndex+1,
+   'single spider icon must follow the numeric popularity score');
+ await f.click('.expanded-body .spider-trigger');
+ await eventually(()=>f.evaluate(()=>!!document.querySelector('.spider-popup .spider-editor')),
+   'spider editor opens as a floating popover',10000);
  const initialRating=await f.evaluate(()=>{
-   const d=document.querySelector('.content-rating-panel');
-   return {axes:d.querySelectorAll('svg.rating-radar line').length,
+   const popup=document.querySelector('.spider-popup');
+   const svg=popup.querySelector('svg.spider-editor');
+   const r=popup.getBoundingClientRect();
+   const page=document.documentElement;
+   return {axes:svg.querySelectorAll('circle.spider-handle').length,
      optIn:document.querySelector('#ratingsEnable').checked,
-     hasForm:!!d.querySelector('form.rating-submit-form')};
+     fixed:getComputedStyle(popup).position==='fixed',
+     fits:r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight,
+     inArticle:!!document.querySelector('.expanded-body .spider-editor'),
+     pageOverflow:page.scrollWidth-innerWidth};
  });
- assert.deepEqual(initialRating,{axes:4,optIn:false,hasForm:true});
- await f.evaluate(()=>{
-   const d=document.querySelector('.content-rating-panel');
-   d.open=true;
-   d.querySelector('[aria-label="Age suitability rating"]').value='3';
-   const values={controversy:5,democraticUrgency:5,
-     intellectualImportance:4,spamLikelihood:1};
-   for(const [name,value] of Object.entries(values)){
-     const labels=[...d.querySelectorAll('.rating-slider-label')];
-     const label=labels.find(x=>x.textContent.includes({
-       controversy:'Controversy',democraticUrgency:'Democratic urgency',
-       intellectualImportance:'Intellectual importance',spamLikelihood:'Spam'
-     }[name]));
-     label.querySelector('input[type=range]').value=String(value);
-   }
-   d.querySelector('input[type=checkbox]').checked=true;
-   d.querySelector('form.rating-submit-form').requestSubmit();
+ assert.equal(initialRating.axes,5);
+ assert.equal(initialRating.optIn,false);
+ assert.equal(initialRating.fixed,true);
+ assert.equal(initialRating.fits,true,JSON.stringify(initialRating));
+ assert.equal(initialRating.inArticle,false);
+ assert.equal(initialRating.pageOverflow,0);
+ // Drag age suitability from 0 to 18+ (3/6) with genuine mouse movements;
+ // verify its accessible slider state and live-language explanation.
+ const ageStart=await f.$eval('.spider-handle[data-spider-axis="age"]',el=>{
+   const r=el.getBoundingClientRect();
+   return {x:r.left+r.width/2,y:r.top+r.height/2};
  });
+ const ageEnd=await f.$eval('.spider-editor',svg=>{
+   const r=svg.getBoundingClientRect();
+   return {x:r.left+140*r.width/280,
+     y:r.top+(125-82*3/6)*r.height/256};
+ });
+ await f.mouse.move(ageStart.x,ageStart.y);
+ await f.mouse.down();
+ await f.mouse.move(ageEnd.x,ageEnd.y,{steps:9});
+ await f.mouse.up();
+ assert.equal(await f.$eval('.spider-handle[data-spider-axis="age"]',
+   el=>Number(el.getAttribute('aria-valuenow'))),3);
+ assert.ok((await f.$eval('.spider-explanation-box',el=>el.textContent))
+   .includes('18+'),'dragging updates the plain-language explanation');
+ // Keyboard arrow/End edits the remaining axis with the same signed schema.
+ await f.$eval('.spider-handle[data-spider-axis="controversy"]',el=>el.focus());
+ await f.keyboard.press('End');
+ assert.equal(await f.$eval('.spider-handle[data-spider-axis="controversy"]',
+   el=>Number(el.getAttribute('aria-valuenow'))),5);
+ await f.$eval('.spider-handle[data-spider-axis="democraticUrgency"]',el=>el.focus());
+ await f.keyboard.press('End');
+ await f.$eval('.spider-handle[data-spider-axis="intellectualImportance"]',el=>el.focus());
+ await f.keyboard.press('End');
+ await f.keyboard.press('ArrowLeft'); // 4/5
+ await f.$eval('.spider-handle[data-spider-axis="spamLikelihood"]',el=>el.focus());
+ await f.keyboard.press('ArrowRight');
+ await f.click('.spider-submit');
  const ownRatings=async()=>f.evaluate(async()=>{
    const {openLocal,getItem}=await import('./core/persist.js');
    const db=await openLocal();
@@ -1504,8 +1543,36 @@ try{
    finally{db.close();}
  });
  await eventually(async()=>{
-   const signed=await ownRatings();return signed.length>0&&signed.at(-1).payload.body.age===3;
- },'reader published genuine signed age/controversy rating',15000);
+   const signed=await ownRatings();return signed.length>0&&signed.at(-1).payload.body.age===3&&
+     signed.at(-1).payload.body.axes.controversy===5;
+ },'reader dragged and keyboard-edited real signed spider rating',15000);
+ assert.equal(await f.$('.spider-popup'),null,'popup closes after signed submission');
+ // The exceptional democratic-public-interest alert belongs in Report, not
+ // inside the five-dimensional spider editor, and must not modify age/axes.
+ await f.click('.report-control > summary');
+ const hasAlert=await f.$eval('.report-control select',el=>
+   [...el.options].some(x=>x.value==='public-interest-censorship-pressure'));
+ assert.equal(hasAlert,true);
+ await f.$eval('.report-control select',el=>{
+   el.value='public-interest-censorship-pressure';
+   el.dispatchEvent(new Event('change',{bubbles:true}));
+ });
+ assert.equal(await f.$eval('.report-control .report-submit',el=>el.textContent),
+   'Sign public-interest alert');
+ await f.$eval('.report-control textarea',el=>{
+   el.value='Documented public-interest reporting with substantial censorship pressure.';
+ });
+ await f.click('.report-control .report-submit');
+ await eventually(()=>f.evaluate(async()=>{
+   const {openLocal,getItem}=await import('./core/persist.js');
+   const db=await openLocal();
+   try{return (await getItem(db,'records')||[]).some(e=>
+     e.payload.kind==='label'&&
+     e.payload.body.tag==='public-interest-censorship-pressure');}
+   finally{db.close();}
+ }), 'signed public-interest warning as separate report menu label',12000);
+ assert.equal((await ownRatings()).length,1,
+   'the public-interest flag MUST NOT create or overwrite an age/spider rating');
  assert.equal(await f.$eval('#ratingsEnable',el=>el.checked),false,
    'publishing a rating never silently enables censorship');
  await f.evaluate(()=>{
@@ -1540,9 +1607,27 @@ try{
      !!document.querySelector('.rating-hidden-placeholder')&&
      !document.querySelector('.post-main-media img');
  },sampleImage.title),'hidden age-rated media is not fetched for local preview',10000);
+ // Earlier tool-driven preference updates preserve scroll, so the reveal
+ // action may start well above the viewport. Move to the actual control
+ // before performing a genuine pointer click, as a reader would.
+ await f.$eval('.rating-reveal-control button',el=>
+   el.scrollIntoView({block:'center',behavior:'instant'}));
  await f.click('.rating-reveal-control button');
- await eventually(()=>f.evaluate(()=>!!document.querySelector('.post-main-media img')),
-   'local explicit reveal restores media without altering signed record',10000);
+ try{
+   await eventually(()=>f.evaluate(()=>!!document.querySelector('.post-main-media img')),
+     'local explicit reveal restores media without altering signed record',10000);
+ }catch(error){
+   const detail=await f.evaluate(()=>({
+     selected:document.querySelector('.post.selected')?.dataset.id,
+     panelCount:document.querySelectorAll('.post-container.expanded').length,
+     reveal:document.querySelector('.rating-reveal-control')?.textContent,
+     media:document.querySelector('.post-main-media')?.innerHTML.slice(0,1800),
+     tiles:[...document.querySelectorAll('#imageGrid .post')].slice(0,2).map(x=>x.className),
+     trace:document.querySelector('#toast')?.textContent
+   }));
+   console.error('SPIDER_REVEAL_DIAGNOSTIC',JSON.stringify(detail));
+   throw error;
+ }
  const rootRating=await ownRatings();
  assert.ok(rootRating[0].id.startsWith('sha256:'));
  // Group reputation & self-nomination stay public but have no automatically
@@ -1565,7 +1650,7 @@ try{
    finally{db.close();}
  }), 'signed reviewer candidacy without role authority',10000);
  await f.click('#closeClans');
- console.log('CLASSIC checkpoint 25: signed 4-axis age/urgency ratings and radar, opt-in blur thresholds, group reputation and self-candidacy');
+ console.log('CLASSIC checkpoint 25: tiny score-adjacent spider popup with mouse-drag and keyboard signing, flag-menu civic alert, opt-in age blur and group candidacy');
 
  console.log('PASS classic board, threads, audit, attributes, identity portability and append-only revision/withdrawal');
 }finally{

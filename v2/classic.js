@@ -557,6 +557,7 @@ function alignGridRow(card){
   alignUnderHeader(row||card);
 }
 function closeSelected(){
+  closeSpiderPopup();
   const id=state.selected;
   const card=[...document.querySelectorAll('#imageGrid > .post')].find(el=>el.dataset.id===id);
   const index=card?Number(card.dataset.index):-1;
@@ -1027,6 +1028,10 @@ function render(){
   }
   const feed=effectiveFeed(),grid=$('imageGrid');
   const prev=state.selected;
+  // Network batches may trigger full redraws while a reader is adjusting a
+  // rating. Preserve their unsaved five-axis draft for the SAME post only.
+  if(activeSpiderPopup&&(!prev||activeSpiderPopup.postId!==prev||
+    !feed.some(item=>item.event.id===prev)))closeSpiderPopup();
   grid.className='grid '+state.view;
   renderSpaces();
   renderRecommendedSpaces();
@@ -1157,7 +1162,8 @@ async function ingest(e,{outgoing=false}={}){
   const response=await state.replica.ingest(e);
   if(!response.accepted)return response;
   if(!response.duplicate){
-    if(e.payload.kind==='content-rating'){
+    if(e.payload.kind==='content-rating'||
+       (e.payload.kind==='label'&&e.payload.body.tag==='public-interest-censorship-pressure')){
       const id=e.payload.body.target;
       const existing=state.ratingRecordsByTarget.get(id)||[];
       existing.push(e);state.ratingRecordsByTarget.set(id,existing);
@@ -1296,193 +1302,289 @@ function renderReplies(body,post){
   body.append(section);
 }
 
+// One small on-demand spider editor; nothing occupies article height until
+// the reader requests it from the icon beside the popularity score.
 const SVG_NS='http://www.w3.org/2000/svg';
-function contentRatingRadar(axes){
-  const wrap=element('div','rating-radar-wrap');
-  const svg=document.createElementNS(SVG_NS,'svg');
-  svg.setAttribute('class','rating-radar');
-  svg.setAttribute('viewBox','0 0 240 205');
-  svg.setAttribute('role','img');
-  svg.setAttribute('aria-label','Spider chart: '+Object.entries(RATING_AXES)
-    .map(([key,label])=>label+' '+(axes[key]===null?'unrated':axes[key]+'/5')).join(', '));
-  const center=[120,99],radius=72,keys=Object.keys(RATING_AXES);
-  const point=(idx,value)=>{
-    const angle=-Math.PI/2+idx*2*Math.PI/keys.length;
-    const r=radius*(value/5);
-    return (center[0]+Math.cos(angle)*r).toFixed(1)+','+
-      (center[1]+Math.sin(angle)*r).toFixed(1);
-  };
-  const add=(tag,attrs)=>{
-    const node=document.createElementNS(SVG_NS,tag);
-    for(const [name,value] of Object.entries(attrs))node.setAttribute(name,String(value));
-    svg.append(node);return node;
-  };
-  for(const r of [1,2,3,4,5]){
-    add('polygon',{points:keys.map((_,i)=>point(i,r)).join(' '),
-      fill:'none',stroke:'#615666','stroke-width':.75});
-  }
-  for(const [i,key] of keys.entries()){
-    add('line',{x1:center[0],y1:center[1],
-      x2:point(i,5).split(',')[0],y2:point(i,5).split(',')[1],
-      stroke:'#73647a','stroke-width':.9});
-  }
-  const values=keys.map(key=>axes[key]??0);
-  add('polygon',{points:values.map((value,i)=>point(i,value)).join(' '),
-    fill:'#d395bf','fill-opacity':.29,stroke:'#f1acd1','stroke-width':2});
-  const labels=[['Controversy',120,13],['Democracy',191,103],['Intellectual',120,191],['Spam',47,103]];
-  for(const [text,x,y] of labels){
-    const t=add('text',{x,y,'text-anchor':'middle',fill:'#d9c3d6','font-size':10});
-    t.textContent=text;
-  }
-  wrap.append(svg);
-  return wrap;
+const SPIDER_DIMENSIONS=[
+  {key:'age',name:'Age suitability',short:'AGE',max:6,
+   levels:AGE_TIERS.map((tier,i)=>[
+     'All audiences; no adult warning claimed.',
+     'PG: parental guidance may be useful.',
+     '13+: may be unsuitable for younger children.',
+     '18+: intended for adults.',
+     'Extreme/disturbing adult material, beyond ordinary 18+.',
+     'Graphic gore or disturbing news imagery; context matters.',
+     'Potential legal concern — an unverified opinion, NOT a legal ruling.'
+   ][i])},
+  {key:'controversy',name:'Controversy / censorship pressure',short:'CONTEST',max:5,
+   levels:['No significant controversy asserted','Minor disagreement',
+     'Some disputed interpretations','Strong public disagreement',
+     'Highly contested or facing suppression pressure',
+     'Exceptional controversy or censorship pressure']},
+  {key:'democraticUrgency',name:'Democratic urgency',short:'CIVIC',max:5,
+   levels:['No special civic urgency','Peripheral public relevance',
+     'Some relevance to civic decisions','Useful public-interest reporting',
+     'Time-sensitive democratic information',
+     'Critical for timely democratic participation']},
+  {key:'intellectualImportance',name:'Intellectual importance',short:'IDEAS',max:5,
+   levels:['Little substantive intellectual value claimed',
+     'Lightweight entertainment or casual commentary',
+     'Some substantive content','Meaningful ideas or educational analysis',
+     'High intellectual or educational relevance',
+     'Exceptional depth or public understanding value']},
+  {key:'spamLikelihood',name:'Spam / low-value likelihood',short:'SPAM',max:5,
+   levels:['No spam indicators asserted','Very low concern',
+     'Some low-value or repetitive elements','Noticeable spam characteristics',
+     'Strong spam/low-quality signals','Very likely spam or bulk noise']}
+];
+let activeSpiderPopup=null;
+function closeSpiderPopup({restoreFocus=false}={}){
+  const current=activeSpiderPopup;
+  if(!current)return;
+  activeSpiderPopup=null;
+  current.cleanup();
+  current.popup.remove();
+  if(restoreFocus&&current.trigger?.isConnected)current.trigger.focus({preventScroll:true});
 }
-function renderContentRatingPanel(post){
-  const review=ratingAssessment(post.id,{media:!!post.payload.body.media?.length});
-  const panel=element('details','content-rating-panel');
-  panel.setAttribute('aria-label','Independent content rating and reader decisions');
-  panel.append(element('summary','',
-    'Suitability & importance · '+review.allSignedCount+' signed rating'+
-      (review.allSignedCount===1?'':'s')+' · '+review.qualifiedCount+' recognized'));
-  const content=element('div','rating-panel-content');
-  content.append(element('p','rating-caveat',
-    'Independent opinions about this post — not flags against other groups or their decisions. '+
-    'Ratings are not verdicts, age certification or legal findings. Popularity is separate.'));
-  content.append(contentRatingRadar(review.axes));
-  const stats=element('div','rating-axis-stats');
-  for(const [key,name] of Object.entries(RATING_AXES)){
-    stats.append(element('div','rating-axis-row',
-      name+' · '+(review.axes[key]===null?'not assessed':review.axes[key]+'/5')));
+function openSpiderPopup(post,trigger){
+  if(activeSpiderPopup?.postId===post.id){closeSpiderPopup({restoreFocus:true});return;}
+  closeSpiderPopup();
+  const review=ratingAssessment(post.id);
+  const own=review.latest.find(e=>e.payload.author===state.identity.author)?.payload.body;
+  const draft={
+    age:own?.age??0,
+    ...Object.fromEntries(Object.keys(RATING_AXES).map(key=>[key,own?.axes?.[key]??0]))
+  };
+  const popup=element('div','spider-popup');
+  popup.setAttribute('role','dialog');
+  popup.setAttribute('aria-label','Rate content using draggable spider points');
+  popup.tabIndex=-1;
+  const top=element('div','spider-popup-head');
+  const title=element('strong','','🕸 Rate content');
+  const closeButton=button('×',()=>closeSpiderPopup({restoreFocus:true}),'spider-close');
+  closeButton.setAttribute('aria-label','Close spider chart');
+  top.append(title,closeButton);popup.append(top);
+  const help=element('p','spider-intro',
+    'Drag each dot outward for more, inward for less. Click a label or use arrow keys on a dot. Your scores are independent of popularity.');
+  popup.append(help);
+  const viewWidth=280,viewHeight=256,cx=140,cy=125,radius=82;
+  const angle=i=>-Math.PI/2+i*2*Math.PI/SPIDER_DIMENSIONS.length;
+  const locationOf=(i,value)=>{
+    const fraction=value/SPIDER_DIMENSIONS[i].max;
+    return [cx+Math.cos(angle(i))*radius*fraction,
+      cy+Math.sin(angle(i))*radius*fraction];
+  };
+  const toPoint=point=>point.map(v=>v.toFixed(2)).join(',');
+  const svg=document.createElementNS(SVG_NS,'svg');
+  svg.setAttribute('class','spider-editor');
+  svg.setAttribute('viewBox','0 0 '+viewWidth+' '+viewHeight);
+  svg.setAttribute('role','group');
+  svg.setAttribute('aria-label','Five editable rating axes; dots can be dragged or adjusted with keyboard arrows');
+  const add=(tag,attrs,parent=svg)=>{
+    const node=document.createElementNS(SVG_NS,tag);
+    for(const [key,value] of Object.entries(attrs))node.setAttribute(key,String(value));
+    parent.append(node);return node;
+  };
+  const keys=SPIDER_DIMENSIONS;
+  for(let n=1;n<=5;n++)add('polygon',{
+    points:keys.map((_,i)=>toPoint(locationOf(i,keys[i].max*n/5))).join(' '),
+    fill:'none',stroke:'#5c5061','stroke-width':.9
+  });
+  for(let i=0;i<keys.length;i++){
+    const [x,y]=locationOf(i,keys[i].max);
+    add('line',{x1:cx,y1:cy,x2:x,y2:y,stroke:'#675968','stroke-width':.85});
   }
-  content.append(stats);
-  const high=review.high,low=review.low;
-  content.append(element('p','rating-caveat',
-    review.qualifiedCount+' recognized independent signer'+(review.qualifiedCount===1?'':'s')+
-    ', '+review.untrustedCount+' unrecognized · '+
-    high+' above age threshold, '+low+' below'+
-    (review.disputed?' · CONFLICT: no automatic restriction':'')+
-    ' · media action: '+review.action.toUpperCase()));
-  // Show groups' independent numerical summaries side by side. No group
-  // claims authority to challenge or overturn another group's decision.
-  const groupsCompared=Object.entries(review.groupComparisons);
-  if(groupsCompared.length){
-    const comparisons=element('div','rating-group-comparisons');
-    comparisons.append(element('strong','','Independent group ratings · compare without adjudicating'));
-    for(const [groupId,observed] of groupsCompared){
-      const group=state.groupViews.find(entry=>entry.id===groupId);
-      comparisons.append(element('div','rating-group-comparison',
-        (group?.result?.state.name||groupId.slice(7,21))+
-        ' · '+observed.count+' recognized signer'+(observed.count===1?'':'s')+
-        ' · median age '+(Number.isInteger(observed.ageMedian)?
-          AGE_TIERS[observed.ageMedian]:
-          Number(observed.ageMedian).toFixed(1)+'/6')+
-        ' · urgency '+observed.axes.democraticUrgency+'/5'));
-    }
-    content.append(comparisons);
+  // The dashed gray shape represents recognized other opinions, NOT a
+  // consensus verdict and not a second spider UI.
+  if(review.qualifiedCount){
+    const ageExpanded=review.ages.flatMap((count,i)=>Array(count).fill(i));
+    const middle=ageExpanded.length?
+      ageExpanded[Math.floor((ageExpanded.length-1)/2)]:0;
+    const previous=keys.map(k=>k.key==='age'?middle:(review.axes[k.key]??0));
+    add('polygon',{class:'spider-community',
+      points:previous.map((value,i)=>toPoint(locationOf(i,value))).join(' '),
+      fill:'none',stroke:'#aca0b6','stroke-dasharray':'4 3','stroke-width':1.4});
   }
-  if(review.publicInterestAlerts){
-    content.append(element('p','rating-interest',
-      review.publicInterestAlerts+' recognized public-interest/censorship-pressure alert'+
-      (review.publicInterestAlerts===1?'':'s')+
-      '. Alerts alone do not force highlighting or bypass spam filters.'));
+  const polygon=add('polygon',{class:'spider-draft',points:'',
+    fill:'#d7a2c3','fill-opacity':.23,stroke:'#f0badc','stroke-width':2.2});
+  let activeIndex=0,dragIndex=null;
+  const dots=[],labels=[];
+  const titleLine=element('div','spider-explanation-title');
+  const description=element('div','spider-explanation');
+  const count=element('div','spider-coverage',
+    review.qualifiedCount+' recognized ratings · '+review.untrustedCount+
+    ' other signed ratings'+(review.disputed?' · age opinions conflict':''));
+  const explanations=element('div','spider-explanation-box');
+  explanations.setAttribute('aria-live','polite');
+  explanations.append(titleLine,description);
+  function renderValue(){
+    const d=keys[activeIndex],value=draft[d.key];
+    titleLine.textContent=d.name+' · '+value+'/'+d.max+
+      (d.key==='age'?' · '+AGE_TIERS[value]:'');
+    description.textContent=d.levels[value];
   }
-  const ageSummary=element('div','rating-age-summary');
-  for(let n=0;n<AGE_TIERS.length;n++){
-    if(review.ages[n])ageSummary.append(element('span','rating-age-chip',
-      AGE_TIERS[n]+' · '+review.ages[n]));
+  function renderShape(){
+    polygon.setAttribute('points',keys.map((d,i)=>toPoint(locationOf(i,draft[d.key]))).join(' '));
+    keys.forEach((d,i)=>{
+      // Zero-scored handles are drawn slightly away from the center so the
+      // five controls remain separately draggable instead of stacking.
+      // The *signed* value and polygon still remain exactly zero.
+      const [x,y]=locationOf(i,draft[d.key]===0?1.25:draft[d.key]);
+      const dot=dots[i];
+      dot.setAttribute('cx',x);dot.setAttribute('cy',y);
+      dot.setAttribute('aria-valuenow',draft[d.key]);
+      dot.setAttribute('aria-valuetext',d.key==='age'?AGE_TIERS[draft[d.key]]:
+        draft[d.key]+'/'+d.max+' — '+d.levels[draft[d.key]]);
+      dot.classList.toggle('active',i===activeIndex);
+      labels[i].classList.toggle('active',i===activeIndex);
+    });
+    renderValue();
   }
-  if(ageSummary.children.length)content.append(ageSummary);
+  function selectAxis(index){
+    activeIndex=index;
+    renderShape();
+  }
+  function setValue(index,value){
+    const d=keys[index];
+    draft[d.key]=Math.max(0,Math.min(d.max,Math.round(value)));
+    activeIndex=index;
+    renderShape();
+  }
+  for(const [i,d] of keys.entries()){
+    const [lx,ly]=locationOf(i,d.max);
+    const labelDistance=28;
+    const tx=lx+Math.cos(angle(i))*labelDistance;
+    const ty=ly+Math.sin(angle(i))*labelDistance;
+    const name=add('text',{class:'spider-axis-label',x:tx,y:ty,
+      'text-anchor':'middle','dominant-baseline':'central'});
+    name.textContent=d.short;
+    name.style.cursor='pointer';
+    name.addEventListener('click',()=>selectAxis(i));
+    labels.push(name);
+  }
+  for(const [i,d] of keys.entries()){
+    const dot=add('circle',{class:'spider-handle',r:10,cx:cx,cy:cy,
+      tabindex:0,role:'slider','aria-orientation':'vertical',
+      'aria-label':d.name,'aria-valuemin':0,'aria-valuemax':d.max,
+      'data-spider-axis':d.key});
+    dot.addEventListener('keydown',event=>{
+      if(!['ArrowUp','ArrowRight','ArrowDown','ArrowLeft','Home','End'].includes(event.key))return;
+      event.preventDefault();event.stopPropagation();
+      setValue(i,event.key==='Home'?0:event.key==='End'?d.max:
+        draft[d.key]+(['ArrowUp','ArrowRight'].includes(event.key)?1:-1));
+    });
+    dot.addEventListener('focus',()=>selectAxis(i));
+    dot.addEventListener('pointerdown',event=>{
+      if(event.button!==0)return;
+      event.preventDefault();
+      dragIndex=i;activeIndex=i;
+      svg.setPointerCapture(event.pointerId);
+      updateFromPointer(event,i);
+    });
+    dots.push(dot);
+  }
+  function updateFromPointer(event,index){
+    const rect=svg.getBoundingClientRect();
+    if(!rect.width||!rect.height)return;
+    const x=(event.clientX-rect.left)*viewWidth/rect.width-cx;
+    const y=(event.clientY-rect.top)*viewHeight/rect.height-cy;
+    const projection=(x*Math.cos(angle(index))+y*Math.sin(angle(index)))/radius;
+    setValue(index,projection*keys[index].max);
+  }
+  svg.addEventListener('pointermove',event=>{
+    if(dragIndex!==null)updateFromPointer(event,dragIndex);
+  });
+  const release=()=>{dragIndex=null;};
+  svg.addEventListener('pointerup',release);
+  svg.addEventListener('pointercancel',release);
+  svg.addEventListener('lostpointercapture',release);
+  popup.append(svg,explanations,count);
+  const legend=element('p','spider-legend',
+    review.qualifiedCount?'Pink: your draft · dashed: recognized ratings':'Pink: your draft · no recognized reference yet');
+  popup.append(legend);
+  // Retain independent reviewer audit and explicit trust/ignore capability,
+  // while removing the enormous in-article dropdown and list of sliders.
   if(review.latest.length){
-    const details=element('details','rating-audit-entries');
-    details.append(element('summary','','Signed individual assessments · inspect / trust reviewers'));
-    for(const entry of review.latest.slice(0,80)){
-      const b=entry.payload.body,author=entry.payload.author;
-      const trusted=review.qualified.some(x=>x.payload.author===author);
-      const row=element('div','rating-audit-row');
-      row.append(element('span','',
-        who(author)+' · '+AGE_TIERS[b.age]+
-        (b.publicInterestAlert?' · public-interest alert':'')+
-        (b.group?' · claimed group '+b.group.slice(7,19):'')+
-        (trusted?' · recognized':' · not used for automatic filtering')));
-      if(b.note)row.append(element('div','rating-audit-note',b.note));
+    const sourceBox=element('details','spider-source-list');
+    sourceBox.append(element('summary','','Individual opinions ('+review.latest.length+')'));
+    const rows=element('div','spider-sources');
+    for(const entry of review.latest.slice(0,30)){
+      const author=entry.payload.author;
+      const row=element('div','spider-source-row');
+      row.append(element('span','',who(author)+' · '+AGE_TIERS[entry.payload.body.age]+
+        (review.qualified.some(e=>e.payload.author===author)?' · trusted':' · not trusted')));
       if(author!==state.identity.author){
-        const individuallyTrusted=state.ratingTrustedAuthors.includes(author);
-        row.append(button(individuallyTrusted?'Stop trusting ratings':'Trust this rater',async()=>{
-          state.ratingTrustedAuthors=individuallyTrusted?
+        row.append(button(state.ratingTrustedAuthors.includes(author)?'Untrust':'Trust',async()=>{
+          const existing=state.ratingTrustedAuthors.includes(author);
+          state.ratingTrustedAuthors=existing?
             state.ratingTrustedAuthors.filter(x=>x!==author):
             [...new Set([...state.ratingTrustedAuthors,author])].slice(0,1000);
-          await store();redrawCurrentWithoutScroll(post.id);
-        },'rating-trust'));
+          await store();
+          closeSpiderPopup();
+          openSpiderPopup(post,trigger);
+        }));
       }
-      details.append(row);
+      rows.append(row);
     }
-    content.append(details);
+    sourceBox.append(rows);popup.append(sourceBox);
   }
-  const form=element('form','rating-submit-form');
-  form.append(element('strong','','Rate this content (signed; public)'));
-  const own=review.latest.find(e=>e.payload.author===state.identity.author)?.payload.body;
-  const ageLabel=element('label','','Age / extreme-content category');
-  const age=document.createElement('select');age.name='age';age.setAttribute('aria-label','Age suitability rating');
-  for(const [i,name] of AGE_TIERS.entries()){
-    const option=new Option(name,String(i));
-    if(i===(own?.age??0))option.selected=true;
-    age.append(option);
-  }
-  ageLabel.append(age);form.append(ageLabel);
-  const sliders=new Map();
-  for(const [key,name] of Object.entries(RATING_AXES)){
-    const label=element('label','rating-slider-label',name);
-    const range=document.createElement('input');range.type='range';
-    range.min='0';range.max='5';range.step='1';
-    range.value=String(own?.axes?.[key]??0);
-    range.setAttribute('aria-label',name);
-    const number=element('output','rating-slider-output',range.value+'/5');
-    range.oninput=()=>number.textContent=range.value+'/5';
-    label.append(range,number);form.append(label);sliders.set(key,range);
-  }
-  const alert=element('label','rating-alert-label');
-  const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.checked=own?.publicInterestAlert===true;
-  alert.append(checkbox,document.createTextNode(
-    ' Public-interest / censorship-pressure alert (news, democracy, reporting; not meme promotion)'));
-  form.append(alert);
-  const groupChoices=state.groupViews.filter(g=>
-    state.groupSubscriptions.includes(g.id)&&!g.result.ambiguous&&
-    Object.hasOwn(g.result.state.reviewers||{},state.identity.author));
-  const groupLabel=element('label','','Publish this assessment');
-  const group=document.createElement('select');group.setAttribute('aria-label','Rating attribution');
-  group.append(new Option('My own signed opinion (no group endorsement)',''));
-  for(const entry of groupChoices)group.append(new Option(
-    'As ratified reviewer for '+entry.result.state.name,entry.id));
-  if(own?.group&&groupChoices.some(x=>x.id===own.group))group.value=own.group;
-  groupLabel.append(group);form.append(groupLabel);
-  const reason=element('textarea','rating-note');
-  reason.maxLength=500;reason.rows=2;
-  reason.placeholder='Optional evidence or explanation (not an attack on another group’s decision)';
-  reason.value=own?.note||'';
-  form.append(reason);
-  form.append(element('p','rating-caveat',
-    'One most-recent signed rating per signing key per post. Claimed group membership is ignored unless its reviewer appointment is independently ratified.'));
-  const send=element('button','rating-submit','Publish signed assessment');send.type='submit';
-  form.append(send);
-  form.onsubmit=async e=>{
-    e.preventDefault();send.disabled=true;
+  const footer=element('div','spider-footer');
+  const submit=button('Publish signed rating',async()=>{
+    submit.disabled=true;
     try{
-      const axes=Object.fromEntries([...sliders.entries()].map(([key,range])=>
-        [key,Number(range.value)]));
-      await publish('content-rating',{
-        target:post.id,age:Number(age.value),axes,
-        ...(checkbox.checked?{publicInterestAlert:true}:{}),
-        ...(group.value?{group:group.value}:{}),
-        ...(reason.value.trim()?{note:reason.value.trim()}:{} )
+      const axes=Object.fromEntries(Object.keys(RATING_AXES).map(k=>[k,draft[k]]));
+      // This button has no publicInterestAlert field. Exceptional civic/news
+      // flags are signed separately in the existing ⚑ Report dropdown.
+      const group=own?.group&&state.groupViews.some(g=>g.id===own.group&&
+        state.groupSubscriptions.includes(g.id)&&!g.result.ambiguous&&
+        Object.hasOwn(g.result.state.reviewers||{},state.identity.author))?
+        own.group:null;
+      await publish('content-rating',{target:post.id,age:draft.age,axes,
+        ...(group?{group}:{}),
+        ...(own?.note?{note:own.note}:{}),
+        ...(own?.publicInterestAlert?{publicInterestAlert:true}:{})
       },{space:post.payload.space});
-      toast('Your independent signed rating was published. Reader controls remain local.');
-      redrawCurrentWithoutScroll(post.id);
-    }catch(error){toast('Rating failed: '+error.message);}
-    finally{send.disabled=false;}
+      closeSpiderPopup();
+      toast('Signed spider rating published; filtering is still reader-controlled.');
+    }catch(error){toast('Rating not published: '+error.message);}
+    finally{submit.disabled=false;}
+  },'spider-submit');
+  footer.append(submit,button('Cancel',()=>closeSpiderPopup({restoreFocus:true}),'spider-cancel'));
+  popup.append(footer);
+  document.body.append(popup);
+  const anchor=trigger.getBoundingClientRect();
+  // Use a fixed popover, anchored near the score, never expand the article.
+  // It flips above on short screens and clamps horizontally on mobile.
+  const popupWidth=Math.min(324,innerWidth-12);
+  const left=Math.max(6,Math.min(anchor.left,innerWidth-popupWidth-6));
+  // Width changes line wrapping. Apply it before measuring the HEIGHT;
+  // otherwise the popover can spill below the viewport on small screens.
+  Object.assign(popup.style,{width:popupWidth+'px',left:left+'px'});
+  const height=Math.min(popup.getBoundingClientRect().height,innerHeight-12);
+  const below=anchor.bottom+7;
+  const above=anchor.top-height-7;
+  const topY=below+height>innerHeight-6&&above>=6?above:
+    Math.max(6,Math.min(below,innerHeight-height-6));
+  popup.style.top=topY+'px';
+  const onOutside=event=>{
+    if(!popup.contains(event.target)&&event.target!==trigger)closeSpiderPopup();
   };
-  content.append(form);
-  panel.append(content);
-  return panel;
+  const onEscape=event=>{
+    if(event.key==='Escape'){
+      event.preventDefault();event.stopImmediatePropagation();
+      closeSpiderPopup({restoreFocus:true});
+    }
+  };
+  // Scrolling is not a dismissal gesture: async board content can move the
+  // viewport while a reader is dragging a handle. Outside click/Escape close.
+  document.addEventListener('pointerdown',onOutside,true);
+  document.addEventListener('keydown',onEscape,true);
+  activeSpiderPopup={postId:post.id,popup,trigger,cleanup:()=>{
+    document.removeEventListener('pointerdown',onOutside,true);
+    document.removeEventListener('keydown',onEscape,true);
+  }};
+  renderShape();
+  popup.focus({preventScroll:true});
 }
 
 function renderReportControl(post){
@@ -1497,6 +1599,7 @@ function renderReportControl(post){
     ['scam','Fraud / scam'],
     ['malware','Malicious executable or link'],
     ['suspected-illegal-media','Potentially prohibited media (metadata only)'],
+    ['public-interest-censorship-pressure','Public-interest / censorship-pressure alert (important news)'],
     ['other','Other / request review']
   ]){
     const option=document.createElement('option');
@@ -1507,20 +1610,36 @@ function renderReportControl(post){
   reason.maxLength=500;reason.rows=2;
   const explanation=element('p','fine',
     'A report is a signed allegation, not a finding or deletion. Your own local rules may hide spam/scam/malware; others decide independently.');
+  const isAlert=()=>select.value==='public-interest-censorship-pressure';
   const send=button('Sign report',async()=>{
     const detail=reason.value.trim();
     if(detail.length<4)return toast('Please describe the report (at least 4 characters).');
     send.disabled=true;
     try{
+      // This special public-interest label must never create an implied
+      // 'age 0 / safe' rating or overwrite the four spider dimensions.
+      const special=isAlert();
       const record=await publish('label',{
         target:post.id,tag:select.value,reason:detail
       },{space:post.payload.space});
       report.open=false;
-      toast('Signed allegation '+record.id.slice(0,18)+'… published. See Audit or Trash to inspect it.');
+      toast((special?'Signed public-interest alert ':'Signed allegation ')+
+        record.id.slice(0,18)+'… published.');
       render();
     }catch(error){toast('Report was not published: '+error.message);}
     finally{send.disabled=false;}
   },'report-submit');
+  select.addEventListener('change',()=>{
+    if(isAlert()){
+      reason.placeholder='Describe the civic importance, news value or censorship pressure; not for ordinary memes.';
+      explanation.textContent='Special, independently signed public-interest alert. Only sufficiently recognized evidence can suggest text-first presentation; it does not bypass spam filtering, age limits or operator law.';
+      send.textContent='Sign public-interest alert';
+    }else{
+      reason.placeholder='Describe what you observed, with evidence. Avoid personal information.';
+      explanation.textContent='A report is a signed allegation, not a finding or deletion. Your local rules may hide spam/scam/malware; others decide independently.';
+      send.textContent='Sign report';
+    }
+  });
   form.append(select,reason,explanation,send);
   report.append(toggle,form);
   return report;
@@ -1727,6 +1846,7 @@ function redrawCurrentWithoutScroll(id){
   window.scrollTo({top,behavior:'instant'});
 }
 function expand(id,{focus=true}={}){
+  if(activeSpiderPopup&&activeSpiderPopup.postId!==id)closeSpiderPopup();
   const feed=effectiveFeed(),index=feed.findIndex(x=>x.event.id===id);
   if(index<0)return;
   const current=feed[index],p=current.event.payload,b=current.displayBody||p.body;
@@ -1944,6 +2064,11 @@ function expand(id,{focus=true}={}){
     renderReplies(body,current.event);
   }else{
     votes.append(element('span','score',String(reactionScore(id))));
+    const spider=button('🕸',()=>openSpiderPopup(current.event,spider),'spider-trigger');
+    spider.setAttribute('aria-label','Open draggable spider chart to rate this post');
+    spider.title='Rate age suitability, controversy, civic urgency, intellectual value and spam likelihood';
+    votes.append(spider);
+    if(activeSpiderPopup?.postId===id)activeSpiderPopup.trigger=spider;
     for(const [label,v] of [['++',2],['+',1],['−',-1],['−−',-2]]){
       const type=v===2?'vote-max':v===1?'vote-up':v===-1?'vote-down':'vote-min';
       const action=button(label,()=>react(id,v),type+(chosenReaction===v?' selected':''));
@@ -1953,7 +2078,6 @@ function expand(id,{focus=true}={}){
       votes.append(action);
     }
     votes.append(renderReportControl(current.event));
-    body.append(renderContentRatingPanel(current.event));
     votes.append(button(state.audit?'− Audit':'⚖ Audit',()=>{
       state.audit=!state.audit;expand(id,{focus:false});
     },'audit-action'));
@@ -3251,7 +3375,8 @@ async function init(){
   state.saved=await getItem(state.db,'records')||[];
   for(const event of state.saved){
     const accepted=await state.replica.ingest(event);
-    if(accepted.accepted&&event.payload.kind==='content-rating'){
+    if(accepted.accepted&&(event.payload.kind==='content-rating'||
+       (event.payload.kind==='label'&&event.payload.body.tag==='public-interest-censorship-pressure'))){
       const id=event.payload.body.target,items=state.ratingRecordsByTarget.get(id)||[];
       items.push(event);state.ratingRecordsByTarget.set(id,items);
     }

@@ -143,3 +143,35 @@ test('separate group distrust and reviewer misconduct remain signed opinion/evid
  assert.equal(self.payload.kind,'reviewer-candidacy');
  assert.equal(self.payload.author,founder.author);
 });
+
+
+test('public-interest alert in Report is a signed label, not an unintended all-ages/spider rating',async()=>{
+ const publisher=await generateIdentity(),a=await generateIdentity(),
+  b=await generateIdentity(),subject=await post(publisher);
+ const alert=await signEvent(a,{kind:'label',body:{
+  target:subject.id,tag:'public-interest-censorship-pressure',
+  reason:'Detailed public-interest reporting faces active censorship pressure'}});
+ assert.equal(await verifyEvent(alert),true);
+ const onlyAlert=assessContentRatings([alert],subject.id,{
+  trustAuthors:[a.author],rules:{...DEFAULT_RATING_RULES,active:true,blurVotes:1,hideVotes:2}
+ });
+ assert.equal(onlyAlert.publicInterestAlerts,1);
+ assert.equal(onlyAlert.allSignedCount,0);
+ assert.equal(onlyAlert.qualifiedCount,0);
+ assert.equal(onlyAlert.ages.reduce((a,b)=>a+b,0),0);
+ assert.equal(onlyAlert.action,'clear');
+ const rich=await rating(a,subject.id,3,{
+  axes:{democraticUrgency:5,intellectualImportance:4}});
+ const alert2=await signEvent(b,{kind:'label',body:{
+  target:subject.id,tag:'public-interest-censorship-pressure',
+  reason:'Relevant independent evidence of public-interest urgency'}});
+ const combined=assessContentRatings([alert,alert2,rich],subject.id,{
+  trustAuthors:[a.author,b.author]});
+ assert.equal(combined.publicInterestAlerts,2,'one author cannot inflate alerts by also rating');
+ assert.equal(combined.qualifiedCount,1,'alert-only signer has no age classification');
+ assert.equal(combined.textFirst,true);
+ const untrusted=assessContentRatings([alert,alert2,rich],subject.id,{
+  trustAuthors:[a.author]});
+ assert.equal(untrusted.publicInterestAlerts,1);
+ assert.equal(untrusted.textFirst,false,'one trusted alert cannot force democratic promotion');
+});

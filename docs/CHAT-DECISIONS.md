@@ -507,3 +507,20 @@ The owner's direct correction (supersedes the earlier direct-greenlight / interg
 The same message further requires: multiple distinct ratings including TV age PG, 18+, extreme disgusting adult media, gore/news, and a separate *unverified* legally-questionable tier; a matrix/spider chart for democratic urgency, intellectual importance and content value; avoid meme spam in public-interest alerts through credible review and text-first display; **do not require two-group agreement in small communities**; use adjustable reader-side threshold effects (2 age-18+ votes blur, 5 hide; **10 18+ versus 2 credible younger-rated votes from another group -> visible without blur**), and capability for future adaptive tuning suggestions/migrations without breaking existing preferences. Group reviewers may volunteer initially; only their own ratified elected/appointed group governance gives status, and members can vote to remove them. Outside observers can publish signed group-distrust opinions (not a unilateral platform punishment). Reviewers have public review activity histories and individual signed conduct allegations, with optional evidence; status perks (badges, tiny attributed flags, bounded post highlight) are reader/group-scoped *presentation*, not coercive namespace control.
 
 **This pass implemented experimentally:** signed `content-rating` with age tier 0–6 and four numeric 0–5 axes, a distinct public-interest alert field, a browser spider chart and public rating form; deduplicated per-author reader-recognized age aggregation with dissent guard and user-local versioned thresholds off by default; signed `group-rating`, `reviewer-conduct`, `reviewer-candidacy` events; group reputation and reviewer audit UI; quorum-backed reviewer appointment/removal proposals. This implementation **does NOT** adopt site-wide "legal" conclusions, guaranteed detection, formal moderator eligibility from self-nomination, earned karma, group collective liability, automatic ranked recommendations or globally valid reviewer status. The **earlier docs text about direct greenlight challenges is superseded**, including the earlier supposed cross-greenlight subtraction strategy. See revised [COMPOSABLE-MODERATION.md](./COMPOSABLE-MODERATION.md).
+
+
+## 2026-11-19: owner correction — rating editor should be ONE draggable spider POPUP next to vote number
+
+> "thanks but the spider chart it takes massive amounts of space and looks complicated. Can't you just make one spider chart that pops up with spider symbol next to the rating number here 4
+> ++
+> +
+> −
+> −−
+> ⚑ Report
+> ⚖ Audit
+> Add friend
+> Add
+>
+> and then users can drag points in the chart towards the things and it shows somehow what that means exactly. And the Public-interest / censorship-pressure alert it goes into the menu that pops out from flagging so get rid of the whole dropdown basically somehow"
+
+**Implemented interpretation:** remove the in-post suitability/importance details section, move the only chart into a small popover opened from a 🕸 button next to numeric popularity score, make its **five** points (age plus original four assessment axes) directly draggable with keyboard equivalents and live plain-English descriptions for each numeric level. Keep ratings signed and independent from reaction votes. Move public-interest/censorship-pressure alert from the former chart form into the existing \`⚑ Report\` category picker. It signs a \`label\` with special public-interest tag, distinct from a normal report; **no implied zero-age or rating-axis values**. Preserve old signed \`content-rating.publicInterestAlert\` interpretation for backwards compatibility. Search-filter threshold preference is still permitted; "get rid of whole dropdown" refers to the intrusive per-post multi-section reviewer panel, not removing reader-controlled visibility rules.

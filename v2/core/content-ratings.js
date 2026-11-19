@@ -122,7 +122,29 @@ export function assessContentRatings(signedEvents,target,{
     if(trustedKeys.has(author)||approvedGroup)verified.push(event);
   }
   const ages=Array.from({length:7},()=>0);
-  const publicInterestAlerts=verified.filter(e=>e.payload.body.publicInterestAlert===true).length;
+  // The special democratic/public-interest flag is a signed label inside
+  // ⚑ Report, never an implied 0/6 age rating or default-zero spider score.
+  // Keep legacy rating.publicInterestAlert for older signed events.
+  const alertTag='public-interest-censorship-pressure';
+  const latestAlertByAuthor=new Map();
+  for(const e of signedEvents){
+    if(e?.payload?.kind!=='label'||e.payload.body?.target!==target||
+       e.payload.body?.tag!==alertTag||typeof e.payload.author!=='string')continue;
+    const author=e.payload.author,old=latestAlertByAuthor.get(author);
+    if(!old||e.payload.time>old.payload.time||
+      (e.payload.time===old.payload.time&&e.id>old.id))
+      latestAlertByAuthor.set(author,e);
+  }
+  const alertAuthors=new Set(verified.filter(e=>e.payload.body.publicInterestAlert===true)
+    .map(e=>e.payload.author));
+  for(const e of latestAlertByAuthor.values()){
+    const author=e.payload.author;
+    const groupId=e.payload.body.group;
+    if(trustedKeys.has(author)||
+      (groupId&&subscriptions.has(groupId)&&verifiedGroupReviewers.get(groupId)?.has(author)))
+      alertAuthors.add(author);
+  }
+  const publicInterestAlerts=alertAuthors.size;
   const groupCounts=Object.create(null),groupBuckets=new Map(),axisValues={};
   for(const key of Object.keys(RATING_AXES))axisValues[key]=[];
   for(const e of verified){
