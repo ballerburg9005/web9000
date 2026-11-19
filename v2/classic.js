@@ -22,7 +22,7 @@ const $=id=>document.getElementById(id);
 const state={
   db:null,identity:null,replica:new Replica({maxEvents:25000}),saved:[],outbox:[],
   peers:[],peerScopes:['*'],mesh:null,suggested:[],mediaBase:null,mediaMirrors:[],
-  mediaApprovalV1:false,unconfirmedMediaURL:null,
+  mediaApprovalV1:false,unconfirmedMediaURL:null,firstPartyMediaBase:null,
   space:'commons',profileAuthor:null,sort:'new',view:'grid',search:'',showUnverified:false,
   ownerHint:null,respectOwner:true,respectWithdrawals:true,selected:null,trust:[],ignoredLabels:[],audit:false,showMedia:false,
   demo:[],demoVotes:new Map(),demoPollChoices:new Map(),demoReplies:new Map(),demoFlags:new Map(),demoTagVotes:new Map(),
@@ -43,13 +43,33 @@ function normalizeMediaBase(raw){
     throw Error('Use HTTPS for a public media peer');
   return u.href.replace(/\/$/,'');
 }
+// Website-hosted media can load automatically ONLY when the configured
+// gateway has the exact SAME ORIGIN as the page and the website itself
+// advertises that service in its local demo config. An unrelated peer,
+// media-provider claim or remote site config never authorizes auto-fetching.
+function setFirstPartyMedia(raw,enabled){
+  state.firstPartyMediaBase=null;
+  if(enabled!==true||typeof raw!=='string'||!raw.trim())return;
+  try{
+    const base=normalizeMediaBase(raw);
+    const u=new URL(base);
+    if(u.origin===location.origin)state.firstPartyMediaBase=base;
+  }catch{}
+}
+function activeMediaBase(){return state.mediaBase||state.firstPartyMediaBase;}
+function autoMediaFor(author){
+  // Same-origin hosting is ordinary site media, independent of whether the
+  // post author has local reputation. Other hosts retain author trust gating.
+  return !!(state.firstPartyMediaBase&&activeMediaBase()===state.firstPartyMediaBase)||
+    !!(state.mediaBase&&trustedForMedia(author));
+}
 const mediaRouteCache=new Map();
 function mediaCandidates(cid){
-  const cacheKey=[cid,state.mediaBase,...state.mediaMirrors,...state.trust,
+  const cacheKey=[cid,activeMediaBase(),...state.mediaMirrors,...state.trust,
     state.identity?.author,state.replica.size,Math.floor(Date.now()/60000)].join('|');
   if(mediaRouteCache.has(cacheKey))return mediaRouteCache.get(cacheKey);
   const claims=claimsFromVerifiedEvents(allEvents(),{cid});
-  const bases=chooseMediaGateways({cid,preferred:state.mediaBase,
+  const bases=chooseMediaGateways({cid,preferred:activeMediaBase(),
     approved:state.mediaMirrors,claims,securePage:location.protocol==='https:',
     trustedAuthors:[state.identity?.author,...state.trust]});
   const urls=bases.map(base=>base+'/ipfs/'+encodeURIComponent(cid.slice(7)));
@@ -74,6 +94,45 @@ function applyMediaSource(el,cid,onFailure){
 function trustedForMedia(author){
   return author===state.identity?.author||state.trust.includes(author)||
     (state.space==='demo'&&author===state.demoAuthor);
+}
+// A suggestion is NOT an approved gateway. The visible click on the
+// 'Enable IPFS images' or 'Load image from …' button constitutes explicit
+// reader consent to use that shown host for media fetches, not pinning.
+function suggestedMediaPeer(){
+  if(activeMediaBase())return null;
+  const raw=state.unconfirmedMediaURL||$('mediaPeerUrl')?.value?.trim()||
+    state.suggested.find(x=>x.mediaUrl)?.mediaUrl||'';
+  try{return normalizeMediaBase(raw);}catch{return null;}
+}
+function updateMediaEnableButton(){
+  const el=$('enableImages');
+  if(!el)return;
+  const url=suggestedMediaPeer();
+  el.hidden=!url;
+  if(url){
+    const host=new URL(url).host;
+    el.textContent='Enable images · '+host;
+    el.title='Approve image fetching from '+url+'. Browser will not pin, mirror, or serve these files.';
+  }
+}
+async function approveSuggestedMediaPeer({redraw=true}={}){
+  if(activeMediaBase())return true;
+  const url=suggestedMediaPeer();
+  if(!url){
+    $('joinNetwork').click();
+    toast('Choose a voluntary IPFS media gateway in Join Network, then approve it.');
+    return false;
+  }
+  // The user clicked a visible control identifying the media destination.
+  state.mediaBase=url;
+  state.mediaApprovalV1=true;
+  state.unconfirmedMediaURL=null;
+  $('mediaPeerUrl').value=url;
+  await store();
+  updateMediaEnableButton();
+  if(redraw)render();
+  toast('Images enabled from '+new URL(url).host+'. No media mirroring enabled.');
+  return true;
 }
 const toast=(msg)=>{
   const el=$('toast');el.textContent=String(msg).slice(0,280);el.classList.add('visible');
@@ -107,7 +166,9 @@ function debugRecordEntries(source){
           acknowledgedBy:item.ackedBy||[]
         }))}},
       {kind:'ipfs-media',space:'media',raw:{
-        kind:'ipfs-media',preferredGateway:state.mediaBase,
+        kind:'ipfs-media',preferredGateway:activeMediaBase(),
+        sameOriginSiteGateway:state.firstPartyMediaBase,
+        manuallyApprovedGateway:state.mediaBase,
         mediaApprovalRecorded:state.mediaApprovalV1,
         voluntarilyApprovedBackups:[...state.mediaMirrors],
         automaticBrowserPinning:false,operatorIndependentStorage:true,
@@ -142,8 +203,8 @@ function debugRecordEntries(source){
     ];
   }
   if(source==='network')return [...state.debugTrace.entries].reverse()
-    .map((trace,i)=>({kind:trace.type,space:'',author:'',type:trace.direction,
-      at:trace.at,peer:trace.peer,raw:trace,entryId:'net-'+i}));
+    .map(trace=>({kind:trace.type,space:'',author:'',type:trace.direction,
+      at:trace.at,peer:trace.peer,raw:trace,entryId:'net-'+trace.seq}));
   if(source==='dump')return (state.debugDump?.events||[]).map(event=>({
     kind:event.payload.kind,space:event.payload.space,author:event.payload.author,
     at:new Date(event.payload.time).toISOString(),id:event.id,event}));
@@ -202,23 +263,53 @@ function renderDebugConsole(){
   }
   if(!filtered.length)target.append(element('div','fine',
     source==='dump'?'No matching records in this post/comment dump.':'No matching local data.'));
-  const next=filtered.findIndex(item=>item.id&&item.id===state.debugSelected);
+  const next=filtered.findIndex(item=>(item.id||item.entryId)===state.debugSelected);
   selectDebugItem(next>=0?next:0);
   $('debugStatus').textContent=filtered.length+' shown of '+all.length+
-    ' · '+(source==='network'?'Raw packet logging starts with this browser session; oversized frames are truncated.' :
+    ' · '+(source==='network'?
+      ($('debugLive').checked?'LIVE view · ':'PAUSED view · ')+
+      'traffic is buffered from startup, with a bounded recent history across reloads. Oversized frames truncated.' :
       source==='social'?'Friend/foe labels are local only; no reputational score or moderation authority yet.':
       source==='dump'?'Only records already replicated into this browser can be dumped.':'Verified signed event envelopes already stored by this browser.');
 }
 function selectDebugItem(index){
   const item=state.debugItems[index]||null;
-  state.debugSelected=item?.id||null;
+  state.debugSelected=item?.id||item?.entryId||null;
   const raw=$('debugRaw');
   raw.textContent=item?JSON.stringify(item.event||item.raw||item,null,2):
     'Select a record on the left to inspect its raw JSON.';
   for(const button of $('debugEntries').querySelectorAll('[data-debug-index]'))
     button.classList.toggle('selected',Number(button.dataset.debugIndex)===index);
 }
-function openDebugConsole(source='events'){
+function refreshDebugPostPicker(){
+  const pick=$('debugPostPick'),previous=pick.value,selected=state.selected;
+  const roots=buildPostLifecycles(allEvents());
+  const posts=[...roots.values()].sort((a,b)=>
+    b.root.payload.time-a.root.payload.time||b.root.id.localeCompare(a.root.id));
+  const choices=posts.slice(0,500);
+  const wanted=selected||previous;
+  const missing=wanted&&roots.has(wanted)&&!choices.some(x=>x.root.id===wanted);
+  if(missing)choices.unshift(roots.get(wanted));
+  pick.replaceChildren();
+  if(!choices.length){
+    pick.append(new Option('No locally stored posts',''));
+    return;
+  }
+  for(const life of choices){
+    const post=life.root,prefix=(life.display.payload.body.title||post.payload.body.title||
+      'Untitled').slice(0,75);
+    pick.append(new Option(prefix+' · '+post.payload.space+' · '+post.id.slice(7,18),post.id));
+  }
+  pick.value=choices.some(x=>x.root.id===wanted)?wanted:choices[0].root.id;
+}
+function selectedDebugPost(){
+  const id=$('debugPostPick').value;
+  const life=buildPostLifecycles(allEvents()).get(id);
+  if(!life)throw Error("Selected post is not in this browser\'s signed records");
+  return {event:life.root,lifecycle:life};
+}
+function openDebugConsole(source='network'){
+  refreshDebugPostPicker();
   $('debugSource').value=source;
   for(const id of ['debugKind','debugSpace','debugAuthor','debugSearch'])$(id).value='';
   state.debugSelected=null;
@@ -287,6 +378,27 @@ function updateRelationControls(author){
     el.dataset.socialLabel=status||'';
   }
 }
+let debugFlushTimer=null,debugDisplayTimer=null;
+function restoreBufferedTraffic(){
+  try{
+    const recent=JSON.parse(sessionStorage.getItem('web9000-debug-traffic-v1')||'[]');
+    state.debugTrace.restore(recent);
+  }catch{state.debugTrace.clear();}
+}
+function queueDebugHistorySave(){
+  if(debugFlushTimer!==null)return;
+  debugFlushTimer=setTimeout(()=>{
+    debugFlushTimer=null;
+    try{
+      // Browser-session retention only; bounded to limit private interest,
+      // memory and disk usage. Never persist the private signing key.
+      const entries=state.debugTrace.entries.slice(-125).map(x=>({
+        ...x,raw:x.raw.slice(0,8192)
+      }));
+      sessionStorage.setItem('web9000-debug-traffic-v1',JSON.stringify(entries));
+    }catch{}
+  },400);
+}
 function tracePeer({direction,url,payload}){
   let type='frame';
   if(direction==='status')type='connection';
@@ -295,8 +407,15 @@ function tracePeer({direction,url,payload}){
   state.debugTrace.push({direction,peer:url,type,
     packet:direction==='in'||direction==='out'?payload:undefined,
     message:direction==='status'||direction==='error'?payload:''});
-  if($('debugDialog')?.open&&$('debugSource').value==='network')
-    renderDebugConsole();
+  queueDebugHistorySave();
+  if($('debugDialog')?.open&&$('debugSource').value==='network'&&
+      $('debugLive').checked&&debugDisplayTimer===null){
+    debugDisplayTimer=setTimeout(()=>{
+      debugDisplayTimer=null;
+      if($('debugDialog')?.open&&$('debugSource').value==='network'&&$('debugLive').checked)
+        renderDebugConsole();
+    },160);
+  }
 }
 function downloadDebugJSON(){
   const source=$('debugSource').value,body=JSON.stringify({
@@ -627,7 +746,7 @@ function tile(item,i,replyCounts){
     card.append(img);
   } else if(b.media?.length){
     const primary=primaryMedia(b);
-    if(item.decision?.visible&&state.mediaBase&&trustedForMedia(p.author)&&primary){
+    if(item.decision?.visible&&autoMediaFor(p.author)&&primary){
       // Browser media is only fetched from a viewer-chosen media peer
       // for authored or explicitly trusted records, never all raw posts.
       const src=mediaURL(primary.cid);
@@ -651,7 +770,9 @@ function tile(item,i,replyCounts){
         card.append(img);
       }
     } else {
-      card.append(element('div','post-reveal','IPFS media · open to choose what to load'));
+      card.append(element('div','post-reveal',
+        activeMediaBase()?'Media from untrusted author · open to load':
+          'Images off · enable media gateway above'));
     }
   }else{
     card.append(element('div','post-text-preview',b.text||b.title||'Text post'));
@@ -1115,7 +1236,6 @@ function markAudit(body,item){
       render();
       toast('Your local interpretation changed. No signed records or other users were affected.');
     }));
-    controls.append(button('Copy signed label ID',()=>navigator.clipboard?.writeText(label.id).then(()=>toast('Label ID copied'))));
     row.append(controls);
     section.append(row);
   }
@@ -1130,7 +1250,7 @@ function showMultiImageGallery(body,post){
   const navigation=element('div','gallery-navigation');
   const thumbs=element('div','gallery-thumbnails');
   const counter=element('span','gallery-count');
-  const allowed=new Set(state.mediaBase&&trustedForMedia(post.payload.author)?cids:[]);
+  const allowed=new Set(autoMediaFor(post.payload.author)?cids:[]);
   const specified=post.payload.body.fields?.primaryMediaIndex;
   let index=Number.isInteger(specified)&&specified>=0&&specified<cids.length?specified:0;
   function draw(){
@@ -1146,8 +1266,9 @@ function showMultiImageGallery(body,post){
     }else{
       const placeholder=element('div','gallery-placeholder',
         'Image '+(index+1)+' · no automatic download from unknown authors');
-      placeholder.append(button('Load this image',()=>{
-        if(!state.mediaBase)return toast('Choose an independent media peer before loading this attachment.');
+      placeholder.append(button('Load this image'+(suggestedMediaPeer()?
+        ' from '+new URL(suggestedMediaPeer()).host:''),async()=>{
+        if(!activeMediaBase()&&!await approveSuggestedMediaPeer({redraw:false}))return;
         allowed.add(cid);draw();
       },'gallery-load'));
       stage.append(placeholder);
@@ -1174,9 +1295,6 @@ function showMultiImageGallery(body,post){
     counter,
     button('Next ›',()=>{index=(index+1)%cids.length;draw();},'gallery-next'));
   area.append(stage,navigation,thumbs);
-  area.append(button('Copy current CID',()=>{
-    navigator.clipboard?.writeText(cids[index]).then(()=>toast('CID copied'));
-  },'gallery-copy cid-copy'));
   draw();body.append(area);
 }
 // Attachment carousel can combine any supported media category. Selecting an
@@ -1185,7 +1303,7 @@ function showMixedMediaGallery(body,post){
   const items=mediaItems(post.payload.body).slice(0,12);
   const primary=primaryMedia(post.payload.body);
   let selected=primary?.index||0;
-  const trusted=trustedForMedia(post.payload.author)&&!!state.mediaBase;
+  const trusted=autoMediaFor(post.payload.author);
   const allowed=new Set(trusted?items.map(x=>x.cid):[]);
   const area=element('div','attachments media-gallery mixed-media-gallery');
   const stage=element('div','gallery-stage mixed-gallery-stage');
@@ -1216,8 +1334,9 @@ function showMixedMediaGallery(body,post){
       const box=element('div','gallery-placeholder',
         kinds[item.kind]+' attachment '+(selected+1)+
         ' · no automatic download from unknown authors');
-      box.append(button('Load this attachment',()=>{
-        if(!state.mediaBase)return toast('Connect to an independent media peer first.');
+      box.append(button('Load this attachment'+(suggestedMediaPeer()?
+        ' from '+new URL(suggestedMediaPeer()).host:''),async()=>{
+        if(!activeMediaBase()&&!await approveSuggestedMediaPeer({redraw:false}))return;
         allowed.add(item.cid);draw();
       },'gallery-load'));
       stage.append(box);
@@ -1259,26 +1378,26 @@ function showMedia(body,post){
   const area=element('div','attachments');
   for(const cid of post.payload.body.media){
     const wrap=element('div','media-ref');
-    const short=cid.slice(0,32)+'…';
-    wrap.append(element('div','',short));
-    const load=button('Load image manually',()=>{
-      const url=state.mediaBase;
-      if(!url){toast('No independent IPFS media gateway configured. The signed CID can be copied to another gateway.');return;}
+    const proposal=suggestedMediaPeer();
+    const caption=activeMediaBase()?'Load image':
+      proposal?'Load image from '+new URL(proposal).host:
+        'Choose media gateway to load image';
+    const load=button(caption,async()=>{
+      if(!activeMediaBase()&&!await approveSuggestedMediaPeer({redraw:false}))return;
       const img=document.createElement('img');
-      img.loading='eager';img.alt='Explicitly loaded IPFS attachment';
+      img.loading='eager';img.alt='IPFS image from approved gateway';
       applyMediaSource(img,cid,()=>{
-        img.replaceWith(element('p','','Image unavailable from approved peers. CID remains signed.'));
+        img.replaceWith(element('p','','Image unavailable from selected media gateway.'));
       });
       wrap.replaceChildren(img);
     });
-    if(state.mediaBase&&trustedForMedia(post.payload.author)){
+    if(autoMediaFor(post.payload.author)){
       // Safe-to-fetch self / explicitly trusted images render in the
       // expanded post without an additional manual click.
       load.click();
     }else{
       wrap.append(load);
     }
-    wrap.append(button('Copy CID',()=>navigator.clipboard?.writeText(cid).then(()=>toast('CID copied')),'cid-copy'));
     area.append(wrap);
   }
   body.append(area);
@@ -1499,8 +1618,6 @@ function expand(id,{focus=true}={}){
     },'audit-action'));
     if(state.mockMode)votes.append(button('Test karma…',()=>openMockKarma(p.author)));
     appendRelationButtons(votes,p.author);
-    votes.append(button('Dump post',()=>dumpSignedPost(current),'source-action'));
-    votes.append(button('Dump comments',()=>dumpSignedComments(current.event.id),'source-action'));
     body.append(votes);
     if(current.lifecycle){
       const life=current.lifecycle;
@@ -1531,8 +1648,6 @@ function expand(id,{focus=true}={}){
           attachments.length+' originally attached IPFS reference(s) remain part of the signed event. '+
           'Media may no longer be hosted by the peer you selected.'));
         row.append(read);
-        row.append(button('Inspect signed event',()=>showDebugDump(
-          'Historical signed event '+e.id.slice(0,20),[e]),'history-copy'));
         history.append(row);
       }
       for(const e of life.actions){
@@ -2397,7 +2512,7 @@ function bind(){
   };
   $('addComposeAttribute').onclick=addComposeAttributeRow;
   $('closeComposer').onclick=()=>close('postDialog');$('cancelPost').onclick=()=>close('postDialog');
-  $('debugConsoleButton').onclick=()=>openDebugConsole('events');
+  $('debugConsoleButton').onclick=()=>openDebugConsole('network');
   $('closeDebug').onclick=()=>close('debugDialog');
   $('debugSource').onchange=()=>{
     $('debugKind').value='';renderDebugConsole();
@@ -2406,10 +2521,22 @@ function bind(){
     $(id).addEventListener('input',renderDebugConsole);
     $(id).addEventListener('change',renderDebugConsole);
   }
-  $('debugRefresh').onclick=renderDebugConsole;
+  $('debugLive').onchange=()=>{
+    if($('debugLive').checked)renderDebugConsole();
+    else $('debugStatus').textContent='PAUSED view · new traffic is still being buffered and can be refreshed.';
+  };
+  for(const [id,handler] of [
+    ['debugDumpPost',()=>dumpSignedPost(selectedDebugPost())],
+    ['debugDumpComments',()=>dumpSignedComments(selectedDebugPost().event.id)]
+  ])$(id).onclick=()=>{
+    try{handler();}catch(error){toast(error.message);}
+  };
+  $('debugRefresh').onclick=()=>{refreshDebugPostPicker();renderDebugConsole();};
   $('debugClear').onclick=()=>{
-    state.debugTrace.clear();renderDebugConsole();
-    toast('This browser session’s network trace cleared. Signed records unchanged.');
+    state.debugTrace.clear();
+    try{sessionStorage.removeItem('web9000-debug-traffic-v1');}catch{}
+    renderDebugConsole();
+    toast('Buffered traffic cleared. Signed records unchanged.');
   };
   $('debugCopy').onclick=async()=>{
     const raw=$('debugRaw').textContent;
@@ -2418,6 +2545,7 @@ function bind(){
     catch(error){toast('Clipboard unavailable: '+error.message);}
   };
   $('debugExport').onclick=downloadDebugJSON;
+  $('enableImages').onclick=()=>void approveSuggestedMediaPeer();
   $('joinNetwork').onclick=()=>{renderMediaProviderSuggestions();modal('networkDialog');};$('closeNetwork').onclick=()=>close('networkDialog');
   $('suggestPeers').onclick=loadSuggestions;
   $('connectPeers').onclick=connectPeers;
@@ -2488,18 +2616,19 @@ function renderMediaProviderSuggestions(){
     target.append(row);
   }
 }
-async function loadSuggestions({silent=false}={}){
+async function loadSuggestions({silent=false,onlyMedia=false}={}){
   try{
     const data=await(await fetch('./peers.json',{cache:'no-store'})).json();
     if(data.format!=='web9000-peer-suggestions-v1'||!Array.isArray(data.peers)||data.peers.length>8)throw Error('Invalid peer directory');
     state.suggested=data.peers;
-    $('peerURLs').value=data.peers.map(x=>x.url).join('\n');
-    if(data.peers[0]?.mediaUrl){
+    if(!onlyMedia)$('peerURLs').value=data.peers.map(x=>x.url).join('\n');
+    if(!state.mediaBase&&!state.unconfirmedMediaURL&&data.peers[0]?.mediaUrl){
       // This is merely a proposed operator URL. Do NOT silently promote
       // it into state.mediaBase, persist it, or start fetching its bytes.
       // Only Connect -> connectPeers() can grant that media-gateway consent.
       $('mediaPeerUrl').value=normalizeMediaBase(data.peers[0].mediaUrl);
     }
+    updateMediaEnableButton();
     if(!silent)toast('Loaded '+data.peers.length+' voluntary peer suggestion(s). Review before connecting.');
   }catch(error){toast('Cannot load suggestions: '+error.message);}
 }
@@ -2522,6 +2651,7 @@ async function connectPeers(){
     state.autoDemoPeerDisabled=false;
     state.mesh.connect(urls,{spaces});
     await store();close('networkDialog');render();
+    updateMediaEnableButton();
     toast('Connecting to '+urls.length+' independent peer(s), '+
       (spaces.includes('*')?'all namespaces':spaces.length+' selected namespace(s)')+
       '; local records stay saved. Unverified posts remain hidden by default.');
@@ -2710,6 +2840,7 @@ async function init(){
     if(demo.space==='demo'&&/^ed25519:[A-Za-z0-9_-]{43}$/.test(demo.author)){
       state.demoAuthor=demo.author;
       state.demoAutoConnect=demo.autoConnectSameOrigin===true;
+      setFirstPartyMedia(demo.galleryPeer,demo.autoConnectSameOrigin===true);
     }
   }catch{}
   const hint=readSiteContext(location.href);
@@ -2746,13 +2877,18 @@ async function init(){
   $('mediaPeerUrl').value=state.mediaBase||state.unconfirmedMediaURL||'';
   $('mediaMirrorURLs').value=state.mediaMirrors.join('\n');
   bind();
+  restoreBufferedTraffic();
   // Pre-fill independently replaceable peer suggestions, without connecting.
   // Consent is still required to open any WebSocket or upload images.
-  if(!state.peers.length&&!state.mediaBase)await loadSuggestions({silent:true});
-  if(state.unconfirmedMediaURL){
+  // Peer discovery is separate from media discovery. A first-party media
+  // default must NOT suppress the same site's auto-connect WebSocket hint.
+  if(!state.peers.length||!activeMediaBase())
+    await loadSuggestions({silent:true,onlyMedia:state.peers.length>0});
+  if(state.unconfirmedMediaURL&&!state.firstPartyMediaBase){
     $('mediaPeerUrl').value=state.unconfirmedMediaURL;
-    toast('Previously stored media gateway needs your approval again. Review it in Join Network and click Connect.');
+    toast('Previously stored third-party media gateway needs approval. Use Enable images or Join Network.');
   }
+  updateMediaEnableButton();
   state.mesh=new BrowserPeerMesh({
     securePage:location.protocol==='https:',
     getPending:()=>state.outbox.map(x=>x.event),

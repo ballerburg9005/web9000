@@ -443,3 +443,36 @@ Owner simply requested continued WEB9000 work on `main`. The audit demonstrated 
 ### 2026-11-19: continue — reader-selected namespace metadata synchronization
 
 Owner prompted **"ok thanks continue"** after IPFS Bitswap hardening. Implemented reader-opted, persisted **public namespace synchronization scopes** in classic Join Network. Existing accounts default to `*` for backwards compatibility; the reader can enter one namespace per line, including names containing comma or semicolon, and voluntarily choose different scopes when connecting to independent peers. This is transport/storage interest, **not namespace authority, display follows or group membership**. A chosen peer sees the names of subscribed namespaces; a malicious peer can transmit unsolicited records on the wire, but browser-side verification refuses to *ingest* signed events outside the authorized scope. Old local signed records survive later scope changes; original signed publications may still be made to *any* namespace regardless of subscription. Added explicit parser/malicious-bridge checks, two independent Helia/OrbitDB peer checks, and four website origins proving persistence, historical group sync and scope changes. **Unfinished:** server-side indexed queries, missing-event/set reconciliation, signed checkpoints, efficient anti-entropy, independent discoverability, private subscription privacy and global completeness evidence. No change to the live demo peer default feed.
+
+
+## 2026-11-19: owner correction — NO inline debugging, console in top-right; image previews blocked
+
+Latest owner messages:
+
+> "Dump post
+> Dump comments
+>
+> this is shown inline but I want zero debug info inline I want a console that pops up from pressing debug in the top-right page menu bar. And there you have buttons and stuff and it shows live traffic and traffic that has already occured."
+
+> "also right now it shows like this: IPFS media · open to choose what to load ... only the video previews work and sound but the images don't load"
+
+> "No independent IPFS media gateway configured. The signed CID can be copied to another gateway.
+>
+> this is what it shows if I click manual"
+
+**Implemented direction:** Top-right HEADER Debug opens a modal. Remove `Dump post`, `Dump comments`, old raw signed-record copy and ID inspector buttons from post details and revision history; keep nondebug moderation/audit human-reading UI. The modal itself now provides post picker and Dump post/Dump comments buttons, filtered real signed records, live WebSocket trace with already recorded traffic, bounded per-tab saved packets through reload, pause/refresh and explicit copy/download. Do NOT claim historic packets from before the browser was ever running or remote libp2p packet captures.
+
+**Media failure root cause and repair:** earlier approved-gateway migration rightly stopped blindly accepting `peers.json` suggestions as active media hosts, but it produced an unusable manual-load path when the user hadn't approved the media host. UI now displays a clearly labeled **Enable images · HOST** action and manual **Load image from HOST** action; clicking either explicitly approves the proposed host and stores consent, allowing signed demo image CID preview to load without overriding the opt-in rule for unfamiliar authors. Keep offscreen thumbnail lazy loading and forbid automatic third-party media hosts or browser pinning.
+
+
+## 2026-11-19 owner correction — hosted images MUST load without a click
+
+The user immediately rejected the fresh **`Images off · enable media gateway above`** placeholder:
+
+> "Images off · enable media gateway above
+>
+> why is it off pls make it work again without user doing things"
+
+The previous change correctly prevented silent connections to arbitrary newly advertised *third-party* gateways, but its explicit-approval requirement for the same site's own WEB9000 media gateway contradicted the original imageboard experience. **New rule:** `v2/demo.json` on the current website can declare `galleryPeer` alongside `autoConnectSameOrigin:true`; only if that URL has the **exact same scheme, host AND port** as `location.origin` may the browser use it to load IPFS CID image/video/audio previews without asking. No new WebSocket authority, additional mirror or file pinning. All signed public image tiles should display automatically from this first-party endpoint, not only locally trusted authors. Unapproved external gateway suggestions, malicious cross-origin `galleryPeer` values, `media-provider` claims and secondary mirrors never become first-party. Keep a true manual gateway override for external sites, and never pretend auto site default is a user's consent in IndexedDB.
+
+Both static HTML entry points share `classic.js`, so this fixes the production demo without changing signatures or CID content. Tests: sixth independent website origin with same-origin CID gateway (also adversarial external configuration), hosted Chromium clean browser loads image immediately and after reload, no click; browser core and full integration.

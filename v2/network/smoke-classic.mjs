@@ -33,14 +33,23 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const base=await mkdtemp(path.join(os.tmpdir(),'w9-classic-'));
 const servers=[];
 let browser,libp2p,helia,orbitdb,index,bridge,mediaGateway,demoIdentity,demoCid,demoBytes;
-function serve(){
+function serve({firstPartyMedia=false,externalMediaClaim=false}={}){
  const mime={'.html':'text/html','.css':'text/css','.js':'text/javascript',
    '.jpg':'image/jpeg','.mp4':'video/mp4','.mp3':'audio/mpeg'};
  const server=createServer(async(req,res)=>{
    const url=new URL(req.url,'http://local.invalid');
    if(url.pathname==='/v2/demo.json'){
      res.writeHead(200,{'content-type':'application/json'});
-     res.end(JSON.stringify({version:1,space:'demo',author:demoIdentity.author}));
+     res.end(JSON.stringify({version:1,space:'demo',author:demoIdentity.author,
+       ...(firstPartyMedia?{
+         autoConnectSameOrigin:true,
+         galleryPeer:'http://127.0.0.1:'+server.address().port+'/v2/media/'
+       }:{}),
+       ...(externalMediaClaim?{
+         autoConnectSameOrigin:true,
+         galleryPeer:'http://127.0.0.1:'+mediaGateway.port+'/'
+       }:{})
+     }));
      return;
    }
    if(url.pathname==='/v2/peers.json'){
@@ -528,25 +537,33 @@ try{
  assert.equal(bridge.replica.list().filter(e=>e.payload.kind==='endorse').length,0,
    'local friend/foe preferences must not leak a public social graph');
 
- // The post's source actions go to one raw console rather than clipboard.
+ // Raw inspection has NO inline post controls. The only entry point is
+ // the top-right Debug menu and all dump actions happen inside that console.
  assert.equal(await b.$$eval('.reactions button',items=>
-   items.filter(e=>e.textContent.includes('Copy signed record')||
-     e.textContent.includes('Trust author')).length),0);
- await b.evaluate(()=>[...document.querySelectorAll('.reactions button')]
-   .find(x=>x.textContent==='Dump post').click());
+   items.filter(e=>/Dump post|Dump comments|Copy signed record|Trust author/.test(e.textContent)).length),0);
+ assert.equal(await b.$eval('.classic-toolbar',e=>e.querySelector('#debugConsoleButton')),null);
+ assert.ok(await b.$eval('#topHeader',e=>e.querySelector('#debugConsoleButton')));
+ await b.click('#debugConsoleButton');
  assert.equal(await b.$eval('#debugDialog',el=>el.open),true);
+ assert.equal(await b.$eval('#debugSource',el=>el.value),'network');
+ const history=await b.$eval('#debugEntries .debug-record',el=>el.textContent);
+ assert.match(history,/batch|subscribe|hello|event|ack|sync|publish/i,
+   'top-right debug immediately displays buffered traffic from before it opened');
+ const selectedDump=await b.$eval('.post.selected',el=>el.dataset.id);
+ await b.$eval('#debugPostPick',(el,id)=>{el.value=id;el.dispatchEvent(new Event('change'));},selectedDump);
+ await b.click('#debugDumpPost');
  assert.equal(await b.$eval('#debugSource',el=>el.value),'dump');
  assert.ok((await b.$eval('#debugRaw',el=>el.textContent)).includes('"signature"'),
-   'post dump must contain full signed event envelope');
- await b.evaluate(()=>document.getElementById('debugKind').value='post');
- await b.evaluate(()=>document.getElementById('debugKind').dispatchEvent(new Event('input')));
+   'console post dump must contain full signed event envelope');
+ await b.evaluate(()=>{
+   document.getElementById('debugKind').value='post';
+   document.getElementById('debugKind').dispatchEvent(new Event('input'));
+ });
  assert.ok(await b.$$eval('#debugEntries .debug-record',items=>items.length)>=1);
- await b.click('#closeDebug');
- await b.evaluate(()=>[...document.querySelectorAll('.reactions button')]
-   .find(x=>x.textContent==='Dump comments').click());
+ await b.click('#debugDumpComments');
  assert.equal(await b.$eval('#debugSource',el=>el.value),'dump');
  assert.ok((await b.$eval('#debugRaw',el=>el.textContent))
-   .includes('A separate, real signed comment'),'comments dump must expose the signed discussion tree');
+   .includes('A separate, real signed comment'),'console comment dump exposes the signed discussion tree');
  await b.evaluate(()=>{
    document.getElementById('debugSource').value='network';
    document.getElementById('debugSource').dispatchEvent(new Event('change'));
@@ -1261,6 +1278,179 @@ try{
  assert.equal(afterScopeChange.some(e=>e.id===other.id),false,
    'switching to groups does not silently load unrelated namespace');
  console.log('CLASSIC checkpoint 22: fourth-origin opt-in namespace subscriptions, persisted scopes, independent publication and local record retention');
+
+ // The source server suggests a media gateway but cannot approve it by
+ // itself. A visible user click on a specific image MUST work, not produce
+ // the old 'No independent IPFS media gateway configured' dead end.
+ const sampleImage=DEMO_CATALOG.find(spec=>spec.type==='image'&&!spec.noThumb&&!spec.video);
+ assert.ok(sampleImage,'demo catalog includes an actual signed CID image');
+ const originE=await serve({externalMediaClaim:true}),e=await browser.newPage();
+ e.on('pageerror',err=>errors.push('e: '+err.message));
+ await e.goto(originE,{waitUntil:'domcontentloaded'});await ready(e);
+ assert.equal(await e.$eval('#enableImages',button=>button.hidden),false,
+   'page offers one-click explicit media approval rather than an unexplained placeholder');
+ assert.match(await e.$eval('#enableImages',button=>button.textContent),/Enable images/);
+ await e.evaluate(url=>{
+   document.querySelector('#joinNetwork').click();
+   document.querySelector('#peerURLs').value=url;
+   // Deliberately approve the WebSocket peer WITHOUT approving its suggested
+   // media gateway, to reproduce the user's already-connected state.
+   document.querySelector('#mediaPeerUrl').value='';
+   document.querySelector('#connectPeers').click();
+ },bridge.url);
+ await eventually(()=>e.evaluate(title=>[...document.querySelectorAll('#imageGrid .post')]
+   .some(el=>el.querySelector('.post-headline')?.textContent===title),
+ sampleImage.title),'media-consent test origin received signed demo image',20000);
+ const candidate=await e.evaluate(title=>{
+   const tile=[...document.querySelectorAll('#imageGrid .post')]
+     .find(el=>el.querySelector('.post-headline')?.textContent===title);
+   return {placeholder:!!tile.querySelector('.post-reveal'),title:tile.textContent.slice(0,80)};
+ },sampleImage.title);
+ assert.ok(candidate.placeholder,'unapproved media is not downloaded merely from an IPFS CID');
+ await e.evaluate(title=>[...document.querySelectorAll('#imageGrid .post')]
+   .find(el=>el.querySelector('.post-headline')?.textContent===title).click(),sampleImage.title);
+ const manualLabel=await e.$eval('.expanded-body .media-ref button',button=>button.textContent);
+ assert.match(manualLabel,/Load image from /,'manual load names the proposed gateway');
+ await e.evaluate(()=>document.querySelector('.expanded-body .media-ref button').click());
+ await eventually(()=>e.evaluate(()=>[...document.querySelectorAll('.expanded-body .media-ref img')]
+   .some(img=>img.complete&&img.naturalWidth>0)),
+   'manual image loads from expressly approved suggested gateway',20000);
+ const approved=await e.evaluate(async()=>{
+   const {openLocal,getItem}=await import('./core/persist.js');
+   const db=await openLocal();
+   try{return {media:await getItem(db,'classic-media-url'),
+     consent:await getItem(db,'classic-media-approved-v1')};}
+   finally{db.close();}
+ });
+ assert.equal(approved.media,'http://127.0.0.1:'+mediaGateway.port);
+ assert.equal(approved.consent,true);
+ assert.equal(await e.$eval('#enableImages',button=>button.hidden),true);
+ await sleep(850); // allow bounded session traffic history to flush before reload
+ await e.reload({waitUntil:'domcontentloaded'});await ready(e);
+ try{
+   await eventually(()=>e.evaluate(title=>[...document.querySelectorAll('#imageGrid .post')]
+     .some(el=>el.querySelector('.post-headline')?.textContent===title),sampleImage.title),
+     'restored post after reload',20000);
+ }catch(error){
+   const diagnostic=await e.evaluate(async title=>{
+     const {openLocal,getItem}=await import('./core/persist.js');
+     const db=await openLocal();
+     try{
+       return {wanted:title,selected:document.querySelector('#spaceName')?.value,
+        posts:[...document.querySelectorAll('#imageGrid .post-headline')].slice(0,30).map(e=>e.textContent),
+        peer:document.querySelector('#peerStatus')?.textContent,
+        feed:document.querySelector('#feedStatus')?.textContent,
+        approved:await getItem(db,'classic-media-approved-v1'),
+        media:await getItem(db,'classic-media-url'),
+        saved:(await getItem(db,'records')||[]).length,
+        urls:await getItem(db,'peer-urls'),
+        errors:document.querySelector('#toast')?.textContent};
+     }finally{db.close();}
+   },sampleImage.title);
+   console.error('MISSING_RESTORED_POST',JSON.stringify(diagnostic));
+   throw error;
+ }
+ await e.evaluate(title=>[...document.querySelectorAll('#imageGrid .post')]
+   .find(el=>el.querySelector('.post-headline')?.textContent===title)
+   .scrollIntoView({block:'center',behavior:'instant'}),sampleImage.title);
+ try{
+   await eventually(()=>e.evaluate(title=>[...document.querySelectorAll('#imageGrid .post')]
+     .some(el=>el.querySelector('.post-headline')?.textContent===title&&
+       el.querySelector('.post-thumb')?.naturalWidth>0),sampleImage.title),
+     'CID thumbnail is now visible after explicit reader approval and reload',20000);
+ }catch(error){
+   const diagnostic=await e.evaluate(async title=>{
+     const {openLocal,getItem}=await import('./core/persist.js');
+     const db=await openLocal();
+     const entries=await getItem(db,'records')||[];
+     const pref=await getItem(db,'classic-media-url'),consent=await getItem(db,'classic-media-approved-v1');
+     db.close();
+     const el=[...document.querySelectorAll('#imageGrid .post')].find(card=>
+       card.querySelector('.post-headline')?.textContent===title);
+     return {title,postCount:document.querySelectorAll('#imageGrid .post').length,
+       peer:document.querySelector('#peerStatus').textContent,
+       saved:entries.length,mediaPref:pref,consent,selectedSpace:document.querySelector('#spaceName').value,
+       tile:el?.outerHTML.slice(0,1050),
+       headerEnableHidden:document.querySelector('#enableImages').hidden,
+       errorText:document.querySelector('#toast').textContent};
+   },sampleImage.title);
+   console.error('RELOADED_IMAGE_DIAGNOSTIC',JSON.stringify(diagnostic));
+   throw error;
+ }
+ await e.click('#debugConsoleButton');
+ assert.equal(await e.$eval('#debugSource',el=>el.value),'network');
+ assert.ok(await e.$$eval('#debugEntries .debug-record',entries=>entries.length)>0,
+   'previously captured traffic survives the reload and appears when Debug opens');
+ assert.ok(await e.$eval('#debugPostPick',el=>el.options.length)>0);
+ await e.click('#debugDumpPost');
+ assert.ok((await e.$eval('#debugRaw',el=>el.textContent)).includes('"signature"'));
+ await e.click('#debugDumpComments');
+ assert.equal(await e.$eval('#debugSource',el=>el.value),'dump');
+ await e.$eval('#debugSource',el=>{el.value='network';el.dispatchEvent(new Event('change'));});
+ await e.$eval('#debugLive',el=>{el.checked=false;el.dispatchEvent(new Event('change'));});
+ const beforePause=await e.$$eval('#debugEntries .debug-record',entries=>entries.length);
+ const later=await signEvent(demoIdentity,{kind:'post',space:'demo',
+   body:{title:'Live traffic after console opened',text:'Signed update while Debug is paused'}});
+ await index.publish(later);
+ await eventually(()=>e.evaluate(id=>
+   JSON.parse(sessionStorage.getItem('web9000-debug-traffic-v1')||'[]')
+     .some(entry=>entry.raw.includes(id)),later.id),
+   'new signed network packet buffered while live view is paused');
+ assert.equal(await e.$$eval('#debugEntries .debug-record',entries=>entries.length),
+   beforePause,'pause stops redrawing while still buffering signed network packets');
+ await e.click('#debugRefresh');
+ assert.ok(await e.$$eval('#debugEntries .debug-record',entries=>entries.length)>=beforePause);
+ assert.equal(await e.$eval('#debugLive',el=>el.checked),false,
+   'Refresh does not silently enable live view');
+ await e.click('#closeDebug');
+ console.log('CLASSIC checkpoint 23: explicit third-party image gateway approval, real CID image and thumbnails, header-only Debug, live pause and buffered traffic after reload');
+
+ // WEB9000's own same-origin media endpoint is not a third-party peer.
+ // Its signed CID pictures should simply be visible, on a fresh browser
+ // without a hidden opt-in click or a forged approval record.
+ const originF=await serve({firstPartyMedia:true}),f=await browser.newPage();
+ f.on('pageerror',error=>errors.push('f: '+error.message));
+ await f.goto(originF,{waitUntil:'domcontentloaded'});await ready(f);
+ assert.equal(await f.$eval('#enableImages',b=>b.hidden),true,
+   'same-origin media images must not display Enable images to fresh readers');
+ // The site's same-origin WebSocket auto-connect and first-party media must
+ // both work without a single reader click on a new browser origin.
+ await eventually(()=>f.evaluate(title=>[...document.querySelectorAll('#imageGrid .post')]
+   .some(tile=>tile.querySelector('.post-headline')?.textContent===title),
+   sampleImage.title),'first-party board receives signed images',20000);
+ await f.evaluate(title=>[...document.querySelectorAll('#imageGrid .post')]
+   .find(tile=>tile.querySelector('.post-headline')?.textContent===title)
+   .scrollIntoView({block:'center',behavior:'instant'}),sampleImage.title);
+ await eventually(()=>f.evaluate(title=>[...document.querySelectorAll('#imageGrid .post')]
+   .some(tile=>tile.querySelector('.post-headline')?.textContent===title&&
+     tile.querySelector('img.post-thumb')?.naturalWidth>0),sampleImage.title),
+   'first-party signed CID images load without an approval click',20000);
+ const siteMediaState=await f.evaluate(async()=>{
+   const {openLocal,getItem}=await import('./core/persist.js'),db=await openLocal();
+   try{return {
+     autoMedia:document.querySelector('.post[data-index] img.post-thumb')?.src,
+     manuallyApproved:await getItem(db,'classic-media-approved-v1'),
+     manuallySelectedURL:await getItem(db,'classic-media-url'),
+     manualEnableHidden:document.querySelector('#enableImages').hidden
+   };}finally{db.close();}
+ });
+ assert.equal(siteMediaState.manuallyApproved,false,
+   'an automatic same-origin image must not forge user approval for third parties');
+ assert.equal(siteMediaState.manuallySelectedURL,null,
+   'default same-origin media never persists as a user-picked third-party gateway');
+ assert.ok(siteMediaState.autoMedia?.startsWith(new URL(originF).origin+'/v2/media/ipfs/'));
+ await f.reload({waitUntil:'domcontentloaded'});await ready(f);
+ await eventually(()=>f.evaluate(title=>[...document.querySelectorAll('#imageGrid .post')]
+   .some(tile=>tile.querySelector('.post-headline')?.textContent===title),
+   sampleImage.title),'first-party reload obtains signed image post',20000);
+ await f.evaluate(title=>[...document.querySelectorAll('#imageGrid .post')]
+   .find(tile=>tile.querySelector('.post-headline')?.textContent===title)
+   .scrollIntoView({block:'center',behavior:'instant'}),sampleImage.title);
+ await eventually(()=>f.evaluate(title=>[...document.querySelectorAll('#imageGrid .post')]
+   .some(tile=>tile.querySelector('.post-headline')?.textContent===title&&
+     tile.querySelector('img.post-thumb')?.naturalWidth>0),sampleImage.title),
+   'same-origin image still auto loads after reload',20000);
+ console.log('CLASSIC checkpoint 24: same-origin real IPFS thumbnails load on first visit without clicks, third-party peer suggestions stay opt-in');
 
  console.log('PASS classic board, threads, audit, attributes, identity portability and append-only revision/withdrawal');
 }finally{

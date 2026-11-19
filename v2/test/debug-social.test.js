@@ -47,5 +47,14 @@ test('debug trace bounded, raw frames preserved except explicit truncation; no s
  assert.equal(trace.entries[0].raw.length,512);
  assert.equal(trace.entries[0].truncated,true);
  assert.equal(trace.entries[0].originalCharacters,900);
+ const saved=JSON.parse(JSON.stringify(trace.entries));
+ const restored=new DebugTrace({limit:2,bytesPerPacket:512});
+ assert.equal(restored.restore(saved),2,'recent trace restores from untrusted session data');
+ assert.deepEqual(restored.entries,saved);
+ restored.push({direction:'in',type:'new',packet:'fresh'});
+ assert.ok(restored.entries[1].seq>saved[1].seq,
+   'stable packet IDs cannot collide across same-tab reload');
+ assert.equal(restored.restore([{raw:'bad',seq:'bad'},null]),0,
+   'invalid persisted traffic is ignored rather than rendered or executed');
  trace.clear();assert.deepEqual(trace.entries,[]);
 });

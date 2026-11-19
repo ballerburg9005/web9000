@@ -55,13 +55,33 @@ export class DebugTrace{
  constructor({limit=250,bytesPerPacket=16384}={}){
   this.limit=Math.max(1,Math.min(limit,1000));
   this.bytesPerPacket=Math.max(512,Math.min(bytesPerPacket,65536));
-  this.entries=[];
+  this.entries=[];this.nextSequence=1;
+ }
+ restore(entries){
+  if(!Array.isArray(entries))return 0;
+  const restored=[];
+  for(const item of entries.slice(-this.limit)){
+   if(!item||typeof item!=='object'||!Number.isSafeInteger(item.seq)||
+      item.seq<1||typeof item.raw!=='string'||item.raw.length>this.bytesPerPacket||
+      typeof item.at!=='string'||typeof item.direction!=='string'||
+      typeof item.peer!=='string'||typeof item.type!=='string')continue;
+   restored.push({
+    seq:item.seq,at:item.at.slice(0,40),direction:item.direction.slice(0,32),
+    peer:item.peer.slice(0,512),type:item.type.slice(0,60),
+    message:typeof item.message==='string'?item.message.slice(0,1000):'',
+    raw:item.raw,truncated:item.truncated===true,
+    originalCharacters:Number.isSafeInteger(item.originalCharacters)?item.originalCharacters:item.raw.length
+   });
+  }
+  this.entries=restored;
+  this.nextSequence=1+Math.max(0,...restored.map(x=>x.seq));
+  return restored.length;
  }
  push({direction='local',peer='',packet,type='status',message=''}={}){
   const source=typeof packet==='string'?packet:packet===undefined?'':
     JSON.stringify(packet);
   const truncated=source.length>this.bytesPerPacket;
-  const item={at:new Date().toISOString(),direction,peer:String(peer).slice(0,512),
+  const item={seq:this.nextSequence++,at:new Date().toISOString(),direction,peer:String(peer).slice(0,512),
     type:String(type).slice(0,60),message:String(message).slice(0,1000),
     raw:source.slice(0,this.bytesPerPacket),truncated,
     originalCharacters:source.length};

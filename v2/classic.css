@@ -20,6 +20,15 @@ a{color:#b3dce3}a:hover{color:#f2d395}button:focus-visible,a:focus-visible,input
 .menu #postNew:hover{background:#ffdd84}
 .join-network{color:#ded9d9;background:#262329;border-radius:2px}
 .join-network:hover{background:#363039}.join-network.connected{color:var(--green)}
+/* Debug is a dedicated top-right pop-up, not a panel inside a post. */
+.header-debug{border:1px solid #51485a;border-radius:2px;background:#29232e;
+ color:#dfd0df;white-space:nowrap;padding:7px 11px;font-size:11px;
+ font-weight:700;flex:0 0 auto}
+.header-debug:hover,.header-debug:focus-visible{background:#423346;color:#fff}
+.enable-media{background:#41352a;border:1px solid #80644a;border-radius:2px;
+ color:#f2d6a6;padding:5px 9px;font-size:11px;white-space:nowrap}
+.enable-media:hover{background:#625033}
+
 .search-wrap{position:relative;display:flex;align-items:center;flex:1;max-width:310px;min-width:100px;
  background:#1c1a1e;border-radius:3px;border-bottom:1px solid #484149}
 .search-wrap:focus-within{border-bottom-color:var(--gold)}
@@ -222,6 +231,7 @@ dialog::backdrop{background:#000b}
  .grid{grid-template-columns:repeat(4,minmax(0,1fr))}
  .header{flex-wrap:wrap;gap:6px}.menu{order:3;flex-basis:100%;justify-content:center}
  .menu .search-wrap{max-width:none}.classic-toolbar .peer-state{margin-left:0}
+ .join-network{margin-left:auto}
 }
 @media(max-width:620px){
  .grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:3px}
@@ -237,6 +247,14 @@ dialog::backdrop{background:#000b}
  .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
  .two-cols{grid-template-columns:1fr}.logo{font-size:17px}
  .classic-toolbar{gap:6px}.post .post-headline{font-size:10px}
+}
+@media(max-width:350px){
+ /* Under 350px, five non-wrapping menu buttons and search cannot share
+    a single row. Keep the controls usable without horizontal scrolling. */
+ .menu{flex-wrap:wrap;justify-content:flex-start;gap:2px}
+ .menu>button{padding:5px 6px;font-size:11px}
+ .menu #postNew{margin-left:auto;padding:5px 8px}
+ .menu .search-wrap{order:5;flex:1 1 100%;max-width:none}
 }
 /* Multi-photo media navigates within one expanded post, without overlapping it. */
 .media-gallery{display:flex;flex-direction:column;align-items:center;gap:6px;width:100%}
@@ -757,7 +775,19 @@ dialog::backdrop{background:#000b}
 .debug-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
 .debug-filters label{display:flex;flex-direction:column;gap:3px;min-width:0;color:#c6b9cc;font-size:10px}
 .debug-dialog .debug-filters input,.debug-dialog .debug-filters select{width:100%;min-width:0;background:#1d1a20;color:#eee;border:1px solid #514553;padding:5px 6px;font:11px ui-monospace,monospace}
-.debug-actions{display:flex;flex-wrap:wrap;gap:5px}
+.debug-post-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap;
+ border:1px solid #463949;background:#201b24;padding:6px 8px}
+.debug-post-tools label{min-width:180px;flex:1;display:flex;align-items:center;
+ gap:8px;color:#cfbccd;font-size:11px}
+.debug-post-tools select{min-width:120px;flex:1;max-width:100%;
+ border:1px solid #584a5c;background:#161419;color:#eae0ec;
+ padding:5px;font:11px ui-monospace,monospace}
+.debug-post-tools button{border:1px solid #765f53;background:#493b40;
+ color:#f1e2db;font-size:11px;padding:6px 9px}
+.debug-actions{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.debug-live-toggle{display:flex;align-items:center;gap:4px;
+ font-size:11px;color:#b3e1bd;padding:3px 6px}
+.debug-live-toggle:has(input:not(:checked)){color:#dfbd89}
 .debug-actions button{padding:5px 9px;background:#3b303f;border:1px solid #534458;color:#e8dce5;font-size:10px}
 .debug-layout{display:grid;grid-template-columns:minmax(0,36%) minmax(0,1fr);min-height:235px;max-height:55vh;border:1px solid #493d49}
 .debug-entries{background:#1f1b23;min-width:0;overflow:auto;max-height:55vh;display:flex;flex-direction:column;align-items:stretch}
@@ -777,6 +807,10 @@ dialog::backdrop{background:#000b}
  .debug-entries{max-height:115px}
  .debug-raw{min-height:200px;max-height:calc(59vh - 115px)}
  .debug-dialog .dialog-inner{padding:10px}
+ .debug-post-tools label{flex:1 1 100%}
+ .debug-post-tools button{flex:1;min-width:95px}
+ .header-debug{padding:7px 8px;font-size:11px}
+
 }
 
 .debug-social-row{display:flex;align-items:center;gap:4px;border-bottom:1px solid #3a313c}

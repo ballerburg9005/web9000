@@ -56,6 +56,7 @@
 <button type="button" id="postNew" title="Create post">✎ Post</button>
 </nav>
 <button class="join-network" id="joinNetwork" type="button">Join Network</button>
+<button id="debugConsoleButton" class="header-debug" type="button" title="Live and buffered decentralized traffic, signed records and raw inspection">Debug</button>
 </header>
 <nav id="spaceNav" class="space-nav" aria-label="Public namespaces">
   <span class="space-nav-title">Spaces</span><div id="spaceLinks" class="space-links"></div>
@@ -74,7 +75,7 @@
 <label><input type="checkbox" id="showUnverified"> Show unstaked / unverified (raw lane)</label>
 <button id="identityButton" type="button" title="Your profile and portable signing identity">My account</button>
 <button id="mockKarmaButton" type="button">Test karma</button>
-<button id="debugConsoleButton" type="button" title="Inspect signed events, peer packets and personal relationships">Debug</button>
+<button id="enableImages" type="button" class="enable-media" hidden title="Approve a voluntary IPFS media gateway to view image previews">Enable IPFS images</button>
 <span id="mockModeLabel" class="mock-active" hidden></span>
 <span class="peer-state" id="peerStatus">Local, disconnected</span>
 <a href="./dashboard.html" class="subtle-link">Developer dashboard (experimental)</a>
@@ -131,7 +132,7 @@
   <div id="debugSummary" class="debug-summary" aria-live="polite"></div>
   <div class="debug-filters">
     <label>Source <select id="debugSource">
-      <option value="events">Signed events</option><option value="network">Network packets</option>
+      <option value="network">Traffic (live + recent)</option><option value="events">Signed records</option>
       <option value="dump">Post / comment dump</option><option value="social">Friends / foes</option>
       <option value="system">Peers, IPFS, replica & policy</option>
     </select></label>
@@ -141,7 +142,13 @@
     <label>Search raw JSON <input id="debugSearch" placeholder="CID, event ID, text…"></label>
     <label>Limit <select id="debugLimit"><option>50</option><option selected>150</option><option>300</option><option>500</option></select></label>
   </div>
+  <div class="debug-post-tools">
+    <label>Inspect locally stored post <select id="debugPostPick" aria-label="Choose a signed post to inspect"></select></label>
+    <button type="button" id="debugDumpPost">Dump post</button>
+    <button type="button" id="debugDumpComments">Dump comments</button>
+  </div>
   <div class="debug-actions">
+    <label class="debug-live-toggle"><input id="debugLive" type="checkbox" checked> Live view</label>
     <button type="button" id="debugRefresh">Refresh</button>
     <button type="button" id="debugCopy">Copy selected JSON</button>
     <button type="button" id="debugExport">Download filtered JSON</button>
