@@ -59,6 +59,11 @@ jobs:
           node --check v2/network/source-compartments.test.mjs
           node --check v2/network/signed-shard-directory.mjs
           node --check v2/network/signed-shard-directory.test.mjs
+          node --check v2/network/priority-shard-loader.mjs
+          node --check v2/network/priority-shard-loader.test.mjs
+          node --check v2/network/benchmark-priority-recovery.mjs
+          node --check v2/network/isolated-tier-worker.mjs
+          node --check v2/network/isolated-tier-worker.test.mjs
           node --check v2/network/smoke-browser.mjs
           node --check v2/network/smoke-islands.mjs
           node --check v2/network/mirror-policy.js
@@ -135,6 +140,14 @@ jobs:
         working-directory: v2/network
         timeout-minutes: 2
         run: npm run test:adaptive-tiers
+      - name: Prioritize bounded physical shard subscriptions and verify real stored history
+        working-directory: v2/network
+        timeout-minutes: 2
+        run: npm run test:priority-tiers
+      - name: Kill flooded entry worker without taking down independently curated Helia peer
+        working-directory: v2/network
+        timeout-minutes: 2
+        run: npm run test:isolated-worker
       - name: Real headless Chromium browser across independent HTTP origins
         working-directory: v2/network
         timeout-minutes: 3

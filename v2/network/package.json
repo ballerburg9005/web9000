@@ -40,6 +40,8 @@
     "test:media-providers": "node --test announce-media.test.mjs",
     "test:qualified": "node smoke-qualified.mjs",
     "test:adaptive-tiers": "node --test adaptive-tier-router.test.mjs source-compartments.test.mjs signed-shard-directory.test.mjs",
+    "test:priority-tiers": "node --test priority-shard-loader.test.mjs",
+    "test:isolated-worker": "node --test isolated-tier-worker.test.mjs",
     "test:live-ui": "node live-ui-qa.mjs",
     "test:media-bitswap": "node --test media-bitswap-policy.test.mjs"
   },
