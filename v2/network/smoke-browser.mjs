@@ -87,7 +87,39 @@ try{
   // signed records from a willing mirror without referencing the original host.
   const fresh=browser();fresh.mesh.connect([b.bridge.url]);
   await eventually(()=>fresh.received.has(first.id)&&fresh.received.has(second.id),'portable anti-entropy replay');
-  console.log('PASS browser WebSocket clients publish into any space and sync through separate OrbitDB peers');
+
+  // The bridge already supports per-namespace subscriptions; verify that
+  // an opted-in browser reads only the selected namespace across two
+  // independent Helia/OrbitDB nodes. Publishing is still permissionless.
+  const scoped=browser();
+  scoped.mesh.connect([b.bridge.url],{spaces:['a-rival-websites-name']});
+  await eventually(()=>scoped.received.has(first.id)&&scoped.received.has(second.id),
+    'scoped browser receives historical selected namespace');
+  const unrelated=await signEvent(ia,{
+    space:'another-independent-namespace',
+    body:{title:'Do not replicate to unrelated readers',text:'Scope is reader-chosen'}
+  });
+  alice.mesh.publish(unrelated);
+  await eventually(()=>alice.acks.has(unrelated.id),'unsolicited different-namespace post published');
+  await eventually(()=>fresh.received.has(unrelated.id),
+    'wildcard subscriber obtains the other namespace');
+  await sleep(350);
+  assert.equal(scoped.received.has(unrelated.id),false,
+    'both scoped bridge and scoped browser exclude unrelated signed events');
+  const submittedFromScoped=await signEvent(ib,{
+    space:'outside-my-current-subscription',
+    body:{title:'Publication rights are independent of subscription',
+      text:'Subscribe to one space, publish to any other public namespace'}
+  });
+  assert.equal(scoped.mesh.publish(submittedFromScoped),1,
+    'subscription scopes cannot restrict a user from submitting a signed post');
+  await eventually(()=>scoped.acks.has(submittedFromScoped.id),
+    "peer acknowledges signed publication outside reader's scope");
+  await eventually(()=>fresh.received.has(submittedFromScoped.id),
+    "other browsers receive scoped reader's independent publication");
+  assert.equal(scoped.received.has(submittedFromScoped.id),false,
+    'own out-of-scope signed post is not falsely marked as subscribed history');
+  console.log('PASS browser WebSocket clients publish into any namespace, including outside reader-chosen sync scopes');
 }finally{
   for(const client of clients)client.disconnect();
   for(const p of peers.reverse()){

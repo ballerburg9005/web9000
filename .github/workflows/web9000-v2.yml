@@ -36,6 +36,7 @@ jobs:
           node --check v2/core/media-policy.js
           node --check v2/test/media-policy.test.js
           node --check v2/network/browser-mesh.js
+          node --check v2/network/scoped-sync.test.mjs
           node --check v2/network/browser-bridge.mjs
           node --check v2/network/smoke-browser.mjs
           node --check v2/network/smoke-islands.mjs
@@ -89,6 +90,10 @@ jobs:
         working-directory: v2/network
         timeout-minutes: 3
         run: npm run test:browser-bridge
+      - name: Reject out-of-scope signed events from misbehaving peer bridges
+        working-directory: v2/network
+        timeout-minutes: 1
+        run: npm run test:scopes
       - name: Unrelated OrbitDB indexes joined only by optional browser mirroring
         working-directory: v2/network
         timeout-minutes: 3

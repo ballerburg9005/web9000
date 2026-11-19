@@ -157,6 +157,9 @@
 <div class="dialog-title"><strong>Choose independent peers</strong><button id="closeNetwork" type="button" aria-label="Close">×</button></div>
 <p>Peer listings are suggestions, never a mandatory registry or authority. Each peer may refuse to replicate content; anybody can run a different one. Browser WebSocket connections expose your IP to the chosen operator.</p>
 <label>Peer WebSocket addresses (one per line)<textarea id="peerURLs" rows="3" spellcheck="false" placeholder="wss://your-peer.example/ws/"></textarea></label>
+<label>Sync namespaces (one per line, <code>*</code> = all)
+<textarea id="peerScopes" rows="2" spellcheck="false" maxlength="12000" placeholder="commons&#10;demo&#10;groups">*</textarea></label>
+<p class="fine">Store only new signed metadata from these namespaces; your peers can see this interest list. Old local records remain, and anyone may still publish anywhere. Include the governance namespace to sync group decisions.</p>
 <label>Independent media peer (optional) <input id="mediaPeerUrl" type="url" placeholder="https://example.org/media/"></label>
 <label>Backup media peers (optional, one URL per line)
 <textarea id="mediaMirrorURLs" rows="2" spellcheck="false" placeholder="https://another-volunteer.example/media/"></textarea></label>

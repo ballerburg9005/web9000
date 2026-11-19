@@ -4,7 +4,7 @@ import {generateIdentity,signEvent,shortAuthor} from './core/events.js';
 import {Replica} from './core/replica.js';
 import {openLocal,getItem,setItem} from './core/persist.js';
 import {buildFeed,DEFAULT_POLICY} from './core/policy.js';
-import {BrowserPeerMesh,parsePeerUrls} from './network/browser-mesh.js';
+import {BrowserPeerMesh,parsePeerUrls,parseSyncSpaces,normalizeSyncSpaces} from './network/browser-mesh.js';
 import {readSiteContext} from './network/site-context.js';
 import {MockKarmaProvider} from './core/mock-karma.js';
 import {exportIdentityBackup,importIdentityBackup} from './core/identity-backup.js';
@@ -21,7 +21,7 @@ import {discussionRecords,filterDebugEntries,summarizeSignedEvents,DebugTrace} f
 const $=id=>document.getElementById(id);
 const state={
   db:null,identity:null,replica:new Replica({maxEvents:25000}),saved:[],outbox:[],
-  peers:[],mesh:null,suggested:[],mediaBase:null,mediaMirrors:[],
+  peers:[],peerScopes:['*'],mesh:null,suggested:[],mediaBase:null,mediaMirrors:[],
   mediaApprovalV1:false,unconfirmedMediaURL:null,
   space:'commons',profileAuthor:null,sort:'new',view:'grid',search:'',showUnverified:false,
   ownerHint:null,respectOwner:true,respectWithdrawals:true,selected:null,trust:[],ignoredLabels:[],audit:false,showMedia:false,
@@ -99,7 +99,8 @@ function debugRecordEntries(source){
         completeness:'Local signed record set only; any peer may hold additional records'}},
       {kind:'websocket-peers',space:'network',raw:{
         kind:'websocket-peers',approvedAddresses:[...state.peers],
-        connected:state.mesh?.connected||0,sessionSubscriptions:state.mesh?.scopes||[],
+        connected:state.mesh?.connected||0,configuredSubscriptions:[...state.peerScopes],
+        sessionSubscriptions:state.mesh?.scopes||[],
         syncedThisSession:state.mesh?.syncedCount||0,
         outbox:state.outbox.map(item=>({
           id:item.event?.id,kind:item.event?.payload?.kind,
@@ -710,7 +711,8 @@ function updateNetworkStatus(){
   if(!state.identity)return;
   $('peerStatus').textContent=(state.mesh?.connected||0)+' peer(s) · '+
     allEvents().filter(e=>e.payload.kind==='post').length+
-    ' signed posts · '+state.outbox.length+' queued';
+    ' signed posts · '+state.outbox.length+' queued'+
+    (state.peerScopes.includes('*')?'':' · '+state.peerScopes.length+' sync scope(s)');
   $('joinNetwork').textContent=state.mesh?.connected?'◉ Network':'Join Network';
   $('joinNetwork').classList.toggle('connected',!!state.mesh?.connected);
   $('mockModeLabel').hidden=!state.mockMode;
@@ -884,6 +886,7 @@ async function store(){
     setItem(state.db,'records',state.saved),
     setItem(state.db,'outbox',state.outbox),
     setItem(state.db,'peer-urls',state.peers),
+    setItem(state.db,'peer-namespace-subscriptions',state.peerScopes),
     setItem(state.db,'classic-space',state.space),
     setItem(state.db,'classic-trust',state.trust),
     setItem(state.db,'classic-social-relations',state.relations),
@@ -2504,6 +2507,7 @@ async function connectPeers(){
   try{
     const urls=parsePeerUrls($('peerURLs').value,location.protocol==='https:');
     if(!urls.length)throw Error('Enter one or more peer addresses');
+    const spaces=parseSyncSpaces($('peerScopes').value);
     const mediaBase=normalizeMediaBase($('mediaPeerUrl').value);
     const mediaMirrors=parseMediaGateways($('mediaMirrorURLs').value,{
       securePage:location.protocol==='https:'});
@@ -2514,10 +2518,13 @@ async function connectPeers(){
     state.mediaApprovalV1=true;
     state.unconfirmedMediaURL=null;
     state.peers=urls;
+    state.peerScopes=spaces;
     state.autoDemoPeerDisabled=false;
-    state.mesh.connect(urls,{spaces:['*']});
+    state.mesh.connect(urls,{spaces});
     await store();close('networkDialog');render();
-    toast('Connecting to '+urls.length+' independent peer(s); unverified content remains hidden by default.');
+    toast('Connecting to '+urls.length+' independent peer(s), '+
+      (spaces.includes('*')?'all namespaces':spaces.length+' selected namespace(s)')+
+      '; local records stay saved. Unverified posts remain hidden by default.');
   }catch(error){toast('Connection setup: '+error.message);}
 }
 function parseCSV(value){return [...new Set(value.split(/[,;\n]/).map(x=>x.trim().toLowerCase()).filter(validTag))].slice(0,24);}
@@ -2659,6 +2666,9 @@ async function init(){
   for(const event of state.saved)await state.replica.ingest(event);
   state.outbox=await getItem(state.db,'outbox')||[];
   state.peers=await getItem(state.db,'peer-urls')||[];
+  try{
+    state.peerScopes=normalizeSyncSpaces(await getItem(state.db,'peer-namespace-subscriptions')||['*']);
+  }catch{state.peerScopes=['*'];}
   state.trust=await getItem(state.db,'classic-trust')||[];
   state.relations=normalizeRelations(await getItem(state.db,'classic-social-relations'),state.identity.author);
   state.ignoredLabels=(await getItem(state.db,'classic-ignored-labels')||[])
@@ -2732,6 +2742,7 @@ async function init(){
   $('viewStyle').value=state.view;
   $('respectWithdrawals').checked=state.respectWithdrawals;
   $('peerURLs').value=state.peers.join('\n');
+  $('peerScopes').value=state.peerScopes.join('\n');
   $('mediaPeerUrl').value=state.mediaBase||state.unconfirmedMediaURL||'';
   $('mediaMirrorURLs').value=state.mediaMirrors.join('\n');
   bind();
@@ -2795,7 +2806,7 @@ async function init(){
     }catch(error){console.warn('Optional same-origin demo peer unavailable:',error.message);}
   }
   if(state.peers.length){
-    try{state.mesh.connect(state.peers,{spaces:['*']});}
+    try{state.mesh.connect(state.peers,{spaces:state.peerScopes});}
     catch(error){toast(error.message);}
   }
   document.documentElement.dataset.web9000ClassicReady='1';

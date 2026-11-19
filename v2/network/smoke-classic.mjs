@@ -1208,6 +1208,60 @@ try{
    'unknown author rich media requires an explicit reader download click');
  console.log('CLASSIC checkpoint 21: actual mixed JPEG+MP3+MP4 uploads, selected video thumbnail, IPFS UnixFS seek and safe peer replication');
  console.log('CLASSIC checkpoint 20: authenticated corrections and reversible author withdrawal, every signed version retained');
+
+ // A new reader on a FOURTH independent web origin can choose exactly which
+ // namespaces to synchronize without granting a gateway or curator authority.
+ // This must not delete earlier locally stored signed events when changing
+ // scopes, and a scoped client must not ingest valid out-of-scope records.
+ const originD=await serve(),d=await browser.newPage();
+ d.on('pageerror',e=>errors.push('d: '+e.message));
+ await d.goto(originD,{waitUntil:'domcontentloaded'});await ready(d);
+ assert.equal(await d.$eval('#peerScopes',e=>e.value),'*',
+   'existing users retain wildcard sync until they explicitly opt into scopes');
+ await d.evaluate(url=>{
+   document.querySelector('#joinNetwork').click();
+   document.querySelector('#peerURLs').value=url;
+   document.querySelector('#peerScopes').value='demo';
+   document.querySelector('#connectPeers').click();
+ },bridge.url);
+ const stored=async page=>page.evaluate(async()=>{
+   const {openLocal,getItem}=await import('./core/persist.js');
+   const db=await openLocal();
+   try{return (await getItem(db,'records')||[]).map(e=>({id:e.id,space:e.payload.space}));}
+   finally{db.close();}
+ });
+ await eventually(async()=>{
+   const rows=await stored(d);
+   return rows.length>=DEMO_CATALOG.length&&rows.every(e=>e.space==='demo');
+ },'fourth-origin reader synchronizes only demo namespace',20000);
+ const other=await signEvent(demoIdentity,{space:'scoped-elsewhere',
+   body:{title:'Not delivered to fourth-origin scope',text:'Valid, but unrelated namespace'}});
+ await index.publish(other);
+ await eventually(async()=> (await stored(a)).some(e=>e.id===other.id),
+   'wildcard reader receives independently signed other-namespace record',18000);
+ await sleep(250);
+ assert.equal((await stored(d)).some(e=>e.id===other.id),false,
+   'scoped reader rejects unrelated namespace even while another reader receives it');
+ await d.reload({waitUntil:'domcontentloaded'});await ready(d);
+ assert.equal(await d.$eval('#peerScopes',e=>e.value),'demo',
+   'namespace subscription persists after page reload');
+ await eventually(()=>d.evaluate(()=>
+   document.querySelector('#peerStatus')?.textContent.includes('1 sync scope(s)')),
+   'scoped network status survives restart');
+ await d.evaluate(()=>{
+   document.querySelector('#joinNetwork').click();
+   document.querySelector('#peerScopes').value='groups';
+   document.querySelector('#connectPeers').click();
+ });
+ await eventually(async()=> (await stored(d)).some(e=>e.space==='groups'),
+   'changing scope obtains historical group namespace without erasing older records',18000);
+ const afterScopeChange=await stored(d);
+ assert.ok(afterScopeChange.some(e=>e.space==='demo')&&afterScopeChange.some(e=>e.space==='groups'),
+   'local previously downloaded records survive subscription changes');
+ assert.equal(afterScopeChange.some(e=>e.id===other.id),false,
+   'switching to groups does not silently load unrelated namespace');
+ console.log('CLASSIC checkpoint 22: fourth-origin opt-in namespace subscriptions, persisted scopes, independent publication and local record retention');
+
  console.log('PASS classic board, threads, audit, attributes, identity portability and append-only revision/withdrawal');
 }finally{
  try{await browser?.close();}catch{}

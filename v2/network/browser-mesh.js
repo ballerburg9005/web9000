@@ -4,6 +4,24 @@
 import {verifyEvent} from '../core/events.js';
 const ID=/^sha256:[0-9a-f]{64}$/;
 const allowedSpace=s=>typeof s==='string'&&s.length>0&&s.length<=180&&!/[\x00-\x1f]/.test(s);
+// Transport subscriptions are independent of followed-space UI filters.
+// '*' means all published namespaces. Never silently infer a permission
+// or deletion from a user's limited synchronization choice.
+export function normalizeSyncSpaces(value){
+  if(!Array.isArray(value)||!value.length||value.length>64 ||
+     value.some(s=>s!=='*'&&!allowedSpace(s)))throw Error('Invalid namespace subscription');
+  const unique=[...new Set(value)];
+  return unique.includes('*')?['*']:unique;
+}
+export function parseSyncSpaces(value){
+  if(typeof value!=='string'||value.length>12000)
+    throw Error('Invalid namespace subscription text');
+  // Newlines are the ONLY separator: comma, semicolon and spaces may be
+  // legitimate characters in a namespace, so every valid name is selectable.
+  const fields=value.split(/\n/).map(x=>x.trim()).filter(Boolean);
+  return normalizeSyncSpaces(fields.length?fields:['*']);
+}
+
 export function normalizePeerUrl(input,{securePage=false}={}){
   if(typeof input!=='string'||input.length>2048)throw Error('Invalid peer address');
   let u;
@@ -43,11 +61,11 @@ export class BrowserPeerMesh{
     ws.send(raw);
   }
   connect(urls,{spaces=['*']}={}){
-    if(!Array.isArray(urls)||urls.length>8||!Array.isArray(spaces)||!spaces.length||spaces.length>64 ||
-      spaces.some(s=>s!=='*'&&!allowedSpace(s)))throw Error('Invalid peer configuration');
+    if(!Array.isArray(urls)||urls.length>8)throw Error('Invalid peer configuration');
+    const scopes=normalizeSyncSpaces(spaces);
     const sanitized=[...new Set(urls.map(u=>normalizePeerUrl(u,{securePage:this.securePage})))];
     this.disconnect();
-    this.urls=sanitized;this.scopes=[...new Set(spaces)];
+    this.urls=sanitized;this.scopes=scopes;
     const generation=this.#generation;
     for(const url of sanitized)this.#open(url,generation,0);
     this.#status();
@@ -113,6 +131,15 @@ export class BrowserPeerMesh{
   }
   async #accept(event,url){
     if(!await verifyEvent(event)){this.onError(url,'peer supplied invalid signature');return;}
+    // Do not rely on a peer to respect subscriptions: a compromised or
+    // misconfigured bridge can send unrelated signed events. Verified !=
+    // subscribed; only the reader chooses what to add to local storage.
+    if(!this.scopes.includes('*')&&!this.scopes.includes(event.payload.space)){
+      this.#trace('scope-drop',url,
+        JSON.stringify({id:event.id,space:event.payload.space,
+          reason:'outside opted-in namespace synchronization'}));
+      return;
+    }
     await this.onEvent(event,url);
     this.syncedCount++;this.#status();
   }

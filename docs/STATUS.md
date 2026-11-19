@@ -16,7 +16,7 @@
 | P0 | Witnessed time, group checkpoint integrity, signing-key custody | Backdated/missing votes, website-controlled browser keys and unverifiable claim of latest group history |
 | P1 | Verified karma + **approved membership tenure** to **start proposals** | Latest owner direction; follow/subscription is not group membership. Signed member karma/anti-karma and membership votes unimplemented |
 | P1 | Scoped nested-group specialized moderation and appeals | Current `delegate` inheritance is coarse; no categories, expiry, auditable specialist authority or challenge |
-| P1 | Selective replication, anti-entropy and independent discovery | Current browser bridge wildcard `['*']` and manual/static peer discovery do not scale or prove completeness |
+| P1 (scopes partially implemented) | Selective replication, anti-entropy and independent discovery | Reader can now select and persist public namespace subscriptions; browser independently rejects out-of-scope signed events, even from a misbehaving bridge. Default `['*']` unchanged. Still no efficient server-side per-space index, NIP-77-like reconciliation, independent discovery, privacy of subscriptions or proof of complete history. |
 | P1 | Browser CID integrity, opt-in media mirroring and quotas | Reader-approved hosts exist, but no UnixFS byte validation or browser mirror storage budgets |
 | P2 | Owner's UI walkthrough, votes below posts, debug coverage | Clans dialog is prototype; debug doesn't expose native P2P or Bitswap traffic |
 | DESIGN | Tune karma/anti-karma, activity-sensitive thresholds, dormancy, group hierarchy | **Not owner-approved numerical rules** — avoid imposing or guessing them |
