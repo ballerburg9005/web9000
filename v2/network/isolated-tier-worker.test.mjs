@@ -100,3 +100,30 @@ test('separate real Helia/OrbitDB processes protect a curated tier after entry i
     await rm(root,{recursive:true,force:true,maxRetries:5,retryDelay:50});
   }
 });
+
+test('cold restart of a physical Helia/OrbitDB worker retains originally signed published history at its pinned address',async()=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'w9-worker-cold-restart-'));
+ const owner=await generateIdentity();
+ let first,second;
+ try{
+   first=await startWorker('entry',path.join(root,'entry'),null);
+   const signed=await signEvent(owner,{
+     body:{title:'Cold restart must retain source material',
+       text:'This record must survive a new libp2p and Helia process.'}
+   });
+   const submitted=await probe(first,'/publish',signed);
+   assert.equal(submitted.status,200,JSON.stringify(submitted));
+   assert.equal((await probe(first,'/health')).data.stored,1);
+   const original=first.address;
+   await stop(first);
+   second=await startWorker('entry',path.join(root,'entry'),null);
+   assert.equal(second.address,original,'physical database must stay address-stable');
+   const after=await probe(second,'/health');
+   assert.equal(after.status,200);
+   assert.equal(after.data.stored,1,
+     'a new Helia/OrbitDB process must actually reload prior signed events, not just reuse the address');
+ }finally{
+   await Promise.all([stop(first),stop(second)]);
+   await rm(root,{recursive:true,force:true,maxRetries:5,retryDelay:50});
+ }
+});

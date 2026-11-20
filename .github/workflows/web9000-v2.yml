@@ -68,6 +68,15 @@ jobs:
           node --check v2/network/bounded-ingress.mjs
           node --check v2/network/isolated-ingress-process.mjs
           node --check v2/network/bounded-ingress.test.mjs
+          node --check v2/network/operator-trust-proof.mjs
+          node --check v2/network/operator-trust-proof.test.mjs
+          node --check v2/network/operator-proof-service.mjs
+          node --check v2/network/operator-proof-service.test.mjs
+          node --check v2/network/isolated-proof-issuer.mjs
+          node --check v2/network/stake4karma-testnet-verifier.mjs
+          node --check v2/network/stake4karma-testnet-verifier.test.mjs
+          node --check v2/network/vendor/stake4karma-sdk-v0.5.0.mjs
+          node --check v2/network/deploy/bootstrap-lab.mjs
           node --check v2/network/smoke-browser.mjs
           node --check v2/network/smoke-islands.mjs
           node --check v2/network/mirror-policy.js
@@ -156,6 +165,10 @@ jobs:
         working-directory: v2/network
         timeout-minutes: 3
         run: npm run test:ingress
+      - name: Verify rooted signed invitations, group ratifications and pinned Base Sepolia testnet collateral
+        working-directory: v2/network
+        timeout-minutes: 3
+        run: npm run test:proof-qualification
       - name: Real headless Chromium browser across independent HTTP origins
         working-directory: v2/network
         timeout-minutes: 3

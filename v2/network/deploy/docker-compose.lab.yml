@@ -1,0 +1,105 @@
+# Opt-in disposable WEB9000 ingress sandbox. NOT the live site.
+# All 3 independent edge listeners publish ONLY to host loopback.
+# Each Nginx edge, gateway, proof issuer and Helia worker has its OWN cgroup.
+# Each lane has a private Docker network namespace, shared by its own workers.
+# Required env WEB9000_SOURCE_ROOT and WEB9000_LAB_HOME, absolute paths.
+name: web9000-ingress-sandbox
+x-nginx-default: &nginx
+  image: nginx:stable-alpine
+  user: '101:101'
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 32
+  cpus: '0.15'
+  mem_limit: 64m
+  memswap_limit: 64m
+  restart: 'no'
+  tmpfs:
+    - /tmp:rw,size=8m,nosuid,nodev,mode=1777
+    - /var/cache/nginx:rw,size=8m,nosuid,nodev,uid=101,gid=101,mode=0700
+    - /var/run:rw,size=4m,nosuid,nodev,uid=101,gid=101,mode=0700
+  command: ['nginx','-c','/etc/nginx/edge.conf','-g','daemon off;']
+x-node-default: &node
+  image: node:22-alpine
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 64
+  cpus: '0.25'
+  mem_limit: 256m
+  memswap_limit: 256m
+  restart: 'no'
+  working_dir: /app/v2/network
+  tmpfs:
+    - /tmp:rw,size=64m,nosuid,nodev,mode=1777
+services:
+  entry-edge:
+    <<: *nginx
+    networks: [entry-net]
+    ports: ['127.0.0.1:18180:8080']
+    volumes:
+      - ${WEB9000_SOURCE_ROOT:?}/v2/network/deploy/entry.conf:/etc/nginx/edge.conf:ro
+  entry-worker:
+    <<: *node
+    network_mode: 'service:entry-edge'
+    depends_on: [entry-edge]
+    volumes:
+      - ${WEB9000_SOURCE_ROOT:?}:/app:ro
+      - ${WEB9000_LAB_HOME:?}/entry-store:/tmp/entry-store:rw
+    command: ['node','isolated-tier-worker.mjs','entry','/tmp/entry-store','18766']
+  entry-gateway:
+    <<: *node
+    network_mode: 'service:entry-edge'
+    depends_on: [entry-worker]
+    volumes:
+      - ${WEB9000_SOURCE_ROOT:?}:/app:ro
+      - ${WEB9000_LAB_HOME:?}/entry-gateway.json:/run/web9000/config.json:ro
+    command: ['node','isolated-ingress-process.mjs','entry','/run/web9000/config.json','18765']
+  protected-edge:
+    <<: *nginx
+    networks: [protected-net]
+    ports: ['127.0.0.1:18181:8080']
+    volumes:
+      - ${WEB9000_SOURCE_ROOT:?}/v2/network/deploy/protected.conf:/etc/nginx/edge.conf:ro
+  protected-worker:
+    <<: *node
+    network_mode: 'service:protected-edge'
+    depends_on: [protected-edge]
+    volumes:
+      - ${WEB9000_SOURCE_ROOT:?}:/app:ro
+      - ${WEB9000_LAB_HOME:?}/protected-store:/tmp/protected-store:rw
+      - ${WEB9000_LAB_HOME:?}/protected-worker.json:/run/web9000/config.json:ro
+    command: ['node','isolated-tier-worker.mjs','sponsored','/tmp/protected-store','18766','/run/web9000/config.json']
+  protected-gateway:
+    <<: *node
+    network_mode: 'service:protected-edge'
+    depends_on: [protected-worker]
+    volumes:
+      - ${WEB9000_SOURCE_ROOT:?}:/app:ro
+      - ${WEB9000_LAB_HOME:?}/protected-gateway.json:/run/web9000/config.json:ro
+    command: ['node','isolated-ingress-process.mjs','protected','/run/web9000/config.json','18765']
+  proof-edge:
+    <<: *nginx
+    networks: [proof-net]
+    ports: ['127.0.0.1:18182:8080']
+    volumes:
+      - ${WEB9000_SOURCE_ROOT:?}/v2/network/deploy/proof.conf:/etc/nginx/edge.conf:ro
+  proof-issuer:
+    <<: *node
+    network_mode: 'service:proof-edge'
+    depends_on: [proof-edge]
+    cpus: '0.20'
+    mem_limit: 128m
+    memswap_limit: 128m
+    volumes:
+      - ${WEB9000_SOURCE_ROOT:?}:/app:ro
+      - ${WEB9000_LAB_HOME:?}/issuer.json:/run/web9000/issuer.json:ro
+    command: ['node','isolated-proof-issuer.mjs','/run/web9000/issuer.json','18767']
+networks:
+  entry-net:
+    driver: bridge
+  protected-net:
+    driver: bridge
+  proof-net:
+    driver: bridge
