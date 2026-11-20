@@ -426,3 +426,32 @@ test('accepting peer charges VPN /24 before Ed25519 verification and keeps indep
   vpn.terminate();home.terminate();await bridge.close();
  }
 });
+
+test('compact numeric prefix map distinguishes IPv4 /0,/24 and IPv6 /0,/48 boundaries without precision loss',async()=>{
+ const signer=await observer();
+ const cases=[
+  row('0.0.0.0/0','unknown','ZZ','AS0'),
+  row('198.51.100.0/24','vpn','DE','AS64500'),
+  row('::/0','unknown','ZZ','AS0'),
+  row('ffff:ffff:ffff::/48','mobile','PL','AS64501'),
+  row('ffff:ffff:fffe::/48','datacenter','FR','AS64502')
+ ];
+ const doc=await signSourceFeed(signer,body(1,cases));
+ const good=await verifySourceFeed(doc,{expectedIssuer:signer.author,now});
+ assert.equal(good.valid,true);
+ const expected=[
+  ['198.51.100.1','vpn','DE','AS64500'],
+  ['198.51.101.1','unknown','ZZ','AS0'],
+  ['0.0.0.0','unknown','ZZ','AS0'],
+  ['255.255.255.255','unknown','ZZ','AS0'],
+  ['ffff:ffff:ffff::1','mobile','PL','AS64501'],
+  ['ffff:ffff:fffe:ffff::','datacenter','FR','AS64502'],
+  ['ffff:ffff:fffd::1','unknown','ZZ','AS0'],
+  ['::1','unknown','ZZ','AS0']
+ ];
+ for(const [ip,kind,country,asn] of expected){
+  const result=classifyObservedIp(ip,good);
+  assert.deepEqual([result.networkKind,result.country,result.asn,result.matched],
+   [kind,country,asn,true],ip);
+ }
+});

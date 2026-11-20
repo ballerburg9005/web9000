@@ -55,6 +55,9 @@ jobs:
           node --check v2/network/source-refresh-stage.test.mjs
           node --check v2/network/source-feed-refresh.mjs
           node --check v2/network/benchmark-source-feed-browser.mjs
+          node --check v2/network/source-snapshot-archive.mjs
+          node --check v2/network/source-snapshot-archive.test.mjs
+          node --check v2/network/source-snapshot-fetch.mjs
           node --check v2/network/node-source-observer.mjs
           node --check v2/network/scoped-sync.test.mjs
           node --check v2/network/browser-bridge.mjs

@@ -44,7 +44,12 @@ export function validateSourceProvenanceBody(body){
   throw Error('Invalid bounded source provenance fields');
  const used=new Set();
  for(const entry of body.sources){
-  if(!shape(entry,['category','uri','license','sha256','bytes','retrievedAt'])||
+  const keys=['category','uri','license','sha256','bytes','retrievedAt',
+    ...(entry?.archiveCid!==undefined?['archiveCid']:[])];
+  if(!shape(entry,keys)||
+    (entry.archiveCid!==undefined&&
+      (typeof entry.archiveCid!=='string'||
+       !/^baf[a-z2-7]{20,116}$/.test(entry.archiveCid)))||
     !sourceCategories.includes(entry.category)||
     !asUrl(entry.uri)||
     typeof entry.license!=='string'||entry.license.length<1||

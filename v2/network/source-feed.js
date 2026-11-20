@@ -139,22 +139,27 @@ export async function verifySourceFeed(document,{expectedIssuer,now=Date.now(),m
 // Pre-index prefixes once per independently verified source revision.
 // Avoid re-scanning and re-parsing tens of thousands of CIDRs per socket.
 const prefixIndexes=new WeakMap();
-function prefixKey(version,bits,bytes){
- const normalized=[];
- for(let i=0;i<bytes.length;i++){
-  const width=Math.max(0,Math.min(8,bits-i*8));
-  const mask=width===0?0:(255<<(8-width))&255;
-  normalized.push((bytes[i]&mask).toString(16).padStart(2,'0'));
- }
- return version+'|'+bits+'|'+normalized.join('');
+// A key encoded as a NUMBER takes much less browser heap than a 30-60
+// character per-CIDR string. IPv6 rules stop at /48, so the first six
+// bytes fit exactly into a JS integer (<2^53). Keep separate maps by
+// prefix length so IPv4/IPv6 cannot collide or lose leading zeros.
+function prefixNumber(bytes,count){
+ let value=0;
+ for(let i=0;i<count;i++)value=value*256+bytes[i];
+ return value;
 }
 function indexedRules(feed){
  let index=prefixIndexes.get(feed);
  if(index)return index;
- index={4:new Map(),6:new Map()};
+ index={4:Array.from({length:25},()=>new Map()),
+        6:Array.from({length:49},()=>new Map())};
  for(const rule of feed.rules){
   const net=rangeCidr(rule.cidr);
-  if(net)index[net.version].set(prefixKey(net.version,net.bits,net.bytes),rule);
+  if(!net)continue;
+  const width=net.version===4?32:48;
+  const key=Math.floor(prefixNumber(net.bytes,width/8)/
+    2**(width-net.bits));
+  index[net.version][net.bits].set(key,rule);
  }
  prefixIndexes.set(feed,index);
  return index;
@@ -167,10 +172,11 @@ export function classifyObservedIp(ip,verifiedFeed){
  if(!addr)return {networkKind:'unknown',country:'ZZ',asn:'AS0',matched:false,
   reason:'source-address-unavailable'};
  const index=indexedRules(verifiedFeed)[addr.version];
- const bitsLimit=addr.version===4?24:48;
+ const width=addr.version===4?32:48,bitsLimit=addr.version===4?24:48;
+ const numeric=prefixNumber(addr.bytes,width/8);
  let first=null,kind=null,country=null,asn=null;
  for(let bits=bitsLimit;bits>=0;bits--){
-  const rule=index.get(prefixKey(addr.version,bits,addr.bytes));
+  const rule=index[bits].get(Math.floor(numeric/2**(width-bits)));
   if(!rule)continue;
   first??=rule;
   // ASN/country intelligence can describe a more-specific prefix while

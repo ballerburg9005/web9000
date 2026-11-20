@@ -7,6 +7,7 @@ import {constants as fsConstants} from 'node:fs';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
 import {validateSourceProvenanceBody} from './source-provenance.js';
+import {CID} from 'multiformats/cid';
 
 const MAX_BYTES=128*1024*1024;
 const SHA=/^[0-9a-f]{64}$/;
@@ -24,13 +25,19 @@ export async function readVerifiedSourceSnapshots(manifestPath,{now=Date.now()}=
   throw Error('Invalid source dataset provenance manifest');
  const checked=[],seen=new Set();
  for(const item of input.sources){
-  if(!SHAPE(item,['category','uri','license','sha256','bytes',
-      'retrievedAt','file'])||
+  const keys=['category','uri','license','sha256','bytes','retrievedAt',
+      'file',...(item?.archiveCid!==undefined?['archiveCid']:[])];
+  if(!SHAPE(item,keys)||
      typeof item.file!=='string'||!path.isAbsolute(item.file)||
      !SHA.test(item.sha256)||
      !Number.isSafeInteger(item.bytes)||item.bytes<1||
       item.bytes>MAX_BYTES)
    throw Error('Missing or invalid source file hash pin');
+  if(item.archiveCid!==undefined){
+   const cid=CID.parse(item.archiveCid);
+   if(cid.version!==1||!['bafy','bafk'].some(prefix=>item.archiveCid.startsWith(prefix)))
+     throw Error('IPFS archive must be a canonical base32 CIDv1');
+  }
   const key=item.category+'|'+item.uri;
   if(seen.has(key))throw Error('Duplicate source dataset provenance');
   seen.add(key);
