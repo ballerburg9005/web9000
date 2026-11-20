@@ -152,8 +152,19 @@ async function setupNetwork(){
       state.sourceFeedCheckpoints[url]={revision:feed.revision,digest:feed.digest};
       $('#networkSourceStatus').textContent='Verified '+url+
         ' feed revision '+feed.revision+' · '+feed.rules.length+' ranges';
+      $('#networkSourceProvenance').textContent=
+        'No signed dataset provenance yet for revision '+feed.revision+'.';
       if(state.db)void setItem(state.db,'peer-source-feed-checkpoints',
         state.sourceFeedCheckpoints).catch(console.error);
+    },
+    onSourceProvenance:(receipt,url)=>{
+      $('#networkSourceProvenance').textContent=
+        JSON.stringify(receipt.document,null,2);
+      const licenses=[...new Set(receipt.sources.map(x=>x.license))].join(', ');
+      $('#networkSourceStatus').textContent='Verified '+url+
+        ' revision '+receipt.revision+' · '+receipt.rulesCount+
+        ' CIDRs · operator-signed inputs: '+receipt.sources.length+
+        ' ('+licenses+'; original providers not independently audited)';
     },
     onEvent:async(event,sourceUrl)=>{
       const result=await addLocal(event);

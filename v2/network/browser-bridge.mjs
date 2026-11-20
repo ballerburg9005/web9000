@@ -8,6 +8,7 @@ import {Replica} from '../core/replica.js';
 import {ScopedEventCatalog} from './scoped-event-catalog.mjs';
 import {verifySourceFeed,classifyObservedIp,parseNetworkIp} from './source-feed.js';
 import {signSourceReceipt} from './source-receipt.js';
+import {verifySourceProvenance,digestRules} from './source-provenance.js';
 import {verifySourceFeedDocument} from './source-feed-bundle.js';
 
 const MAX_INBOUND = 48 * 1024;
@@ -56,6 +57,15 @@ export async function createBrowserBridge({
       expectedIssuer:sourceObserver.feedIssuer
     });
     if(!observedFeed.valid)throw Error('Unverifiable source-classification list: '+observedFeed.reason);
+    if(sourceObserver.provenance){
+      const attested=await verifySourceProvenance(sourceObserver.provenance,{
+        expectedIssuer:sourceObserver.feedIssuer,
+        revision:observedFeed.revision,feedDigest:observedFeed.digest
+      });
+      if(!attested.valid||attested.rulesSha256!==await digestRules(observedFeed.rules)||
+        attested.rulesCount!==observedFeed.rules.length)
+        throw Error('Source provenance must match verified signed feed and rule contents');
+    }
   }
   const recentObservations=new Map();
   // A signed country/ASN/VPN feed may have up to 2,048 CIDR rules. Classify
@@ -162,6 +172,8 @@ export async function createBrowserBridge({
     if(sourceObserver.feed.manifest)
       wire(ws,{type:'source-feed-manifest',manifest:sourceObserver.feed.manifest});
     else wire(ws,{type:'source-feed',document:sourceObserver.feed});
+    if(sourceObserver.provenance)
+      wire(ws,{type:'source-provenance',document:sourceObserver.provenance});
   }
   // RAM-only, operator-defined caps protect the unaudited *test peer*.
   // These are not global publication rules. Any user can host another peer.
@@ -357,14 +369,26 @@ export async function createBrowserBridge({
     replica,catalog,index: index.address,
     host,port:server.address().port,
     url:'ws://'+(host.includes(':')?'['+host+']':host)+':'+server.address().port+'/',
-    async updateSourceFeed(document){
+    async updateSourceFeed(document,{provenance=null}={}){
       if(!sourceObserver)throw Error('Source classification is not enabled at this peer');
       const verified=await verifySourceFeedDocument(document,{
         expectedIssuer:sourceObserver.feedIssuer,
         minimumRevision:observedFeed.revision+1
       });
       if(!verified.valid)throw Error('Source feed update rejected: '+verified.reason);
+      if(sourceObserver.provenance&&!provenance)
+        throw Error('Cannot silently discard an existing signed source provenance trail');
+      if(provenance){
+        const attested=await verifySourceProvenance(provenance,{
+          expectedIssuer:sourceObserver.feedIssuer,
+          revision:verified.revision,feedDigest:verified.digest
+        });
+        if(!attested.valid||attested.rulesSha256!==await digestRules(verified.rules)||
+          attested.rulesCount!==verified.rules.length)
+          throw Error('Source feed update provenance mismatch');
+      }
       observedFeed=verified;sourceObserver.feed=document;
+      sourceObserver.provenance=provenance;
       for(const session of sessions)announceSignedSourceList(session.ws);
       return {revision:verified.revision,digest:verified.digest};
     },

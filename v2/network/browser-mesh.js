@@ -4,6 +4,7 @@
 import {verifyEvent} from '../core/events.js';
 import {verifySourceReceipt} from './source-receipt.js';
 import {verifySourceFeed} from './source-feed.js';
+import {verifySourceProvenance,digestRules} from './source-provenance.js';
 import {verifySourceFeedManifest,verifySourceFeedChunk,assembleSourceFeedBundle} from './source-feed-bundle.js';
 const ID=/^sha256:[0-9a-f]{64}$/;
 const allowedSpace=s=>typeof s==='string'&&s.length>0&&s.length<=180&&!/[\x00-\x1f]/.test(s);
@@ -63,13 +64,15 @@ export class BrowserPeerMesh{
   #connections=new Map();
   #generation=0;
   constructor({WebSocketImpl=globalThis.WebSocket,onEvent=async()=>{},onAck=()=>{},onStatus=()=>{},onError=()=>{},
-      onSource=()=>{},onSourceFeed=()=>{},getPending=()=>[],securePage=false,onPacket=()=>{},
+      onSource=()=>{},onSourceFeed=()=>{},onSourceProvenance=()=>{},
+      getPending=()=>[],securePage=false,onPacket=()=>{},
       now=()=>Date.now()}={}){
     if(!WebSocketImpl)throw Error('WebSocket implementation missing');
     this.WS=WebSocketImpl;
     this.onEvent=onEvent;this.onAck=onAck;this.onStatus=onStatus;this.onError=onError;
     this.getPending=getPending;this.securePage=securePage;this.onPacket=onPacket;
-    this.onSource=onSource;this.onSourceFeed=onSourceFeed;this.now=now;
+    this.onSource=onSource;this.onSourceFeed=onSourceFeed;
+    this.onSourceProvenance=onSourceProvenance;this.now=now;
     this.scopes=['*'];this.urls=[];this.syncedCount=0;this.sourcePins={};
   }
   get connected(){return [...this.#connections.values()].filter(s=>s.ws.readyState===this.WS.OPEN).length;}
@@ -128,6 +131,8 @@ export class BrowserPeerMesh{
     const s={ws,timer:null,chain:Promise.resolve(),pages:0,lastCursor:null,
       queued:0,queuedBytes:0,minute:-1,verifiedCount:0,
       deferred:null,resumeTimer:null,feedPending:null,
+      verifiedFeed:null,provenancePending:null,provenanceSignature:null,
+      previousVerifiedFeed:null,
       initialSyncStarted:false,initialSyncTimer:null,
       laneCounts:new Map(),receiptIssuer:null,
       feedRevision:this.sourceCheckpoints[url]?.revision||0,
@@ -141,6 +146,43 @@ export class BrowserPeerMesh{
       if(s.initialSyncTimer)clearTimeout(s.initialSyncTimer);
       s.initialSyncTimer=null;
       this.#send(ws,url,{type:'sync',cursor:null,limit:32});
+    };
+    const inspectProvenance=async()=>{
+      const record=s.provenancePending,feed=s.verifiedFeed;
+      if(!record||!feed||!this.sourcePins[url])return;
+      const verified=await verifySourceProvenance(record,{
+        expectedIssuer:this.sourcePins[url],feedDigest:feed.digest,
+        revision:feed.revision,now:this.now()
+      });
+      if(!verified.valid){
+        // A pending receipt for a NEW feed may arrive before the feed.
+        // A receipt claiming the CURRENT revision but failing signature
+        // or digest verification is never accepted as independent evidence.
+        if(record.body?.revision===feed.revision)
+          this.onError(url,'unverified source-data provenance');
+        return;
+      }
+      // When the browser already pinned the IMMEDIATELY preceding
+      // revision, a signed operator refresh must chain to that digest.
+      // Skipped revisions cannot establish such a local continuity proof.
+      if(s.previousVerifiedFeed&&
+         verified.revision===s.previousVerifiedFeed.revision+1&&
+         verified.previousFeedDigest!==s.previousVerifiedFeed.digest){
+        this.onError(url,'source provenance breaks locally pinned revision chain');
+        return;
+      }
+      if(verified.rulesCount!==feed.rules.length||
+         verified.rulesSha256!==await digestRules(feed.rules)){
+        this.onError(url,'source-data provenance does not match signed CIDR rules');
+        return;
+      }
+      if(s.provenanceSignature&&s.provenanceSignature!==record.signature){
+        this.onError(url,'equivocating source provenance at same signed feed');
+        return;
+      }
+      if(s.provenanceSignature===record.signature)return;
+      s.provenanceSignature=record.signature;
+      this.onSourceProvenance(verified,url);
     };
     const processBatch=async msg=>{
       if(!Array.isArray(msg.events)||msg.events.length>32||
@@ -236,10 +278,16 @@ export class BrowserPeerMesh{
                 feed.digest!==s.feedDigest){
                 this.onError(url,'source feed fork at pinned revision');
               }else{
+                if(s.feedDigest!==feed.digest){
+                  if(s.feedRevision>0)s.previousVerifiedFeed={
+                    revision:s.feedRevision,digest:s.feedDigest};
+                  s.provenanceSignature=null;
+                }
                 s.feedRevision=feed.revision;s.feedDigest=feed.digest;
-                s.feedValidated=true;
+                s.feedValidated=true;s.verifiedFeed=feed;
                 this.sourceCheckpoints[url]={revision:feed.revision,digest:feed.digest};
                 this.onSourceFeed(feed,url);
+                await inspectProvenance();
                 initialSync();
               }
             }else this.onError(url,'unverified or stale source-feed update');
@@ -296,14 +344,26 @@ export class BrowserPeerMesh{
                 }
                 // Commit the new local feed checkpoint ONLY when all
                 // chunks match the same signed operator manifest.
+                if(s.feedDigest!==assembled.digest){
+                  if(s.feedRevision>0)s.previousVerifiedFeed={
+                    revision:s.feedRevision,digest:s.feedDigest};
+                  s.provenanceSignature=null;
+                }
                 s.feedRevision=assembled.revision;s.feedDigest=assembled.digest;
-                s.feedValidated=true;
+                s.feedValidated=true;s.verifiedFeed=assembled;
                 this.sourceCheckpoints[url]={revision:assembled.revision,
                   digest:assembled.digest};
                 this.onSourceFeed(assembled,url);
+                await inspectProvenance();
                 initialSync();
               }
             }
+          }
+        }else if(msg.type==='source-provenance'){
+          if(this.sourcePins[url]&&msg.document&&
+             typeof msg.document==='object'){
+            s.provenancePending=msg.document;
+            await inspectProvenance();
           }
         }else if(msg.type==='batch'){
           if(!s.deferred)await processBatch(msg);

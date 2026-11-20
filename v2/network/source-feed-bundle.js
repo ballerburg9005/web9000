@@ -12,7 +12,10 @@ const DIGEST=/^[0-9a-f]{64}$/;
 const SIGNATURE=/^[A-Za-z0-9_-]{86}$/;
 export const MAX_FEED_CHUNKS=64;
 export const MAX_FEED_RULES=MAX_FEED_CHUNKS*2048;
-const MAX_CHUNK_BYTES=120*1024;
+// v1 already permits a 160 KiB canonical feed body. Keep the same bound
+// per chunk so 2,048 compact CIDRs can fit and 64 chunks can truly reach
+// the declared 131,072-rule maximum.
+const MAX_CHUNK_BYTES=160*1024;
 const MAX_MANIFEST_BYTES=16*1024;
 const fields=(v,names)=>v&&typeof v==='object'&&!Array.isArray(v)&&
  Object.keys(v).sort().join(',')===names.slice().sort().join(',');

@@ -3600,8 +3600,20 @@ async function init(){
       state.sourceFeedCheckpoints[url]={revision:feed.revision,digest:feed.digest};
       $('peerSourceStatus').textContent='Verified '+url+
         ' list revision '+feed.revision+' · '+feed.rules.length+' network ranges';
+      $('peerSourceProvenance').textContent=
+        'No signed dataset provenance yet for revision '+feed.revision+'.';
       if(state.db)void setItem(state.db,'peer-source-feed-checkpoints',
         state.sourceFeedCheckpoints).catch(console.error);
+    },
+    onSourceProvenance:(receipt,url)=>{
+      $('peerSourceProvenance').textContent=
+        JSON.stringify(receipt.document,null,2);
+      const licenses=[...new Set(receipt.sources.map(x=>x.license))].join(', ');
+      $('peerSourceStatus').textContent='Verified '+url+
+        ' feed revision '+receipt.revision+' · '+
+        receipt.rulesCount+' ranges · operator-signed provenance for '+
+        receipt.sources.length+' input dataset(s) ('+licenses+
+        '; source classifications not independently audited)';
     },
     onEvent:async e=>{
       const result=await ingest(e);

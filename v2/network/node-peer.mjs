@@ -123,7 +123,7 @@ try {
         const updated=await loadPeerSourceObserver(sourceConfigPath);
         if(updated.signer.author!==sourceObserver.signer.author)
           throw Error('Refusing hot change of pinned observer identity');
-        const result=await bridge.updateSourceFeed(updated.feed);
+        const result=await bridge.updateSourceFeed(updated.feed,{provenance:updated.provenance});
         console.log('SOURCE FEED UPDATED',result.revision,result.digest);
       })().catch(err=>console.error('Rejected source feed update:',err.message));
     });

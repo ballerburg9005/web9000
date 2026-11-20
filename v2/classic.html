@@ -198,6 +198,10 @@
 <p class="fine">Each independent peer can observe an incoming socket IP and classify its network using its own signed, updateable country/ASN/VPN list. To use an observer's report for local sync quotas, pin its identity explicitly: one line with a peer WebSocket URL, a space, and its <code>ed25519:</code> key. The list is verified and updates automatically over the same peer connection. No raw IP is included in received reports. A relay's observed IP is not necessarily the original author's. Unpinned or unverifiable observations use the limited unknown tier; no classification can invalidate a signed record or ban authors network-wide.</p>
 <textarea id="peerSourcePins" rows="2" spellcheck="false" placeholder="wss://your-peer.example/ws/ ed25519:..."></textarea>
 <p id="peerSourceStatus" class="fine" role="status">No trusted source observer selected.</p>
+<details><summary>Inspect signed source-data provenance</summary>
+<p class="fine">This contains the operator's signed file hashes, declared licenses and source URLs. The observer's signature is verified independently; the country/VPN accuracy of the original datasets is not guaranteed.</p>
+<pre id="peerSourceProvenance" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:12rem;overflow:auto;font-size:.75em;">No signed source provenance received.</pre>
+</details>
 </details>
 <label>Independent media peer (optional) <input id="mediaPeerUrl" type="url" placeholder="https://example.org/media/"></label>
 <label>Backup media peers (optional, one URL per line)

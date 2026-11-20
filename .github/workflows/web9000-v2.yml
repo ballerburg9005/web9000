@@ -48,6 +48,13 @@ jobs:
           node --check v2/network/source-feed-bundle.test.mjs
           node --check v2/network/source-feed-import.mjs
           node --check v2/network/source-feed-import.test.mjs
+          node --check v2/network/source-provenance.js
+          node --check v2/network/source-provenance-files.mjs
+          node --check v2/network/source-provenance.test.mjs
+          node --check v2/network/source-refresh-stage.mjs
+          node --check v2/network/source-refresh-stage.test.mjs
+          node --check v2/network/source-feed-refresh.mjs
+          node --check v2/network/benchmark-source-feed-browser.mjs
           node --check v2/network/node-source-observer.mjs
           node --check v2/network/scoped-sync.test.mjs
           node --check v2/network/browser-bridge.mjs

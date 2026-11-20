@@ -4,7 +4,7 @@
 
 ## Signed feed v2 and browser replication
 
-The original single-feed format remains supported (2,048 CIDRs / 160 KiB). The new source-feed-bundle.js permits a signed manifest with up to **64 independently signed chunks and 131,072 CIDR entries**. Each chunk contains at most 2,048 CIDRs, 120 KiB of canonical JSON, and a manifest-committed SHA-256 digest. The manifest contains the operator Ed25519 identity, revision, issued/expiration dates, rule counts and chunk digests.
+The original single-feed format remains supported (2,048 CIDRs / 160 KiB). The new source-feed-bundle.js permits a signed manifest with up to **64 independently signed chunks and 131,072 CIDR entries**. Each chunk contains at most 2,048 CIDRs, 160 KiB of canonical JSON, and a manifest-committed SHA-256 digest. The manifest contains the operator Ed25519 identity, revision, issued/expiration dates, rule counts and chunk digests.
 
 Browsers pin the accepting node's observer identity independently. They verify the signed manifest, request individual bounded chunks over the *same voluntarily selected peer WebSocket*, verify every chunk, and only then commit the new digest and revision. Missing, changed, replayed, outdated, and cross-chunk duplicate CIDRs cause rejection. No new OrbitDB database is opened, and the original signed posts are unmodified.
 
