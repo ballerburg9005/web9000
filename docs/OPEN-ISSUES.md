@@ -1,3 +1,5 @@
+**2026-11-20 browser-first geographic/VPN source compartments (OPT-IN):** The accepting WebSocket peer can classify its observed transport socket from an independently signed, operator-updatable CIDR/country/ASN/VPN/hosting feed, enforce per-category attempts before Ed25519 verification, and sign a transient observation linked to the accepted event ID. Reader-selected browser clients pin the accepting node key, validate the latest feed and exact receipt, and apply separate VPN/residential/unknown resource budgets with bounded deferred history. Web clients can receive signed list updates over the normal voluntary peer connection without Nginx. **Still P0:** no real worldwide country/ASN/VPN feed, authenticated public TLS proxy chain, browser-native libp2p source observation, IPFS UnixFS GC, or high-throughput reference deployment. Existing legacy peer is unchanged. See [BROWSER-SOURCE-CLASSIFICATION-2026-11-20.md](BROWSER-SOURCE-CLASSIFICATION-2026-11-20.md).
+
 # WEB9000 — unresolved work and design decisions
 
 **Living overview · 2026-11-19 · active branch `main` (owner-requested merge completed)**

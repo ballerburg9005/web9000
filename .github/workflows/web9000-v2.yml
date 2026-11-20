@@ -40,6 +40,11 @@ jobs:
           node --check v2/core/media-policy.js
           node --check v2/test/media-policy.test.js
           node --check v2/network/browser-mesh.js
+          node --check v2/network/source-feed.js
+          node --check v2/network/source-receipt.js
+          node --check v2/network/source-feed-operator.mjs
+          node --check v2/network/source-feed.test.mjs
+          node --check v2/network/node-source-observer.mjs
           node --check v2/network/scoped-sync.test.mjs
           node --check v2/network/browser-bridge.mjs
           node --check v2/network/scoped-event-catalog.mjs
@@ -141,6 +146,10 @@ jobs:
         working-directory: v2/network
         timeout-minutes: 1
         run: npm run test:scopes
+      - name: Verify IP-source observer feeds and cross-browser isolated network compartments
+        working-directory: v2/network
+        timeout-minutes: 2
+        run: npm run test:source-observation
       - name: Unrelated OrbitDB indexes joined only by optional browser mirroring
         working-directory: v2/network
         timeout-minutes: 3

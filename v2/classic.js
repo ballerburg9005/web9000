@@ -6,7 +6,7 @@ import {openLocal,getItem,setItem} from './core/persist.js';
 import {buildFeed,DEFAULT_POLICY} from './core/policy.js';
 import {AGE_TIERS,RATING_AXES,DEFAULT_RATING_RULES,normalizeRatingRules,
   assessContentRatings,summarizeSpiderBackground} from './core/content-ratings.js';
-import {BrowserPeerMesh,parsePeerUrls,parseSyncSpaces,normalizeSyncSpaces} from './network/browser-mesh.js';
+import {BrowserPeerMesh,parsePeerUrls,parseSyncSpaces,normalizeSyncSpaces,parseSourcePins} from './network/browser-mesh.js';
 import {readSiteContext} from './network/site-context.js';
 import {compareApprovedPeerInventories} from './network/peer-inventory-client.js';
 import {MockKarmaProvider} from './core/mock-karma.js';
@@ -25,7 +25,8 @@ import {groupReputation,reviewerConduct} from './core/reviewer-reputation.js';
 const $=id=>document.getElementById(id);
 const state={
   db:null,identity:null,replica:new Replica({maxEvents:25000}),saved:[],outbox:[],
-  peers:[],peerScopes:['*'],mesh:null,suggested:[],mediaBase:null,mediaMirrors:[],
+  peers:[],peerScopes:['*'],peerSourcePins:{},sourceFeedCheckpoints:{},
+  sourceObservations:new Map(),mesh:null,suggested:[],mediaBase:null,mediaMirrors:[],
   mediaApprovalV1:false,unconfirmedMediaURL:null,firstPartyMediaBase:null,
   space:'commons',profileAuthor:null,sort:'new',view:'grid',search:'',showUnverified:false,
   ownerHint:null,respectOwner:true,respectWithdrawals:true,selected:null,trust:[],ignoredLabels:[],audit:false,showMedia:false,
@@ -1152,6 +1153,8 @@ async function store(){
     setItem(state.db,'outbox',state.outbox),
     setItem(state.db,'peer-urls',state.peers),
     setItem(state.db,'peer-namespace-subscriptions',state.peerScopes),
+    setItem(state.db,'peer-source-pins',state.peerSourcePins),
+    setItem(state.db,'peer-source-feed-checkpoints',state.sourceFeedCheckpoints),
     setItem(state.db,'classic-space',state.space),
     setItem(state.db,'classic-trust',state.trust),
     setItem(state.db,'classic-social-relations',state.relations),
@@ -3284,6 +3287,11 @@ async function connectPeers(){
     const urls=parsePeerUrls($('peerURLs').value,location.protocol==='https:');
     if(!urls.length)throw Error('Enter one or more peer addresses');
     const spaces=parseSyncSpaces($('peerScopes').value);
+    const sourcePins=parseSourcePins($('peerSourcePins').value,{
+      securePage:location.protocol==='https:'
+    });
+    if(Object.keys(sourcePins).some(url=>!urls.includes(url)))
+      throw Error('Source observer URL must match an explicitly selected peer');
     const mediaBase=normalizeMediaBase($('mediaPeerUrl').value);
     const mediaMirrors=parseMediaGateways($('mediaMirrorURLs').value,{
       securePage:location.protocol==='https:'});
@@ -3295,8 +3303,10 @@ async function connectPeers(){
     state.unconfirmedMediaURL=null;
     state.peers=urls;
     state.peerScopes=spaces;
+    state.peerSourcePins=sourcePins;
     state.autoDemoPeerDisabled=false;
-    state.mesh.connect(urls,{spaces});
+    state.mesh.connect(urls,{spaces,sourcePins,
+      sourceCheckpoints:state.sourceFeedCheckpoints});
     await store();close('networkDialog');render();
     updateMediaEnableButton();
     toast('Connecting to '+urls.length+' independent peer(s), '+
@@ -3453,6 +3463,14 @@ async function init(){
   try{
     state.peerScopes=normalizeSyncSpaces(await getItem(state.db,'peer-namespace-subscriptions')||['*']);
   }catch{state.peerScopes=['*'];}
+  try{
+    state.peerSourcePins=parseSourcePins(
+      Object.entries(await getItem(state.db,'peer-source-pins')||{})
+        .map(([url,issuer])=>url+' '+issuer).join('\n'),
+      {securePage:location.protocol==='https:'
+      });
+    state.sourceFeedCheckpoints=await getItem(state.db,'peer-source-feed-checkpoints')||{};
+  }catch{state.peerSourcePins={};state.sourceFeedCheckpoints={};}
   state.trust=await getItem(state.db,'classic-trust')||[];
   state.relations=normalizeRelations(await getItem(state.db,'classic-social-relations'),state.identity.author);
   state.ignoredLabels=(await getItem(state.db,'classic-ignored-labels')||[])
@@ -3544,6 +3562,10 @@ async function init(){
   $('ratingsDissentVotes').value=String(state.ratingRules.dissentVotes);
   $('peerURLs').value=state.peers.join('\n');
   $('peerScopes').value=state.peerScopes.join('\n');
+  $('peerSourcePins').value=Object.entries(state.peerSourcePins)
+    .map(([url,issuer])=>url+' '+issuer).join('\n');
+  $('peerSourceStatus').textContent=Object.keys(state.peerSourcePins).length+
+    ' chosen source observer(s); unsigned source reports remain unknown.';
   $('mediaPeerUrl').value=state.mediaBase||state.unconfirmedMediaURL||'';
   $('mediaMirrorURLs').value=state.mediaMirrors.join('\n');
   bind();
@@ -3567,6 +3589,20 @@ async function init(){
     // causing lost keyboard focus and detached click targets.
     onStatus:()=>updateNetworkStatus(),
     onPacket:tracePeer,
+    onSource:observation=>{
+      // Short-lived, coarse transport-hop metadata only, never a claim
+      // about an author's nationality, identity, or permanent location.
+      if(state.sourceObservations.size>=300)
+        state.sourceObservations.delete(state.sourceObservations.keys().next().value);
+      state.sourceObservations.set(observation.eventId,observation);
+    },
+    onSourceFeed:(feed,url)=>{
+      state.sourceFeedCheckpoints[url]={revision:feed.revision,digest:feed.digest};
+      $('peerSourceStatus').textContent='Verified '+url+
+        ' list revision '+feed.revision+' · '+feed.rules.length+' network ranges';
+      if(state.db)void setItem(state.db,'peer-source-feed-checkpoints',
+        state.sourceFeedCheckpoints).catch(console.error);
+    },
     onEvent:async e=>{
       const result=await ingest(e);
       if(result.accepted&&['group','proposal','vote','membership','group-rating','reviewer-candidacy'].includes(e.payload.kind))
@@ -3612,7 +3648,10 @@ async function init(){
     }catch(error){console.warn('Optional same-origin demo peer unavailable:',error.message);}
   }
   if(state.peers.length){
-    try{state.mesh.connect(state.peers,{spaces:state.peerScopes});}
+    try{state.mesh.connect(state.peers,{
+      spaces:state.peerScopes,sourcePins:state.peerSourcePins,
+      sourceCheckpoints:state.sourceFeedCheckpoints
+    });}
     catch(error){toast(error.message);}
   }
   document.documentElement.dataset.web9000ClassicReady='1';

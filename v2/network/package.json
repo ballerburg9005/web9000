@@ -30,6 +30,7 @@
     "test:migration": "node --test migrate-verified-events.test.mjs migrate-raw-index.test.mjs",
     "test:browser-bridge": "node smoke-browser.mjs",
     "test:scopes": "node --test scoped-sync.test.mjs",
+    "test:source-observation": "node --test source-feed.test.mjs",
     "test:indexed-sync": "node --test scoped-event-catalog.test.mjs bridge-indexed-sync.test.mjs",
     "test:reconciliation": "node --test bridge-reconciliation.test.mjs peer-inventory-client.test.mjs",
     "test:independent-indexes": "node smoke-islands.mjs",

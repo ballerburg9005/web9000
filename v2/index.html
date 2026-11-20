@@ -194,6 +194,11 @@
 <label>Sync namespaces (one per line, <code>*</code> = all)
 <textarea id="peerScopes" rows="2" spellcheck="false" maxlength="12000" placeholder="commons&#10;demo&#10;groups">*</textarea></label>
 <p class="fine">Store only new signed metadata from these namespaces; your peers can see this interest list. Old local records remain, and anyone may still publish anywhere. Include the governance namespace to sync group decisions.</p>
+<details><summary>Signed source-network classifications (optional)</summary>
+<p class="fine">Each independent peer can observe an incoming socket IP and classify its network using its own signed, updateable country/ASN/VPN list. To use an observer's report for local sync quotas, pin its identity explicitly: one line with a peer WebSocket URL, a space, and its <code>ed25519:</code> key. The list is verified and updates automatically over the same peer connection. No raw IP is included in received reports. A relay's observed IP is not necessarily the original author's. Unpinned or unverifiable observations use the limited unknown tier; no classification can invalidate a signed record or ban authors network-wide.</p>
+<textarea id="peerSourcePins" rows="2" spellcheck="false" placeholder="wss://your-peer.example/ws/ ed25519:..."></textarea>
+<p id="peerSourceStatus" class="fine" role="status">No trusted source observer selected.</p>
+</details>
 <label>Independent media peer (optional) <input id="mediaPeerUrl" type="url" placeholder="https://example.org/media/"></label>
 <label>Backup media peers (optional, one URL per line)
 <textarea id="mediaMirrorURLs" rows="2" spellcheck="false" placeholder="https://another-volunteer.example/media/"></textarea></label>

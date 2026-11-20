@@ -27,6 +27,7 @@ import {loadOrCreatePeerKey} from './peer-identity.mjs';
 import {createImageGateway} from './media-node.mjs';
 import {createMediaBitswapPolicy} from './media-bitswap-policy.mjs';
 import {openQualifiedIndex} from './qualified-index.js';
+import {loadPeerSourceObserver} from './node-source-observer.mjs';
 
 const dir=path.resolve(process.argv[2] || './.web9000-peer');
 const indexName=process.argv[3] || 'web9000-public-test';
@@ -77,7 +78,14 @@ try {
   const replica=new Replica({maxEvents:200000});
   const initial=await index.loadInto(replica);
   const origins=process.env.WEB9000_WS_ORIGINS?.split(',').map(x=>x.trim()).filter(Boolean)||null;
+  // Disabled by default. Operator creates private 0600 observer identity
+  // and signs bounded network-prefix intelligence with that identity.
+  const sourceConfigPath=process.env.WEB9000_SOURCE_OBSERVER_FILE||null;
+  const sourceObserver=sourceConfigPath?
+    await loadPeerSourceObserver(sourceConfigPath):null;
   bridge=await createBrowserBridge({index,replica,
+    sourceObserver,
+    trustedProxyAddress:process.env.WEB9000_WS_TRUST_PROXY||null,
     host:process.env.WEB9000_WS_HOST||'127.0.0.1',
     port:process.env.WEB9000_WS_PORT===undefined?8787:Number(process.env.WEB9000_WS_PORT),
     allowedOrigins:origins,
@@ -107,6 +115,19 @@ try {
     console.log('QUALIFIED INDEX',qualified.address,'(no verified admissions configured)');
   }
   console.log('BROWSER',bridge.url,'(WebSocket, optional; expose through WSS reverse proxy for HTTPS sites)');
+  if(sourceObserver){
+    console.log('SOURCE OBSERVER',sourceObserver.signer.author,
+      '(signed transient ingress-hop classification, not identity or author-location proof)');
+    process.on('SIGHUP',()=>{
+      void (async()=>{
+        const updated=await loadPeerSourceObserver(sourceConfigPath);
+        if(updated.signer.author!==sourceObserver.signer.author)
+          throw Error('Refusing hot change of pinned observer identity');
+        const result=await bridge.updateSourceFeed(updated.feed);
+        console.log('SOURCE FEED UPDATED',result.revision,result.digest);
+      })().catch(err=>console.error('Rejected source feed update:',err.message));
+    });
+  }
   if(process.env.WEB9000_MEDIA_SERVER==='1'){
     const storageMiB=Number(process.env.WEB9000_MEDIA_STORAGE_MIB||64);
     if(!Number.isSafeInteger(storageMiB)||storageMiB<1||storageMiB>4096)

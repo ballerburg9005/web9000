@@ -4,7 +4,7 @@ import {buildFeed,DEFAULT_POLICY} from './core/policy.js';
 import {deriveGroup} from './core/governance.js';
 import {exportIdentityBackup,importIdentityBackup} from './core/identity-backup.js';
 import {openLocal,getItem,setItem} from './core/persist.js';
-import {BrowserPeerMesh,parsePeerUrls} from './network/browser-mesh.js';
+import {BrowserPeerMesh,parsePeerUrls,parseSourcePins} from './network/browser-mesh.js';
 import {mirrorDecision} from './network/mirror-policy.js';
 import {readSiteContext} from './network/site-context.js';
 
@@ -12,7 +12,8 @@ const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const spaces={commons:'Commons',art:'Creative works',organize:'Organize',exchange:'Exchange',projects:'Projects'};
 const types=['All','Discussion','Art','Event','Offer','Project','Job'];
-const state={replica:new Replica(),identity:null,db:null,space:'all',type:'All',layout:'grid',sort:'new',search:'',showFiltered:false,showUnknown:false,subscribed:[],policy:null,selected:null,fixtureKeys:{},localIds:[],groupIds:{},compiledGroups:{},groupViews:[],userTrusted:[],followedSpaces:Object.keys(spaces),mesh:null,peerUrls:[],replicationScopes:Object.keys(spaces),pending:[],lastConnected:0,autoMirror:false,siteContext:null,honorSiteOwner:true,groupHeadChoices:{}};
+const state={replica:new Replica(),identity:null,db:null,space:'all',type:'All',layout:'grid',sort:'new',search:'',showFiltered:false,showUnknown:false,subscribed:[],policy:null,selected:null,fixtureKeys:{},localIds:[],groupIds:{},compiledGroups:{},groupViews:[],userTrusted:[],followedSpaces:Object.keys(spaces),mesh:null,peerUrls:[],peerSourcePins:{},sourceFeedCheckpoints:{},
+  replicationScopes:Object.keys(spaces),pending:[],lastConnected:0,autoMirror:false,siteContext:null,honorSiteOwner:true,groupHeadChoices:{}};
 // Moderation authority derives from signed group checkpoints, not hard-coded group objects.
 const previewContent=[
  {space:'art',type:'Art',title:'Some interesting visual experiments',text:'A small collection of sketches and procedural compositions. What should be explored next?',image:'../thumb/thumb11.jpg',fields:{media:'Image gallery',count:4},author:'maker'},
@@ -64,6 +65,8 @@ async function persistNetwork(){
   await Promise.all([
     setItem(state.db,'outbox',state.pending),
     setItem(state.db,'peer-urls',state.peerUrls),
+    setItem(state.db,'peer-source-pins',state.peerSourcePins),
+    setItem(state.db,'peer-source-feed-checkpoints',state.sourceFeedCheckpoints),
     setItem(state.db,'replicate-scopes',state.replicationScopes),
     setItem(state.db,'followed-spaces',state.followedSpaces),
     setItem(state.db,'auto-mirror',state.autoMirror),
@@ -106,6 +109,13 @@ async function setupNetwork(){
   if(state.db){
     state.pending=await getItem(state.db,'outbox')||[];
     state.peerUrls=await getItem(state.db,'peer-urls')||[];
+    try{
+      state.peerSourcePins=parseSourcePins(
+        Object.entries(await getItem(state.db,'peer-source-pins')||{})
+          .map(([url,issuer])=>url+' '+issuer).join('\n'),
+        {securePage:location.protocol==='https:'});
+      state.sourceFeedCheckpoints=await getItem(state.db,'peer-source-feed-checkpoints')||{};
+    }catch{state.peerSourcePins={};state.sourceFeedCheckpoints={};}
     state.replicationScopes=await getItem(state.db,'replicate-scopes')||Object.keys(spaces);
     state.followedSpaces=await getItem(state.db,'followed-spaces')||Object.keys(spaces);
     state.autoMirror=await getItem(state.db,'auto-mirror')===true;
@@ -118,6 +128,10 @@ async function setupNetwork(){
   $('#autoMirror').checked=state.autoMirror;
   for(const name of state.followedSpaces)ensureSpace(name);
   $('#networkEndpoints').value=state.peerUrls.join('\n');
+  $('#networkSourcePins').value=Object.entries(state.peerSourcePins)
+    .map(([url,issuer])=>url+' '+issuer).join('\n');
+  $('#networkSourceStatus').textContent=Object.keys(state.peerSourcePins).length+
+    ' chosen observer(s); others remain unknown.';
   $('#suggestedPeers').onclick=async()=>{
     try{
       const response=await fetch('./peers.json',{cache:'no-store'});
@@ -134,6 +148,13 @@ async function setupNetwork(){
   $('#networkScopes').value=state.replicationScopes.join(', ');
   state.mesh=new BrowserPeerMesh({
     securePage:location.protocol==='https:',
+    onSourceFeed:(feed,url)=>{
+      state.sourceFeedCheckpoints[url]={revision:feed.revision,digest:feed.digest};
+      $('#networkSourceStatus').textContent='Verified '+url+
+        ' feed revision '+feed.revision+' · '+feed.rules.length+' ranges';
+      if(state.db)void setItem(state.db,'peer-source-feed-checkpoints',
+        state.sourceFeedCheckpoints).catch(console.error);
+    },
     onEvent:async(event,sourceUrl)=>{
       const result=await addLocal(event);
       if(!result.accepted||result.duplicate)return;
@@ -165,7 +186,9 @@ async function setupNetwork(){
   });
   updateNetworkStatus();
   if(state.peerUrls.length){
-    try{state.mesh.connect(state.peerUrls,{spaces:state.replicationScopes});}
+    try{state.mesh.connect(state.peerUrls,{spaces:state.replicationScopes,
+        sourcePins:state.peerSourcePins,
+        sourceCheckpoints:state.sourceFeedCheckpoints});}
     catch(error){$('#networkLastError').textContent=error.message;}
   }
 }
@@ -381,8 +404,15 @@ function bindEvents(){
       const raw=$('#networkScopes').value.trim();
       const scopes=raw==='*'?['*']:raw.split(/[\s,]+/).filter(Boolean);
       if(!scopes.length||scopes.length>64||scopes.some(s=>s.length>180))throw Error('Invalid replication scopes');
+      const pins=parseSourcePins($('#networkSourcePins').value,{
+        securePage:location.protocol==='https:'});
+      if(Object.keys(pins).some(url=>!peers.includes(url)))
+        throw Error('Source observer must match a selected WebSocket peer');
       state.peerUrls=peers;state.replicationScopes=scopes;
-      state.mesh.connect(peers,{spaces:scopes});await persistNetwork();
+      state.peerSourcePins=pins;
+      state.mesh.connect(peers,{spaces:scopes,sourcePins:pins,
+        sourceCheckpoints:state.sourceFeedCheckpoints});
+      await persistNetwork();
       updateNetworkStatus();newToast('Configured '+peers.length+' independently operated peer endpoint(s).');
     }catch(error){$('#networkLastError').textContent=error.message;newToast(error.message);}
   };

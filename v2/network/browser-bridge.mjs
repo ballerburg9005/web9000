@@ -2,9 +2,12 @@
 // The bridge is not a namespace authority, identity provider, or global deletion service.
 // It only exchanges independently verified signed records over a replaceable WebSocket.
 import {WebSocketServer, WebSocket} from 'ws';
+import {isIP} from 'node:net';
 import {verifyEvent} from '../core/events.js';
 import {Replica} from '../core/replica.js';
 import {ScopedEventCatalog} from './scoped-event-catalog.mjs';
+import {verifySourceFeed,classifyObservedIp,parseNetworkIp} from './source-feed.js';
+import {signSourceReceipt} from './source-receipt.js';
 
 const MAX_INBOUND = 48 * 1024;
 const MAX_BUFFERED = 2 * 1024 * 1024;
@@ -30,10 +33,109 @@ const allow = (session,event) => session.spaces?.has('*') || session.spaces?.has
  */
 export async function createBrowserBridge({
   index,replica=new Replica({maxEvents:30000}),
-  host='127.0.0.1',port=8787,maxClients=64,allowedOrigins=null,publicTestLimits=false
+  host='127.0.0.1',port=8787,maxClients=64,allowedOrigins=null,publicTestLimits=false,
+  sourceObserver=null,trustedProxyAddress=null
 }={}) {
   if (!index?.publish || !index?.loadInto || !index?.onUpdate) throw Error('Active OrbitDB index required');
   if(!Number.isSafeInteger(port)||port<0||port>65535)throw Error('Invalid browser bridge port');
+  if(trustedProxyAddress!==null&&!isIP(trustedProxyAddress))
+    throw Error('Trusted proxy must be one explicitly pinned socket IP');
+  // Optional direct-connection observation. The observer must pin a signed
+  // source feed; an author's country/VPN JSON and arbitrary HTTP headers are
+  // NEVER accepted as proof. Existing peers work unchanged with this off.
+  let observedFeed=null;
+  if(sourceObserver){
+    if(!sourceObserver.signer?.privateKey||
+      !/^ed25519:[A-Za-z0-9_-]{43}$/.test(sourceObserver.signer.author||'')||
+      typeof sourceObserver.feedIssuer!=='string'||
+      (sourceObserver.trustedProxyAddress!==undefined&&
+       !isIP(sourceObserver.trustedProxyAddress)))
+      throw Error('Pinned source-observer signing key and trusted feed issuer required');
+    observedFeed=await verifySourceFeed(sourceObserver.feed,{
+      expectedIssuer:sourceObserver.feedIssuer
+    });
+    if(!observedFeed.valid)throw Error('Unverifiable source-classification list: '+observedFeed.reason);
+  }
+  const recentObservations=new Map();
+  // A signed country/ASN/VPN feed may have up to 2,048 CIDR rules. Classify
+  // once per real WebSocket connection, not once per forged signing identity.
+  // The weak cache is discarded with the socket and invalidates on updates.
+  const connectionClassCache=new WeakMap();
+  const sourceAttemptBudgets=new Map();
+  let sourceAttemptWindow=-1;
+  const SOURCE_ATTEMPTS=Object.freeze({
+    residential:120,mobile:80,vpn:12,proxy:8,tor:8,
+    datacenter:12,hosting:12,relay:12,unknown:16
+  });
+  function observedConnection(request){
+    let ip=request.socket.remoteAddress||null,hop='direct-socket';
+    const expectedProxy=sourceObserver?.trustedProxyAddress||trustedProxyAddress;
+    if(expectedProxy&&ip===expectedProxy){
+      // Only the exact operator-pinned proxy socket may assert a single
+      // X-Real-IP. Never accept an arbitrary X-Forwarded-For chain.
+      const forwarded=request.headers['x-real-ip'];
+      if(typeof forwarded==='string'&&parseNetworkIp(forwarded)){
+        ip=forwarded;hop='trusted-proxy';
+      }else{ip=null;hop='unknown';}
+    }
+    return {ip,hop};
+  }
+  function observedClass(request){
+    const sourceFeedFresh=observedFeed&&observedFeed.expiresAt>Date.now();
+    const feedDigest=sourceFeedFresh?observedFeed.digest:null;
+    const cached=connectionClassCache.get(request);
+    if(cached&&cached.feedDigest===feedDigest)return cached.observation;
+    const {ip,hop}=observedConnection(request);
+    const classification=classifyObservedIp(ip,
+      sourceFeedFresh?observedFeed:null);
+    const observation={...classification,ip,hop,feedDigest};
+    connectionClassCache.set(request,{feedDigest,observation});
+    return observation;
+  }
+  function sourceAttempt(request){
+    if(!sourceObserver)return {allowed:true};
+    const observed=observedClass(request);
+    const parsed=parseNetworkIp(observed.ip);
+    // Never replicate raw IP/cohort. Keep only a bounded, local coarse
+    // network-prefix counter before expensive signature verification.
+    const subnet=parsed?parsed.version===4?
+      parsed.bytes.slice(0,3).join('.'):
+      parsed.bytes.slice(0,6).map(x=>x.toString(16).padStart(2,'0')).join(''):
+      'no-observable-source';
+    const family=observed.networkKind;
+    const now=Date.now(),minute=Math.floor(now/60000);
+    if(minute!==sourceAttemptWindow){
+      sourceAttemptWindow=minute;sourceAttemptBudgets.clear();
+    }
+    const kindKey=family+'|'+observed.country+'|'+observed.asn;
+    let key=kindKey+'|'+subnet;
+    if(!sourceAttemptBudgets.has(key)&&sourceAttemptBudgets.size>=128)
+      key='overflow|'+family;
+    const attempts=sourceAttemptBudgets.get(key)||0;
+    if(attempts>=SOURCE_ATTEMPTS[family])
+      return {allowed:false,
+        reason:'This observer source compartment is temporarily full'};
+    sourceAttemptBudgets.set(key,attempts+1);
+    return {allowed:true};
+  }
+  async function receiptFor(event,request){
+    if(!sourceObserver)return null;
+    const observed=observedClass(request);
+    return signSourceReceipt(sourceObserver.signer,{
+      eventId:event.id,observedAt:Date.now(),hop:observed.hop,
+      networkKind:observed.networkKind,country:observed.country,
+      asn:observed.asn,feedDigest:observed.feedDigest
+    });
+  }
+  function rememberReceipt(id,receipt){
+    if(!receipt)return;
+    for(const [key,value] of recentObservations){
+      if(value.body.expiresAt<=Date.now())recentObservations.delete(key);
+    }
+    if(recentObservations.size>=1024)
+      recentObservations.delete(recentObservations.keys().next().value);
+    recentObservations.set(id,receipt);
+  }
   await index.loadInto(replica);
   // Build once from locally verified immutable records. Future index updates
   // are added incrementally; no more O(all records) clone/filter/sort on
@@ -58,9 +160,7 @@ export async function createBrowserBridge({
   function allowTestPublication(event,request){
     if(!publicTestLimits)return {allowed:true};
     const now=Date.now(),day=Math.floor(now/86400000);
-    // Since the bridge may be behind a reverse proxy, it receives a trusted
-    // visitor IP only if the operator configured X-Real-IP at that proxy.
-    const ip=request.headers['x-real-ip'] || request.socket.remoteAddress || 'unknown';
+    const ip=observedConnection(request).ip||'unknown';
     const author=event.payload.author,kind=event.payload.kind;
     const actor=author+'|'+day,client='client:'+ip+'|'+day;
     const entry=budgets.get(actor)||{post:0,reply:0,other:0};
@@ -74,7 +174,9 @@ export async function createBrowserBridge({
     return {allowed:true};
   }
   function announce(event) {
-    for(const session of sessions)if(allow(session,event))wire(session.ws,{type:'event',event});
+    for(const session of sessions)if(allow(session,event))wire(session.ws,{
+      type:'event',event,...(recentObservations.has(event.id)?
+        {sourceReceipt:recentObservations.get(event.id)}:{})});
   }
   async function receive(event) {
     const result=await replica.ingest(event);
@@ -92,8 +194,14 @@ export async function createBrowserBridge({
     ws.on('close',()=>sessions.delete(session));
     ws.on('error',()=>{});
     wire(ws,{type:'hello',protocol:'web9000-ws/1',index:index.address,
+      ...(sourceObserver?{sourceObserver:sourceObserver.signer.author,
+        sourceFeedIssuer:sourceObserver.feedIssuer,
+        sourceFeedDigest:observedFeed.digest}:{}),
       peer:'independent-browser-bridge',maxSync:MAX_SYNC,
       capabilities:['scoped-id-index-v1','local-observation-snapshot-v1','read-only-reconciliation-v1']});
+    // Source intelligence is operator-signed public *data*, not an
+    // executable rule, a peer-wide ban or a trusted author identity.
+    if(sourceObserver)wire(ws,{type:'source-feed',document:sourceObserver.feed});
     ws.on('message',raw=>{
       const now=Date.now();
       if(now-session.window>=60000){session.window=now;session.received=0;}
@@ -129,6 +237,8 @@ export async function createBrowserBridge({
           const result=catalog.page(session.snapshot,{cursor,limit});
           const page=result.ids.map(id=>replica.get(id)).filter(Boolean);
           wire(ws,{type:'batch',events:page,next:result.next,
+            ...(sourceObserver?{sourceReceipts:page.map(ev=>
+              recentObservations.get(ev.id)||null)}:{}),
             snapshotRevision:result.revision});
           return;
         }
@@ -175,6 +285,15 @@ export async function createBrowserBridge({
           return;
         }
         if(msg.type==='publish'){
+          // Network-origin admission is cheaper than validating thousands
+          // of forged signing identities. The source budget resets each
+          // minute; it does not ban an author or alter signed event validity.
+          const sourceBudget=sourceAttempt(request);
+          if(!sourceBudget.allowed){
+            wire(ws,{type:'reject',reason:sourceBudget.reason,
+              id:VALID_ID.test(msg.event?.id)?msg.event.id:null});
+            return;
+          }
           if(!await verifyEvent(msg.event)){wire(ws,{type:'reject',reason:'bad signature or envelope'});return;}
           if(replica.size>=replica.maxEvents&&!replica.get(msg.event.id)){
             wire(ws,{type:'reject',reason:'local node capacity'});return;
@@ -184,10 +303,18 @@ export async function createBrowserBridge({
           const budget=allowTestPublication(msg.event,request);
           if(!budget.allowed){wire(ws,{type:'reject',reason:budget.reason,id:msg.event.id});return;}
           try{
+            const receipt=await receiptFor(msg.event,request);
+            rememberReceipt(msg.event.id,receipt);
             await index.publish(msg.event);
             await receive(msg.event);
+            // Returning the signed observation to its source does not
+            // turn the source's IP classification into author identity.
+            if(receipt)wire(ws,{type:'source-receipt',eventId:msg.event.id,receipt});
             wire(ws,{type:'ack',id:msg.event.id});
-          }catch(error){wire(ws,{type:'reject',reason:'this peer could not append',id:msg.event.id});}
+          }catch(error){
+            recentObservations.delete(msg.event?.id);
+            wire(ws,{type:'reject',reason:'this peer could not append',id:msg.event.id});
+          }
           return;
         }
         wire(ws,{type:'error',error:'unknown command'});
@@ -198,6 +325,17 @@ export async function createBrowserBridge({
     replica,catalog,index: index.address,
     host,port:server.address().port,
     url:'ws://'+(host.includes(':')?'['+host+']':host)+':'+server.address().port+'/',
+    async updateSourceFeed(document){
+      if(!sourceObserver)throw Error('Source classification is not enabled at this peer');
+      const verified=await verifySourceFeed(document,{
+        expectedIssuer:sourceObserver.feedIssuer,
+        minimumRevision:observedFeed.revision+1
+      });
+      if(!verified.valid)throw Error('Source feed update rejected: '+verified.reason);
+      observedFeed=verified;sourceObserver.feed=document;
+      for(const session of sessions)wire(session.ws,{type:'source-feed',document});
+      return {revision:verified.revision,digest:verified.digest};
+    },
     async close(){
       unsubscribe();
       for(const session of sessions)session.ws.terminate();
