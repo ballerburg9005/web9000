@@ -20,6 +20,7 @@ import {LevelBlockstore} from 'blockstore-level';
 import {createHelia} from 'helia';
 import {createOrbitDB} from '@orbitdb/core';
 import {openLocalAdaptiveShard} from './adaptive-tier-router.mjs';
+import {verifyIngressCapability} from './ingress-capability.mjs';
 
 const cls=process.argv[2],dir=process.argv[3],port=Number(process.argv[4]??0);
 if(!['entry','sponsored','established'].includes(cls)||
@@ -32,15 +33,21 @@ const MAX_RECORDS=50;
 const MAX_WINDOW=30;
 const MAX_INFLIGHT=4;
 const AUTHOR=/^ed25519:[A-Za-z0-9_-]{43}$/;
-let allowlist=new Set();
+let allowlist=new Set(),pinnedIssuer=null;
 const allowFile=process.argv[5];
 if(cls!=='entry'){
   if(typeof allowFile!=='string'||!path.isAbsolute(allowFile))
     throw Error('Protected lab worker must have an explicit operator-owned author allowlist');
   const parsed=JSON.parse(await readFile(allowFile,'utf8'));
-  if(!Array.isArray(parsed)||parsed.length>1000||parsed.some(x=>!AUTHOR.test(x)))
-    throw Error('Invalid lab author allowlist');
-  allowlist=new Set(parsed);
+  if(Array.isArray(parsed)){
+    if(parsed.length>1000||parsed.some(x=>!AUTHOR.test(x)))
+      throw Error('Invalid lab author allowlist');
+    allowlist=new Set(parsed);
+  }else if(parsed?.mode==='pinned-ingress-capability'&&
+           AUTHOR.test(parsed.issuer||'')&&
+           Object.keys(parsed).sort().join(',')==='issuer,mode'){
+    pinnedIssuer=parsed.issuer;
+  }else throw Error('Invalid protected operator-owned authorization settings');
 }
 await mkdir(dir,{recursive:true});
 let p2p,ipfs,orbitdb,shard,server;
@@ -107,10 +114,21 @@ try{
       if(!event?.payload?.author||!AUTHOR.test(event.payload.author)){
         throw Error('invalid-author');
       }
-      if(cls!=='entry'&&!allowlist.has(event.payload.author)){
-        counters.unqualified++;
-        reply(res,403,{ok:false,error:'operator-proof-required'});
-        return;
+      if(cls!=='entry'){
+        // This worker trusts only a PINNED issuer from operator-owned local
+        // settings. Gateway claims and X-Forwarded-For values do not grant
+        // access. The author's signed event is verified independently below.
+        const permitted=pinnedIssuer?
+          (await verifyIngressCapability(
+            req.headers['x-w9-operator-capability'],{
+              expectedIssuer:pinnedIssuer,subject:event.payload.author,
+              className:cls
+            })).valid:allowlist.has(event.payload.author);
+        if(!permitted){
+          counters.unqualified++;
+          reply(res,403,{ok:false,error:'operator-proof-required'});
+          return;
+        }
       }
       await shard.publish(event); // original Ed25519 verification, then append
       total++;counters.accepted++;

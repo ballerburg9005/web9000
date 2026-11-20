@@ -100,7 +100,7 @@ export class AdaptiveTierRouter {
   #summary={accepted:0,limited:0,invalid:0,duplicate:0};
   #seen=new Set();
   constructor({openShard,verifyAttestation=async()=>null,
-    now=()=>Date.now(),maxShards=100,windowSeconds=60,
+    now=()=>Date.now(),maxShards=20,windowSeconds=60,
     namePrefix='w9-adaptive-test',entryBudget=80,
     sponsoredBudget=50,establishedBudget=150,
     sourceBudget=12,authorBudget=6,maxInFlight=12,
@@ -110,7 +110,7 @@ export class AdaptiveTierRouter {
     secret=randomBytes(32)}={}){
     if(typeof openShard!=='function'||typeof verifyAttestation!=='function'||
        typeof now!=='function')throw Error('Missing independent shard opener/verifier');
-    bounded(maxShards,100,'maxShards',1);
+    bounded(maxShards,20,'maxShards',1);
     bounded(windowSeconds,3600,'windowSeconds',1);
     for(const [val,key] of [[entryBudget,'entryBudget'],[sponsoredBudget,'sponsoredBudget'],
       [establishedBudget,'establishedBudget'],[sourceBudget,'sourceBudget'],

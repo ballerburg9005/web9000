@@ -272,7 +272,7 @@ test('flood budgets and trusted proof checks remain bounded even when many bogus
 test('12,000 fabricated sender identities cannot allocate unbounded DBs or per-signer accounting memory',async()=>{
   const router=new AdaptiveTierRouter({
     openShard:async()=>{throw Error('Unsigned flood must not open a database');},
-    now:()=>360000,maxShards:100,entryBudget:12,sourceBudget:4,
+    now:()=>360000,maxShards:20,entryBudget:12,sourceBudget:4,
     secret:Buffer.alloc(32,0x33)
   });
   let rejected=0;
@@ -294,5 +294,18 @@ test('12,000 fabricated sender identities cannot allocate unbounded DBs or per-s
   assert.equal(status.shards.length,0,'unverified headers never allocate durable DBs');
   assert.equal(status.active.entry,2,
     'at most one adaptive split per local observation window');
+  await router.close();
+});
+
+test('a new operator cannot provision more than the selected 20 physical databases',async()=>{
+  assert.throws(()=>new AdaptiveTierRouter({
+    openShard:async()=>({address:'/orbitdb/irrelevant',publish:async()=>{}}),
+    maxShards:21
+  }),/Invalid maxShards/);
+  const router=new AdaptiveTierRouter({
+    openShard:async()=>({address:'/orbitdb/irrelevant',publish:async()=>{}})
+  });
+  assert.equal(router.status.active.entry,1);
+  assert.equal(router.adapt().maxShards,20);
   await router.close();
 });

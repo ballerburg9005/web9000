@@ -581,3 +581,9 @@ The intent is failure containment in independent network-based and trust-based r
 > "obviously higher tiers could be loaded first also ... but this would also make 100 dbs less attractive than 20 or whatever"
 
 Interpretation: independently established and sponsored physical databases should be restored and subscribed ahead of unverified lower tiers on each operator/reader, within a tunable **active** subscription budget (e.g. 20). This is distinct from the maximum number of **historical or dynamically created physical DB addresses** (which may still be 100). Preserve a small free-entry allocation and never delete dormant signed records just because the operator does not currently subscribe. Implemented opt-in PriorityShardLoader and measured actual 100-signed-DB warm restore of 20 vs 100: 0.480 vs 2.492 seconds; 20 vs 100 pubsub topics; no live migration. A separate independent-worker sandbox also demonstrated hard CPU/RAM/PID limits in Docker. Details: docs/PRIORITY-RECOVERY-ISOLATION-2026-11-20.md.
+
+## 2026-11-20 — Owner selects 20 physical databases
+
+> "20 DB it is then"
+
+Interpretation: 20 is the selected physical database cap for NEW operator shard allocation, not merely the number loaded simultaneously. Code now defaults to maxShards=20 and rejects >20 for new AdaptiveTierRouter instances. The existing Ed25519-signed historical directory remains able to discover/read *previously created* shards without deletion or migration. Priority loader still favors trust classes first. New bounded ingress and signed operator-capability sandbox are separately tested but NOT the live WEB9000 peer. The 100-shard benchmark is historical evidence, not current design target. See docs/INGRESS-ISOLATION-2026-11-20.md.
