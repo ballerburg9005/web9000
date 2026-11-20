@@ -8,6 +8,7 @@ import {Replica} from '../core/replica.js';
 import {ScopedEventCatalog} from './scoped-event-catalog.mjs';
 import {verifySourceFeed,classifyObservedIp,parseNetworkIp} from './source-feed.js';
 import {signSourceReceipt} from './source-receipt.js';
+import {verifySourceFeedDocument} from './source-feed-bundle.js';
 
 const MAX_INBOUND = 48 * 1024;
 const MAX_BUFFERED = 2 * 1024 * 1024;
@@ -51,7 +52,7 @@ export async function createBrowserBridge({
       (sourceObserver.trustedProxyAddress!==undefined&&
        !isIP(sourceObserver.trustedProxyAddress)))
       throw Error('Pinned source-observer signing key and trusted feed issuer required');
-    observedFeed=await verifySourceFeed(sourceObserver.feed,{
+    observedFeed=await verifySourceFeedDocument(sourceObserver.feed,{
       expectedIssuer:sourceObserver.feedIssuer
     });
     if(!observedFeed.valid)throw Error('Unverifiable source-classification list: '+observedFeed.reason);
@@ -154,6 +155,14 @@ export async function createBrowserBridge({
     server.once('error',reject);
   });
   const sessions=new Set();
+  function announceSignedSourceList(ws){
+    if(!sourceObserver)return;
+    // Multipart data stays outside OrbitDB. Only the small signed manifest
+    // is sent unsolicited; readers opt into bounded, sequential chunk fetch.
+    if(sourceObserver.feed.manifest)
+      wire(ws,{type:'source-feed-manifest',manifest:sourceObserver.feed.manifest});
+    else wire(ws,{type:'source-feed',document:sourceObserver.feed});
+  }
   // RAM-only, operator-defined caps protect the unaudited *test peer*.
   // These are not global publication rules. Any user can host another peer.
   const budgets=new Map();
@@ -189,7 +198,8 @@ export async function createBrowserBridge({
   const unsubscribe=index.onUpdate(event=>{receive(event).catch(err=>console.error('Bridge update error',err));});
   server.on('connection',(ws,request)=>{
     const session={ws,spaces:null,snapshot:null,
-      window:Date.now(),received:0,chain:Promise.resolve(),inventoryMemo:new Map()};
+      window:Date.now(),received:0,chain:Promise.resolve(),inventoryMemo:new Map(),
+      chunkWindow:Date.now(),chunkRequests:0};
     sessions.add(session);
     ws.on('close',()=>sessions.delete(session));
     ws.on('error',()=>{});
@@ -201,7 +211,7 @@ export async function createBrowserBridge({
       capabilities:['scoped-id-index-v1','local-observation-snapshot-v1','read-only-reconciliation-v1']});
     // Source intelligence is operator-signed public *data*, not an
     // executable rule, a peer-wide ban or a trusted author identity.
-    if(sourceObserver)wire(ws,{type:'source-feed',document:sourceObserver.feed});
+    announceSignedSourceList(ws);
     ws.on('message',raw=>{
       const now=Date.now();
       if(now-session.window>=60000){session.window=now;session.received=0;}
@@ -212,6 +222,28 @@ export async function createBrowserBridge({
         let msg;
         try{msg=JSON.parse(raw.toString('utf8'));}catch{wire(ws,{type:'error',error:'invalid JSON'});return;}
         if(!msg||typeof msg!=='object'||Array.isArray(msg))return;
+        if(msg.type==='source-feed-chunk'){
+          if(!sourceObserver?.feed?.manifest)return;
+          const data=sourceObserver.feed;
+          if(!Number.isSafeInteger(msg.revision)||
+             msg.revision!==data.manifest.body.revision||
+             !Number.isSafeInteger(msg.index)||msg.index<0||
+             msg.index>=data.chunks.length){
+            wire(ws,{type:'error',error:'invalid signed source chunk request'});
+            return;
+          }
+          const moment=Date.now();
+          if(moment-session.chunkWindow>=60000){
+            session.chunkWindow=moment;session.chunkRequests=0;
+          }
+          if(++session.chunkRequests>68){
+            wire(ws,{type:'error',error:'signed source chunk request budget'});
+            return;
+          }
+          wire(ws,{type:'source-feed-chunk',revision:msg.revision,
+            index:msg.index,document:data.chunks[msg.index]});
+          return;
+        }
         if(msg.type==='subscribe'){
           if(!Array.isArray(msg.spaces)||msg.spaces.length<1||msg.spaces.length>64 ||
              msg.spaces.some(s=>s!=='*'&&!VALID_SPACE(s))){
@@ -327,13 +359,13 @@ export async function createBrowserBridge({
     url:'ws://'+(host.includes(':')?'['+host+']':host)+':'+server.address().port+'/',
     async updateSourceFeed(document){
       if(!sourceObserver)throw Error('Source classification is not enabled at this peer');
-      const verified=await verifySourceFeed(document,{
+      const verified=await verifySourceFeedDocument(document,{
         expectedIssuer:sourceObserver.feedIssuer,
         minimumRevision:observedFeed.revision+1
       });
       if(!verified.valid)throw Error('Source feed update rejected: '+verified.reason);
       observedFeed=verified;sourceObserver.feed=document;
-      for(const session of sessions)wire(session.ws,{type:'source-feed',document});
+      for(const session of sessions)announceSignedSourceList(session.ws);
       return {revision:verified.revision,digest:verified.digest};
     },
     async close(){

@@ -63,6 +63,14 @@ function rangeCidr(value){
  }
  return {version:ip.version,bytes,bits};
 }
+// Portable canonical key for detecting overlapping textual representations
+// of an identical IP prefix across independently transferred feed chunks.
+export function normalizeNetworkCidr(cidr){
+ const parsed=rangeCidr(cidr);
+ if(!parsed)return null;
+ return parsed.version+'|'+parsed.bits+'|'+
+  parsed.bytes.map(b=>b.toString(16).padStart(2,'0')).join('');
+}
 function strictShape(input,keys){
  return input&&typeof input==='object'&&!Array.isArray(input)&&
   Object.keys(input).sort().join(',')===keys.slice().sort().join(',');
@@ -128,6 +136,29 @@ export async function verifySourceFeed(document,{expectedIssuer,now=Date.now(),m
    expiresAt:b.expiresAt,rules:b.rules};
  }catch{return {valid:false,reason:'invalid-source-feed'};}
 }
+// Pre-index prefixes once per independently verified source revision.
+// Avoid re-scanning and re-parsing tens of thousands of CIDRs per socket.
+const prefixIndexes=new WeakMap();
+function prefixKey(version,bits,bytes){
+ const normalized=[];
+ for(let i=0;i<bytes.length;i++){
+  const width=Math.max(0,Math.min(8,bits-i*8));
+  const mask=width===0?0:(255<<(8-width))&255;
+  normalized.push((bytes[i]&mask).toString(16).padStart(2,'0'));
+ }
+ return version+'|'+bits+'|'+normalized.join('');
+}
+function indexedRules(feed){
+ let index=prefixIndexes.get(feed);
+ if(index)return index;
+ index={4:new Map(),6:new Map()};
+ for(const rule of feed.rules){
+  const net=rangeCidr(rule.cidr);
+  if(net)index[net.version].set(prefixKey(net.version,net.bits,net.bytes),rule);
+ }
+ prefixIndexes.set(feed,index);
+ return index;
+}
 export function classifyObservedIp(ip,verifiedFeed){
  if(!verifiedFeed?.valid||!Array.isArray(verifiedFeed.rules))
   return {networkKind:'unknown',country:'ZZ',asn:'AS0',matched:false,
@@ -135,21 +166,25 @@ export function classifyObservedIp(ip,verifiedFeed){
  const addr=parseNetworkIp(ip);
  if(!addr)return {networkKind:'unknown',country:'ZZ',asn:'AS0',matched:false,
   reason:'source-address-unavailable'};
- let best=null,bits=-1;
- for(const rule of verifiedFeed.rules){
-  const subnet=rangeCidr(rule.cidr);
-  if(!subnet||subnet.version!==addr.version||subnet.bits<=bits)continue;
-  let match=true;
-  for(let j=0;j<subnet.bytes.length;j++){
-   const width=Math.max(0,Math.min(8,subnet.bits-j*8));
-   if(width===0)break;
-   const mask=255<<(8-width)&255;
-   if((addr.bytes[j]&mask)!==subnet.bytes[j]){match=false;break;}
-  }
-  if(match){best=rule;bits=subnet.bits;}
+ const index=indexedRules(verifiedFeed)[addr.version];
+ const bitsLimit=addr.version===4?24:48;
+ let first=null,kind=null,country=null,asn=null;
+ for(let bits=bitsLimit;bits>=0;bits--){
+  const rule=index.get(prefixKey(addr.version,bits,addr.bytes));
+  if(!rule)continue;
+  first??=rule;
+  // ASN/country intelligence can describe a more-specific prefix while
+  // an independent broader VPN/datacenter rule describes its resource type.
+  // A more-specific explicitly labeled type still overrides broad labels.
+  if(!kind&&rule.networkKind!=='unknown')kind=rule;
+  if(!country&&rule.country!=='ZZ')country=rule;
+  if(!asn&&rule.asn!=='AS0')asn=rule;
+  if(kind&&country&&asn)break;
  }
- return best?{networkKind:best.networkKind,country:best.country,asn:best.asn,
-   matched:true,reason:'verified-operator-source-feed'}:
-  {networkKind:'unknown',country:'ZZ',asn:'AS0',matched:false,
-   reason:'no-matching-prefix'};
+ if(!first)return {networkKind:'unknown',country:'ZZ',asn:'AS0',
+  matched:false,reason:'no-matching-prefix'};
+ return {networkKind:kind?.networkKind||first.networkKind,
+  country:country?.country||first.country,
+  asn:asn?.asn||first.asn,matched:true,
+  reason:'verified-operator-source-feed'};
 }

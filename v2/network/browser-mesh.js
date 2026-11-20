@@ -4,6 +4,7 @@
 import {verifyEvent} from '../core/events.js';
 import {verifySourceReceipt} from './source-receipt.js';
 import {verifySourceFeed} from './source-feed.js';
+import {verifySourceFeedManifest,verifySourceFeedChunk,assembleSourceFeedBundle} from './source-feed-bundle.js';
 const ID=/^sha256:[0-9a-f]{64}$/;
 const allowedSpace=s=>typeof s==='string'&&s.length>0&&s.length<=180&&!/[\x00-\x1f]/.test(s);
 // Transport subscriptions are independent of followed-space UI filters.
@@ -114,6 +115,7 @@ export class BrowserPeerMesh{
     for(const s of this.#connections.values()){
       if(s.timer)clearTimeout(s.timer);
       if(s.resumeTimer)clearTimeout(s.resumeTimer);
+      if(s.initialSyncTimer)clearTimeout(s.initialSyncTimer);
       s.ws.onopen=s.ws.onmessage=s.ws.onerror=s.ws.onclose=null;
       s.ws.close();
     }
@@ -125,12 +127,21 @@ export class BrowserPeerMesh{
     try{ws=new this.WS(url);}catch(error){this.onError(url,error.message);return;}
     const s={ws,timer:null,chain:Promise.resolve(),pages:0,lastCursor:null,
       queued:0,queuedBytes:0,minute:-1,verifiedCount:0,
-      deferred:null,resumeTimer:null,
+      deferred:null,resumeTimer:null,feedPending:null,
+      initialSyncStarted:false,initialSyncTimer:null,
       laneCounts:new Map(),receiptIssuer:null,
       feedRevision:this.sourceCheckpoints[url]?.revision||0,
       feedDigest:this.sourceCheckpoints[url]?.digest||null,
       feedValidated:false};
     this.#connections.set(url,s);
+    const initialSync=()=>{
+      if(s.initialSyncStarted||generation!==this.#generation||
+         ws.readyState!==this.WS.OPEN)return;
+      s.initialSyncStarted=true;
+      if(s.initialSyncTimer)clearTimeout(s.initialSyncTimer);
+      s.initialSyncTimer=null;
+      this.#send(ws,url,{type:'sync',cursor:null,limit:32});
+    };
     const processBatch=async msg=>{
       if(!Array.isArray(msg.events)||msg.events.length>32||
          msg.sourceReceipts!==undefined&&
@@ -171,7 +182,14 @@ export class BrowserPeerMesh{
       this.#status();
       // Subscribe all namespaces by default. Per-scope replication is optional.
       this.#send(ws,url,{type:'subscribe',spaces:this.scopes});
-      this.#send(ws,url,{type:'sync',cursor:null,limit:32});
+      // If the reader pinned a source observer, fetch its complete signed
+      // CIDR manifest BEFORE walking potentially thousands of historical
+      // pages. Otherwise both requests compete for a server's bounded
+      // per-socket message budget. Legacy/nonparticipating peers fall back
+      // to unknown-source synchronization after a short bounded delay.
+      if(this.sourcePins[url]){
+        s.initialSyncTimer=setTimeout(initialSync,5000);
+      }else initialSync();
       for(const event of this.getPending())this.publish(event,[url]);
     };
     ws.onmessage=e=>{
@@ -222,8 +240,70 @@ export class BrowserPeerMesh{
                 s.feedValidated=true;
                 this.sourceCheckpoints[url]={revision:feed.revision,digest:feed.digest};
                 this.onSourceFeed(feed,url);
+                initialSync();
               }
             }else this.onError(url,'unverified or stale source-feed update');
+          }
+        }else if(msg.type==='source-feed-manifest'){
+          const expectedIssuer=this.sourcePins[url];
+          if(expectedIssuer){
+            const manifest=await verifySourceFeedManifest(msg.manifest,{
+              expectedIssuer,minimumRevision:s.feedRevision||1,now:this.now()
+            });
+            if(!manifest.valid){
+              this.onError(url,'unverified or stale source manifest');
+            }else if(manifest.revision===s.feedRevision&&s.feedDigest&&
+                     manifest.digest!==s.feedDigest){
+              this.onError(url,'signed source manifest fork at pinned revision');
+            }else if(!(s.feedValidated&&manifest.digest===s.feedDigest)){
+              // Only a verified, independently pinned manifest can make the
+              // browser request additional data. Each chunk is requested
+              // AFTER the previous one verifies, never sent unsolicited.
+              s.feedPending={manifest,index:0,checked:[]};
+              // 64 sequential chunks may require considerable latency on
+              // a slow mobile connection. A valid signed manifest extends
+              // the fallback without allowing an unverified peer to keep
+              // historical sync indefinitely suspended.
+              if(s.initialSyncTimer)clearTimeout(s.initialSyncTimer);
+              s.initialSyncTimer=setTimeout(initialSync,120000);
+              this.#send(ws,url,{type:'source-feed-chunk',
+                revision:manifest.revision,index:0});
+            }
+          }
+        }else if(msg.type==='source-feed-chunk'){
+          const pending=s.feedPending;
+          if(pending&&msg.revision===pending.manifest.revision&&
+             msg.index===pending.index){
+            const verified=await verifySourceFeedChunk(msg.document,{
+              manifest:pending.manifest,index:pending.index,now:this.now()
+            });
+            if(!verified.valid){
+              s.feedPending=null;
+              this.onError(url,'source chunk failed manifest verification');
+            }else{
+              pending.checked.push(verified);pending.index++;
+              if(pending.index<pending.manifest.chunks.length){
+                this.#send(ws,url,{type:'source-feed-chunk',
+                  revision:pending.manifest.revision,index:pending.index});
+              }else{
+                s.feedPending=null;
+                let assembled;
+                try{
+                  assembled=assembleSourceFeedBundle(pending.manifest,pending.checked);
+                }catch{
+                  this.onError(url,'signed source chunks conflict or are incomplete');
+                  return;
+                }
+                // Commit the new local feed checkpoint ONLY when all
+                // chunks match the same signed operator manifest.
+                s.feedRevision=assembled.revision;s.feedDigest=assembled.digest;
+                s.feedValidated=true;
+                this.sourceCheckpoints[url]={revision:assembled.revision,
+                  digest:assembled.digest};
+                this.onSourceFeed(assembled,url);
+                initialSync();
+              }
+            }
           }
         }else if(msg.type==='batch'){
           if(!s.deferred)await processBatch(msg);
@@ -253,6 +333,7 @@ export class BrowserPeerMesh{
     ws.onclose=()=>{this.#trace('status',url,'WebSocket closed');if(generation!==this.#generation)return;
       if(this.#connections.get(url)!==s)return;
       if(s.resumeTimer)clearTimeout(s.resumeTimer);
+      if(s.initialSyncTimer)clearTimeout(s.initialSyncTimer);
       this.#connections.delete(url);this.#status();
       const delay=Math.min(30000,1000*Math.pow(2,Math.min(attempt,5)));
       const boundedDelay=s.budgetPauseUntil?
