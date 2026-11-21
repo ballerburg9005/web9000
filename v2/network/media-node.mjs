@@ -105,6 +105,7 @@ export async function createImageGateway({
  ipfs,host='127.0.0.1',port=8788,manifestFile,uploadEnabled=false,
  richMediaEnabled=false,maxTotal=MAX_TOTAL,trustedProxyAddress=null,
  quarantineFile=null,stakeGrantIssuer=null,stakeGrantAudience='web9000-media-peer',
+ stakeGrantMode='production',
  transferLanes=null
 }={}){
  if(!ipfs||typeof manifestFile!=='string')throw Error('Helia and manifest required');
@@ -113,6 +114,8 @@ export async function createImageGateway({
  // work without a restart. Invalid policy fails closed, not open.
  if(trustedProxyAddress!==null&&!isIP(trustedProxyAddress))
   throw Error('trustedProxyAddress must be a literal IPv4/IPv6 address');
+ if(!['production','base-sepolia-testnet'].includes(stakeGrantMode))
+  throw Error('Explicit media grant chain/mode pin required');
  if(stakeGrantIssuer!==null&&
     (!/^ed25519:[A-Za-z0-9_-]{43}$/.test(stakeGrantIssuer)||
      !/^[a-z0-9][a-z0-9-]{2,80}$/.test(stakeGrantAudience)))
@@ -189,6 +192,9 @@ export async function createImageGateway({
     imageLimit:IMAGE_MAX,audioLimit:AUDIO_MAX,videoLimit:VIDEO_MAX,
     imageStakeLimit:MiB,videoStake100Limit:20*MiB,
     videoStake1000Limit:100*MiB,stakeAdmissionEnabled:!!stakeGrantIssuer,
+    stakeGrantMode:stakeGrantIssuer?stakeGrantMode:null,
+    stakeGrantAudience:stakeGrantIssuer?stakeGrantAudience:null,
+    stakeGrantIssuer:stakeGrantIssuer||null,
     priorityLanes:lanes.stats()});
    return;
   }
@@ -224,7 +230,8 @@ export async function createImageGateway({
     if(!stakeGrantIssuer)
      return send(res,403,{error:'Extended media requires an independently verified, operator-signed Stake4Karma entitlement'});
     stake=await verifyMediaStakeGrant(req.headers['x-web9000-media-grant'],{
-      expectedIssuer:stakeGrantIssuer,audience:stakeGrantAudience,type,bytes:size
+      expectedIssuer:stakeGrantIssuer,audience:stakeGrantAudience,type,
+      mode:stakeGrantMode,bytes:size
     });
     if(!stake.valid)return send(res,403,{error:'Invalid media stake grant: '+stake.reason});
    }
@@ -293,7 +300,8 @@ export async function createImageGateway({
         codec:rich?'unixfs':'raw',sha256:actualHash,
         priority:priority.name,
         ...(stake?{stakeGrantEvidence:stake.evidenceSha256,
-          stakeUsdTier:stake.usdCents>=100000?1000:100}:{})};
+          stakeUsdTier:stake.usdCents>=100000?1000:100,
+          stakeGrantMode:stake.mode}:{})};
        totalBytes+=size;
        writing=writing.then(save);await writing;
       }

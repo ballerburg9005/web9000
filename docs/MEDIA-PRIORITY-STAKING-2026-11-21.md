@@ -1,3 +1,5 @@
+**TESTNET UPDATE (2026-11-21):** The experimental Base Sepolia TEST ETH flow now includes a separate testnet-only issuer, browser wallet/deposit/challenge/grant controls, explicit testnet-mode gateway isolation, and a real Helia testnet-grant upload above 21 MiB. Testnet does NOT make its simulated $100/$1,000 tiers real dollars; the production-dollar issuer remains disabled. See [TESTNET-MEDIA-STAKING-2026-11-21.md](TESTNET-MEDIA-STAKING-2026-11-21.md).
+
 # WEB9000 media priority and Stake4Karma-sized uploads (2026-11-21)
 
 **Status: implemented and tested in the repository, NOT activated on the hosted peer.** Binary units: KiB=1,024 bytes and MiB=1,048,576 bytes. This is a local resource-priority mechanism, NOT content moderation or global authorship authority. The owner's 20-new-physical-OrbitDB-database ceiling stays unchanged.

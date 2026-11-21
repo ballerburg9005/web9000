@@ -45,6 +45,7 @@
     "test:isolated-worker": "node --test isolated-tier-worker.test.mjs",
     "test:ingress": "node --test bounded-ingress.test.mjs",
     "test:proof-qualification": "node --test operator-trust-proof.test.mjs operator-proof-service.test.mjs stake4karma-testnet-verifier.test.mjs",
+    "test:media-testnet": "node --test testnet-media-issuer.test.mjs testnet-media-client.test.mjs",
     "test:live-ui": "node live-ui-qa.mjs",
     "test:media-bitswap": "node --test media-bitswap-policy.test.mjs"
   },

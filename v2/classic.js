@@ -18,6 +18,8 @@ import {buildPostLifecycles} from './core/lifecycle.js';
 import {mediaItems,primaryMedia,choosePrimaryMediaIndex,categoryForType,
   validateLocalUploads} from './core/media.js';
 import {MEDIA_BASE_LIMITS} from './core/media-resource-policy.js';
+import {requestTestnetMediaGrant,depositTestnetMediaStake,
+  requiredSimulatedTestnetTier} from './network/testnet-media-client.js';
 import {parseMediaGateways,claimsFromVerifiedEvents,chooseMediaGateways} from './core/media-discovery.js';
 import {normalizeRelations,setRelation,relationFor} from './core/social-relations.js';
 import {discussionRecords,filterDebugEntries,summarizeSignedEvents,DebugTrace} from './core/debug-console.js';
@@ -3147,9 +3149,85 @@ function bind(){
   $('postNew').onclick=()=>{resetComposition();modal('postDialog');};
   $('composePresentation').onchange=updateComposeType;
   $('composeFiles').onchange=()=>{
+    $('composeMediaGrant').value='';
+    $('composeTestnetStatus').textContent='Media changed. Existing file-specific grants cleared.';
     const types=[...$('composeFiles').files].map(file=>file.type);
     if(!$('composePrimaryIndex').dataset.userSelected)
       $('composePrimaryIndex').value=String(Math.max(0,choosePrimaryMediaIndex(types)));
+  };
+  // No wallet transaction occurs without a separate user click.
+  const oversizedFile=()=>{
+    const files=[...$('composeFiles').files].filter(f=>
+      f.size>MEDIA_BASE_LIMITS[f.type]);
+    if(files.length!==1)
+      throw Error('Choose exactly one file above its ordinary size cap');
+    requiredSimulatedTestnetTier(files[0]);
+    return files[0];
+  };
+  const status=message=>$('composeTestnetStatus').textContent=message;
+  const mediaPeer=()=>{
+    if(!state.mediaBase)throw Error('First select and approve an independent media peer');
+    return state.mediaBase;
+  };
+  const chosenIssuer=()=>{
+    const value=$('composeTestnetIssuer').value.trim();
+    if(!value)throw Error('Enter the operator-selected Base Sepolia grant issuer URL');
+    return value;
+  };
+  const walletAccount=async()=>{
+    const wallet=window.ethereum;
+    if(!wallet?.request)throw Error('No EIP-1193 browser wallet available');
+    const selected=await wallet.request({method:'eth_requestAccounts'});
+    if(!/^0x[0-9a-fA-F]{40}$/.test(selected?.[0]||''))
+      throw Error('No valid wallet address selected');
+    $('composeTestnetWallet').value=selected[0];
+    return selected[0];
+  };
+  $('composeTestnetConnect').onclick=async()=>{
+    try{const wallet=await walletAccount();
+      status('Selected '+wallet.slice(0,10)+'… . This does not stake anything.');
+    }catch(error){status(error.message);}
+  };
+  $('composeTestnetDeposit').onclick=async()=>{
+    const button=$('composeTestnetDeposit');button.disabled=true;
+    try{
+      const file=oversizedFile();
+      const result=await depositTestnetMediaStake({
+        issuerUrl:chosenIssuer(),mediaUrl:mediaPeer(),identity:state.identity,
+        file,walletProvider:window.ethereum,
+        confirmDeposit:details=>window.confirm(
+          'BASE SEPOLIA TESTNET ONLY.\n\nDeposit '+
+          details.amountWei+' wei of TEST ETH from '+details.wallet+
+          '\ninto contract '+details.contract+
+          '\nfor a SIMULATED $'+details.simulatedTierUsd+
+          ' media grant?\n\nOnly approve if you independently recognize '+
+          'this deployed testnet contract. Never send real ETH or mainnet funds.'
+        )
+      });
+      $('composeTestnetWallet').value=result.wallet;
+      status(result.alreadyQualified?
+        'Existing TEST ETH lock meets this simulated tier; request a grant.':
+        'Testnet transaction submitted: '+result.transactionHash+
+        '. Once confirmed on Base Sepolia, request a file grant.');
+    }catch(error){status('Test ETH deposit: '+error.message);}
+    finally{button.disabled=false;}
+  };
+  $('composeTestnetRequest').onclick=async()=>{
+    const button=$('composeTestnetRequest');button.disabled=true;
+    try{
+      const file=oversizedFile();
+      let wallet=$('composeTestnetWallet').value.trim();
+      if(!wallet)wallet=await walletAccount();
+      status('Hashing selected media locally and checking the Base Sepolia lock…');
+      const result=await requestTestnetMediaGrant({
+        issuerUrl:chosenIssuer(),mediaUrl:mediaPeer(),identity:state.identity,
+        wallet,file
+      });
+      $('composeMediaGrant').value=result.grant;
+      status('Verified TEST ETH stake · simulated $'+result.simulatedTierUsd+
+        ' tier · grant ready for this exact file (60 seconds). Publish promptly.');
+    }catch(error){status('Testnet grant refused: '+error.message);}
+    finally{button.disabled=false;}
   };
   $('addComposeAttribute').onclick=addComposeAttributeRow;
   $('closeComposer').onclick=()=>close('postDialog');$('cancelPost').onclick=()=>close('postDialog');

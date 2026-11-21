@@ -141,6 +141,10 @@ try {
     // configured oracle + reviewed escrow; testnet ETH is NOT USD.
     // No issuer means larger file admission stays disabled.
     const mediaStakeIssuer=process.env.WEB9000_MEDIA_STAKE_ISSUER||null;
+    const mediaStakeMode=process.env.WEB9000_MEDIA_STAKE_MODE||'production';
+    if(mediaStakeMode==='base-sepolia-testnet'&&
+       process.env.WEB9000_ENABLE_TESTNET_MEDIA!=='1')
+      throw Error('Testnet-simulated grant admission requires explicit WEB9000_ENABLE_TESTNET_MEDIA=1');
     if(mediaStakeIssuer&&!process.env.WEB9000_MEDIA_STAKE_AUDIENCE)
       throw Error('WEB9000_MEDIA_STAKE_AUDIENCE must be pinned alongside a media entitlement issuer');
     media=await createImageGateway({ipfs,host:process.env.WEB9000_MEDIA_HOST||'127.0.0.1',
@@ -150,6 +154,7 @@ try {
       richMediaEnabled:process.env.WEB9000_MEDIA_RICH_UPLOAD==='1',
       trustedProxyAddress:process.env.WEB9000_MEDIA_TRUST_PROXY||null,
       stakeGrantIssuer:mediaStakeIssuer,
+      stakeGrantMode:mediaStakeMode,
       stakeGrantAudience:process.env.WEB9000_MEDIA_STAKE_AUDIENCE||'web9000-media-peer',
       transferLanes:mediaTransferLanes,
       maxTotal:storageMiB*1024*1024});

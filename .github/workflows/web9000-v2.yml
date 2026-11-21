@@ -111,6 +111,11 @@ jobs:
           node --check v2/network/media-lanes.mjs
           node --check v2/network/media-lanes.test.mjs
           node --check v2/network/media-tier-admission.test.mjs
+          node --check v2/network/testnet-media-config.mjs
+          node --check v2/network/testnet-media-issuer.mjs
+          node --check v2/network/testnet-media-issuer.test.mjs
+          node --check v2/network/testnet-media-client.js
+          node --check v2/network/testnet-media-client.test.mjs
           node --check v2/network/media-bitswap-policy.mjs
           node --check v2/network/mirror-media.mjs
           node --check v2/network/media-quarantine.mjs
@@ -198,6 +203,10 @@ jobs:
         working-directory: v2/network
         timeout-minutes: 3
         run: npm run test:proof-qualification
+      - name: Verify pinned Base Sepolia testnet escrow grants through browser protocol and real Helia storage
+        working-directory: v2/network
+        timeout-minutes: 2
+        run: npm run test:media-testnet
       - name: Real headless Chromium browser across independent HTTP origins
         working-directory: v2/network
         timeout-minutes: 3

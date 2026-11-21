@@ -35,6 +35,7 @@ const servers=[];
 let browser,libp2p,helia,orbitdb,index,bridge,mediaGateway,demoIdentity,demoCid,demoBytes;
 function serve({firstPartyMedia=false,externalMediaClaim=false}={}){
  const mime={'.html':'text/html','.css':'text/css','.js':'text/javascript',
+   '.mjs':'text/javascript',
    '.jpg':'image/jpeg','.mp4':'video/mp4','.mp3':'audio/mpeg'};
  const server=createServer(async(req,res)=>{
    const url=new URL(req.url,'http://local.invalid');

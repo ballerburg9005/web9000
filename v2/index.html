@@ -261,6 +261,15 @@
 <details class="compose-extra-fields">
 <summary>Optional operator-verified media stake grant</summary>
 <p class="fine">For one larger attachment only: paste a short-lived, file-specific grant issued by your chosen media peer. A self-reported wallet balance or stake amount does not qualify. The accepting peer checks the issuer signature, exact media checksum, size and expiry. The existing testnet verifier does not establish real-dollar collateral.</p>
+<p class="fine"><strong>Base Sepolia only:</strong> test ETH is not real money. An operator can independently verify a locked test-ETH position and award simulated $100/$1,000 video tiers. The testnet grant cannot be used with production staking.</p>
+<label>Testnet grant issuer URL <input id="composeTestnetIssuer" type="url" placeholder="https://issuer.example/ (operator selected)" autocomplete="url"></label>
+<label>Stake4Karma testnet wallet <input id="composeTestnetWallet" placeholder="0x… (wallet linked to this WEB9000 identity)" maxlength="42" spellcheck="false"></label>
+<div class="compose-actions">
+<button type="button" id="composeTestnetConnect">Use browser wallet</button>
+<button type="button" id="composeTestnetDeposit">Lock test ETH (wallet confirmation)</button>
+<button type="button" id="composeTestnetRequest">Verify stake and request file grant</button>
+</div>
+<p class="fine" id="composeTestnetStatus" role="status">Choose one oversized attachment and an operator's testnet issuer. A deposit is optional if your wallet already has a qualifying lock.</p>
 <label>Signed media grant <textarea id="composeMediaGrant" rows="2" maxlength="2048" spellcheck="false" placeholder="Operator-signed media entitlement (optional)"></textarea></label>
 </details>
 <label>Tags <input id="composeTags" placeholder="cats, memes, funny (comma separated)" maxlength="400"></label>
