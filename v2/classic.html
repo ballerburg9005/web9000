@@ -257,7 +257,12 @@
 <label>Headline (optional) <input id="composeTitle" maxlength="160" placeholder="What is this about?"></label>
 <label>Text <textarea id="composeText" rows="4" maxlength="16000" placeholder="Write something. Plain text and paragraphs work."></textarea></label>
 <label>Attachments (optional) <input type="file" id="composeFiles" accept="image/jpeg,image/png,image/webp,audio/mpeg,audio/ogg,audio/wav,video/mp4,video/webm" multiple></label>\n<input type="hidden" id="composePrimaryIndex" value="0">
-<p class="fine">Up to 6 attachments: JPEG/PNG/WebP ≤256 KiB, MP3/Ogg/WAV and MP4/WebM ≤10 MiB each. Your independently selected media peer must explicitly enable rich-media uploads. All files are uploaded only after preview and confirmation. Other peers may keep or refuse these bytes independently.</p>
+<p class="fine">Up to 6 attachments: images ≤512 KiB (50/100 KiB fast lanes), audio ≤10 MiB, videos ≤4 MiB. Larger uploads need a verified, operator-signed Stake4Karma grant: up to 1 MiB images, 20 MiB video ($100), or 100 MiB video ($1,000). Your independently selected media peer must explicitly enable rich-media uploads. All files are uploaded only after preview and confirmation. Other peers may keep or refuse these bytes independently.</p>
+<details class="compose-extra-fields">
+<summary>Optional operator-verified media stake grant</summary>
+<p class="fine">For one larger attachment only: paste a short-lived, file-specific grant issued by your chosen media peer. A self-reported wallet balance or stake amount does not qualify. The accepting peer checks the issuer signature, exact media checksum, size and expiry. The existing testnet verifier does not establish real-dollar collateral.</p>
+<label>Signed media grant <textarea id="composeMediaGrant" rows="2" maxlength="2048" spellcheck="false" placeholder="Operator-signed media entitlement (optional)"></textarea></label>
+</details>
 <label>Tags <input id="composeTags" placeholder="cats, memes, funny (comma separated)" maxlength="400"></label>
 <label id="composePriceWrap" hidden>Offer price / terms (optional)
   <input id="composePrice" maxlength="100" placeholder="e.g. $25, trade, free"></label>

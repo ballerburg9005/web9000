@@ -17,6 +17,7 @@ import {createGroupProof,verifyGroupProof} from './core/group-proof.js';
 import {buildPostLifecycles} from './core/lifecycle.js';
 import {mediaItems,primaryMedia,choosePrimaryMediaIndex,categoryForType,
   validateLocalUploads} from './core/media.js';
+import {MEDIA_BASE_LIMITS} from './core/media-resource-policy.js';
 import {parseMediaGateways,claimsFromVerifiedEvents,chooseMediaGateways} from './core/media-discovery.js';
 import {normalizeRelations,setRelation,relationFor} from './core/social-relations.js';
 import {discussionRecords,filterDebugEntries,summarizeSignedEvents,DebugTrace} from './core/debug-console.js';
@@ -2812,7 +2813,14 @@ function checkComposeInputs(){
   const title=$('composeTitle').value.trim(),text=$('composeText').value.trim();
   const files=[...$('composeFiles').files];
   if(!title&&!text&&!files.length&&!state.editingMedia.length)throw Error('Provide a headline, text or image');
-  validateLocalUploads(files,{existingCount:state.editingMedia.length});
+  const grant=$('composeMediaGrant').value.trim();
+  validateLocalUploads(files,{
+    existingCount:state.editingMedia.length,stakeGrantPresent:!!grant
+  });
+  if(files.filter(f=>f.size>MEDIA_BASE_LIMITS[f.type]).length>1)
+    throw Error('One file-specific grant can extend only one attachment');
+  if(grant&&!/^[A-Za-z0-9_-]{1,2048}$/.test(grant))
+    throw Error('Media grant must be bounded base64url text');
   const options=$('composePollOptions').value.split(/\n/).map(x=>x.trim()).filter(Boolean);
   if($('composePollQuestion').value.trim()&&options.length<2)
     throw Error('Polls need at least two options');
@@ -3318,7 +3326,8 @@ function parseCSV(value){return [...new Set(value.split(/[,;\n]/).map(x=>x.trim(
 async function uploadMedia(files){
   if(!files.length)return [];
   if(!state.mediaBase)throw Error('No media peer configured. Connect or choose a voluntary media provider first.');
-  validateLocalUploads(files);
+  const grant=$('composeMediaGrant').value.trim();
+  validateLocalUploads(files,{stakeGrantPresent:!!grant});
   const uploaded=[];
   const base=state.mediaBase.replace(/\/$/,'');
   for(const [index,file] of files.entries()){
@@ -3328,8 +3337,10 @@ async function uploadMedia(files){
       const xhr=new XMLHttpRequest();
       activeMediaXHR=xhr;
       xhr.open('POST',base+'/upload',true);
-      xhr.timeout=120000;
+      xhr.timeout=file.size>10*1024*1024?600000:120000;
       xhr.setRequestHeader('Content-Type',file.type);
+      if(file.size>MEDIA_BASE_LIMITS[file.type]&&grant)
+        xhr.setRequestHeader('X-WEB9000-Media-Grant',grant);
       xhr.upload.onprogress=event=>{
         if(!event.lengthComputable)return;
         const fraction=event.total>0?event.loaded/event.total:0;
@@ -3342,7 +3353,7 @@ async function uploadMedia(files){
         try{result=JSON.parse(xhr.responseText);}catch{}
         if(xhr.status<200||xhr.status>=300){
           reject(Error('Independent media peer refused '+file.name+' ('+xhr.status+
-            '): '+(result?.error||'check its upload settings and 10 MiB cap')));
+            '): '+(result?.error||'check this peer’s file and stake policy')));
         }else resolve(result);
       };
       xhr.onerror=()=>{

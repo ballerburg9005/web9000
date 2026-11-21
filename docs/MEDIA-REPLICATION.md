@@ -1,3 +1,5 @@
+**2026-11-21 NEW OPT-IN MEDIA SIZE & PRIORITY POLICY:** The repository now admits ordinary images up to **512 KiB**, ordinary videos up to **4 MiB**, and audio up to **10 MiB**. Images up to 50 KiB and 100 KiB use independent reserved transfer lanes; large video and 1 MiB staked images use slow heavy lanes. Operator-only independently verified real-dollar Stake4Karma grants (not automatically issued or enabled) provide 1 MiB images, 20 MiB video for >=$100, 100 MiB for >=$1,000. A locally pinned issuer, unique audience, short-lived exact-file digest grant and adequate disk/proxy settings are required. Existing 10 MiB video CIDs remain locally readable. **The old public deployment was not migrated**; this document's historic 256 KiB / 10 MiB references describe its preceding configuration. Full policy and tests: [MEDIA-PRIORITY-STAKING-2026-11-21.md](MEDIA-PRIORITY-STAKING-2026-11-21.md).
+
 # WEB9000 media replication — experimental operator guide
 
 ## Two separate replication paths
@@ -15,7 +17,7 @@ cd v2/network
 node mirror-media.mjs ipfs://<CID> https://source.example/media https://mine.example/media
 ```
 
-This downloads the CID from the operator-chosen source endpoint, enforces the same per-file limits (256 KiB images; 10 MiB audio/video), and submits the bytes to the *operator-chosen* destination. It verifies the **CID returned by the destination is identical** before reporting success. The destination independently retains a local IPFS block/DAG and can subsequently serve that CID if the source goes offline.
+This downloads the CID from the operator-chosen source endpoint, enforces the current unstaked per-file limits (512 KiB images; 10 MiB audio; 4 MiB video), and submits the bytes to the *operator-chosen* destination. It verifies the **CID returned by the destination is identical** before reporting success. The destination independently retains a local IPFS block/DAG and can subsequently serve that CID if the source goes offline.
 
 The destination's existing uploads-on switch, capacity limit, per-address daily quota and MIME checks still apply. The operation uses HTTP as a bootstrap transport; it is **not** automatic IPFS DHT-based discovery, peer-to-peer block exchange, background pinning, a scheduled replication service, or an authenticated private transfer API. Do not assume an independent source is trustworthy merely because it supplies a given CID; locally verify and screen content as required before making it available.
 
@@ -51,7 +53,7 @@ A quarantined CID returns HTTP 403 for both GET and HEAD from **that one operato
 
 ## Tests
 
-The isolated Helia tests cover source upload, independent mirroring with unchanged CID, target serving without source dependency, target-only quarantine with source still reachable, reversal, restart persistence, and 10 MiB limits:
+The isolated Helia tests cover source upload, independent mirroring with unchanged CID, target serving without source dependency, target-only quarantine with source still reachable, reversal, restart persistence, and the current separate image/video/audio limits:
 
 ```sh
 cd v2/network

@@ -105,6 +105,12 @@ jobs:
           node --check v2/classic.js
           node --check v2/network/smoke-classic.mjs
           node --check v2/network/media-node.mjs
+          node --check v2/core/media-resource-policy.js
+          node --check v2/network/media-stake-grant.mjs
+          node --check v2/network/media-stake-grant.test.mjs
+          node --check v2/network/media-lanes.mjs
+          node --check v2/network/media-lanes.test.mjs
+          node --check v2/network/media-tier-admission.test.mjs
           node --check v2/network/media-bitswap-policy.mjs
           node --check v2/network/mirror-media.mjs
           node --check v2/network/media-quarantine.mjs

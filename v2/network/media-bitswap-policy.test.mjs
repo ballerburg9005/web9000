@@ -22,6 +22,7 @@ import * as dagPB from '@ipld/dag-pb';
 import {createImageGateway} from './media-node.mjs';
 import {changeOperatorQuarantine} from './media-quarantine.mjs';
 import {createMediaBitswapPolicy} from './media-bitswap-policy.mjs';
+import {createMediaLanes} from './media-lanes.mjs';
 
 const PNG=Buffer.from([137,80,78,71,13,10,26,10,0,0,0,0,73,69,78,68]);
 const buffer=async chunks=>{
@@ -36,10 +37,13 @@ test('direct libp2p Bitswap block requests respect operator quarantine for raw a
    transports:[tcp()],connectionEncrypters:[noise()],streamMuxers:[yamux()],
    services:{identify:identify(),pubsub:gossipsub({allowPublishToZeroTopicPeers:true})}});
   const backing=new LevelBlockstore(join(root,name,'blocks'));
-  const policy=manifestFile?createMediaBitswapPolicy({manifestFile,localBlockstore:backing}):null;
+  const lanes=manifestFile?createMediaLanes():null;
+  const policy=manifestFile?createMediaBitswapPolicy({
+   manifestFile,localBlockstore:backing,transferLanes:lanes
+  }):null;
   const ipfs=await createHelia({libp2p,blockstore:backing,
    ...(policy?{blockBrokers:policy.blockBrokers}:{})});
-  const node={libp2p,ipfs,policy,orbitdb:undefined,db:[],
+  const node={libp2p,ipfs,policy,lanes,orbitdb:undefined,db:[],
    async stop(){
     for(const d of this.db.reverse())await d.close();
     if(this.orbitdb)await this.orbitdb.stop();
@@ -58,7 +62,8 @@ test('direct libp2p Bitswap block requests respect operator quarantine for raw a
   const manifestFile=join(root,'media-manifest.json');
   const source=await peer('operator',{manifestFile});
   const gateway=await createImageGateway({ipfs:source.ipfs,host:'127.0.0.1',port:0,
-   manifestFile,uploadEnabled:true,richMediaEnabled:true,maxTotal:20*1024*1024});
+   manifestFile,uploadEnabled:true,richMediaEnabled:true,maxTotal:20*1024*1024,
+   transferLanes:source.lanes});
   try{
    const url='http://127.0.0.1:'+gateway.port;
    const upload=async (type,bytes)=>{

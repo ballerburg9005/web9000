@@ -14,6 +14,8 @@ import * as raw from 'multiformats/codecs/raw';
 import * as dagPB from '@ipld/dag-pb';
 import {bitswap,trustlessGateway} from '@helia/block-brokers';
 import {readOperatorQuarantine} from './media-quarantine.mjs';
+import {mediaPriority} from '../core/media-resource-policy.js';
+import {createMediaLanes} from './media-lanes.mjs';
 
 const MAX_MEDIA_BLOCKS=30000;
 const MAX_MANIFEST=512*1024;
@@ -29,11 +31,15 @@ async function localBytes(store,cid){
  }
  return Buffer.concat(chunks,total);
 }
-export function createMediaBitswapPolicy({manifestFile,localBlockstore,quarantineFile}={}){
+export function createMediaBitswapPolicy({manifestFile,localBlockstore,quarantineFile,
+ transferLanes=null}={}){
  if(typeof manifestFile!=='string'||!localBlockstore?.get)
   throw Error('P2P media serving policy needs manifest and direct local blockstore');
  const localQuarantine=quarantineFile||manifestFile+'.quarantine.json';
- let manifestBytes=null,rootsByBlock=new Map();
+ let manifestBytes=null,rootsByBlock=new Map(),rootPriorities=new Map();
+ const lanes=transferLanes||createMediaLanes();
+ if(typeof lanes.acquire!=='function'||typeof lanes.takeBytes!=='function')
+  throw Error('Media Bitswap needs locally verified transfer scheduler');
  async function refresh(){
   // Files are small metadata; byte-equality avoids stale mtime caches and
   // means an upload/manifest rewrite takes effect at the very next request.
@@ -42,12 +48,15 @@ export function createMediaBitswapPolicy({manifestFile,localBlockstore,quarantin
   catch(e){if(e.code==='ENOENT')text='';else throw e;}
   if(text===manifestBytes)return;
   if(text.length>MAX_MANIFEST)throw Error('Media manifest exceeds P2P policy budget');
-  let entries=[];
+  let entries=[],priorities=new Map();
   if(text){
    const parsed=JSON.parse(text);
    if(!parsed||typeof parsed!=='object'||Array.isArray(parsed)||
       Object.keys(parsed).length>10000)throw Error('Invalid media manifest');
    entries=Object.keys(parsed).map(key=>CID.parse(key));
+   for(const [key,value] of Object.entries(parsed))
+    priorities.set(key,mediaPriority(value?.type,value?.bytes)||
+      {lane:'heavy',rank:12,name:'unclassified-source-archive'});
   }
   const next=new Map();
   for(const root of entries){
@@ -75,6 +84,7 @@ export function createMediaBitswapPolicy({manifestFile,localBlockstore,quarantin
   // shareable. The previous known-good map stays in force only while
   // its old manifest applies; changed invalid manifest causes denial.
   rootsByBlock=next;
+  rootPriorities=priorities;
   manifestBytes=text;
  }
  async function maySend(cid){
@@ -95,12 +105,32 @@ export function createMediaBitswapPolicy({manifestFile,localBlockstore,quarantin
    return false;
   }
  }
+ function blockPriority(cid){
+  const owners=rootsByBlock.get(cid.toString());
+  if(!owners)return {lane:'heavy',rank:12};
+  let best={lane:'heavy',rank:12};
+  for(const owner of owners){
+   const item=rootPriorities.get(owner);
+   if(item&&item.rank<best.rank)best=item;
+  }
+  return best;
+ }
  function outboundOnlyBlockstore(original){
   return new Proxy(original,{
    get(target,key,receiver){
     if(key==='get')return async function* guardedGet(cid,options){
      if(!await maySend(cid))throw Error('Media block withheld by local P2P operator policy');
-     yield* original.get(cid,options);
+     // Bitswap bypasses HTTP entirely. Apply the SAME reserved physical
+     // read lanes to every outbound CID block (including UnixFS children),
+     // so a large video flood cannot fill tiny-image read slots.
+     const priority=blockPriority(cid);
+     const release=await lanes.acquire(priority.lane,priority.rank);
+     try{
+      for await(const part of original.get(cid,options)){
+       await lanes.takeBytes(priority.lane,part.byteLength);
+       yield part;
+      }
+     }finally{release();}
     };
     const value=Reflect.get(target,key,receiver);
     return typeof value==='function'?value.bind(target):value;
@@ -113,6 +143,7 @@ export function createMediaBitswapPolicy({manifestFile,localBlockstore,quarantin
  return {
   maySend,
   blockBrokers:[trustlessGateway(),broker],
+  transferLanes:()=>lanes.stats(),
   // For tests and operator diagnostics; no media bytes are exposed here.
   async info(){
    try{await refresh();return {blocks:rootsByBlock.size,roots:new Set(

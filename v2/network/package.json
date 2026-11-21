@@ -37,7 +37,7 @@
     "test:peer-identity": "node --test peer-identity.test.mjs",
     "test:browser-ui": "node smoke-ui.mjs",
     "test:classic-ui": "node smoke-classic.mjs",
-    "test:media": "node --test media-node.test.mjs",
+    "test:media": "node --test media-node.test.mjs media-stake-grant.test.mjs media-lanes.test.mjs media-tier-admission.test.mjs",
     "test:media-providers": "node --test announce-media.test.mjs",
     "test:qualified": "node smoke-qualified.mjs",
     "test:adaptive-tiers": "node --test adaptive-tier-router.test.mjs source-compartments.test.mjs signed-shard-directory.test.mjs",

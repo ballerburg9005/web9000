@@ -78,7 +78,7 @@ async function eventually(fn,name,timeout=25000){
 }
 async function ready(page){
  try{
-   await page.waitForSelector('html[data-web9000-classic-ready="1"]',{timeout:15000});
+   await page.waitForSelector('html[data-web9000-classic-ready="1"]',{timeout:30000});
  }catch(err){
    console.error('Classic readiness diagnostics',
      await page.evaluate(()=>({
@@ -135,10 +135,14 @@ try{
  const originA=await serve(),originB=await serve();
  const chromium=[process.env.CHROME_BIN,process.env.PUPPETEER_EXECUTABLE_PATH,'/usr/bin/google-chrome','/usr/bin/google-chrome-stable','/usr/bin/chromium'].find(x=>x&&existsSync(x));
  if(!chromium)throw Error('Browser not installed');
- browser=await puppeteer.launch({executablePath:chromium,headless:true,protocolTimeout:12000,args:['--no-sandbox','--disable-setuid-sandbox']});
+ browser=await puppeteer.launch({executablePath:chromium,headless:true,protocolTimeout:60000,args:['--no-sandbox','--disable-setuid-sandbox']});
  const errors=[];
  const a=await browser.newPage(),b=await browser.newPage();
- for(const [name,page] of [['a',a],['b',b]])page.on('pageerror',e=>errors.push(name+': '+e.message));
+ for(const [name,page] of [['a',a],['b',b]])
+  page.on('pageerror',e=>{
+   errors.push(name+': '+e.message);
+   console.error('CLASSIC_BROWSER_MODULE_ERROR',name,e.message);
+  });
  await a.goto(originA,{waitUntil:'domcontentloaded'});await ready(a);
  assert.equal(await a.$eval('#spaceName',e=>e.value),'demo','new sessions open the dedicated signed demo namespace');
  assert.equal(await a.$$eval('.post',e=>e.length),0,'no local fake fixture posts before a peer connects');

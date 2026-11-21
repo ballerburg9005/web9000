@@ -5,11 +5,10 @@ export const SUPPORTED_MEDIA_TYPES=Object.freeze([
   'image/jpeg','image/png','image/webp','audio/mpeg','audio/ogg','audio/wav',
   'video/mp4','video/webm'
 ]);
-export const MEDIA_FILE_LIMITS=Object.freeze({
-  'image/jpeg':262144,'image/png':262144,'image/webp':262144,
-  'audio/mpeg':10485760,'audio/ogg':10485760,'audio/wav':10485760,
-  'video/mp4':10485760,'video/webm':10485760
-});
+import {MEDIA_BASE_LIMITS,MEDIA_PHYSICAL_LIMITS,mediaLimitText,
+ mediaPriority} from './media-resource-policy.js';
+export const MEDIA_FILE_LIMITS=MEDIA_BASE_LIMITS;
+
 export const categoryForType=type=>
   type?.startsWith('audio/')?'audio':type?.startsWith('video/')?'video':'image';
 export function choosePrimaryMediaIndex(types,selection=undefined){
@@ -36,13 +35,21 @@ export function primaryMedia(body){
     body?.fields?.primaryMediaIndex);
   return index<0?null:{...items[index],index};
 }
-export function validateLocalUploads(files,{existingCount=0}={}){
+export function validateLocalUploads(files,{existingCount=0,stakeGrantPresent=false}={}){
   if(files.length>6)throw Error('Maximum six mixed-media attachments per post');
   if(!files.length&&!existingCount)return;
   for(const file of files){
     if(!Object.hasOwn(MEDIA_FILE_LIMITS,file.type))
       throw Error('Only JPEG/PNG/WebP, MP3/Ogg/WAV, MP4/WebM are accepted');
-    if(!Number.isFinite(file.size)||file.size<1||file.size>MEDIA_FILE_LIMITS[file.type])
-      throw Error(file.name+' exceeds the '+(file.type.startsWith('image/')?'256 KiB':'10 MiB')+' size limit');
+    const max=stakeGrantPresent?MEDIA_PHYSICAL_LIMITS[file.type]:
+      MEDIA_FILE_LIMITS[file.type];
+    if(!Number.isSafeInteger(file.size)||file.size<1||file.size>max)
+      throw Error(file.name+' exceeds the '+mediaLimitText(file.type,max)+' size limit');
+    // A pasted grant is only a claim until the accepting peer independently
+    // validates its operator signature, scope, expiry and exact file digest.
+    if(file.size>MEDIA_FILE_LIMITS[file.type]&&!stakeGrantPresent)
+      throw Error(file.name+' requires a verified operator media entitlement');
+    if(!mediaPriority(file.type,file.size))
+      throw Error('Unsupported media priority category');
   }
 }

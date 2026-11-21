@@ -26,6 +26,7 @@ import {createBrowserBridge} from './browser-bridge.mjs';
 import {loadOrCreatePeerKey} from './peer-identity.mjs';
 import {createImageGateway} from './media-node.mjs';
 import {createMediaBitswapPolicy} from './media-bitswap-policy.mjs';
+import {createMediaLanes} from './media-lanes.mjs';
 import {openQualifiedIndex} from './qualified-index.js';
 import {loadPeerSourceObserver} from './node-source-observer.mjs';
 
@@ -55,10 +56,14 @@ const libp2p=await createLibp2p({
   services:{identify:identify(),pubsub:gossipsub({allowPublishToZeroTopicPeers:true})}
 });
 const localBlockstore=new LevelBlockstore(path.join(dir,'blocks'));
+// Shared operator-local bandwidth/slot budget covers BOTH HTTP and direct
+// Bitswap, so neither transport secretly gets a second giant-video lane.
+const mediaTransferLanes=process.env.WEB9000_MEDIA_SERVER==='1'?
+  createMediaLanes():null;
 const mediaBitswapPolicy=process.env.WEB9000_MEDIA_SERVER==='1'?
   createMediaBitswapPolicy({
     manifestFile:path.join(dir,'media-manifest.json'),
-    localBlockstore
+    localBlockstore,transferLanes:mediaTransferLanes
   }):null;
 // Critical: Bitswap has its own P2P outbound block path, independent from
 // HTTP gateway checks. Restrict media bytes at the serving broker, not
@@ -132,12 +137,21 @@ try {
     const storageMiB=Number(process.env.WEB9000_MEDIA_STORAGE_MIB||64);
     if(!Number.isSafeInteger(storageMiB)||storageMiB<1||storageMiB>4096)
       throw Error('WEB9000_MEDIA_STORAGE_MIB must be 1..4096 MiB');
+    // Production real-dollar stake evidence needs an independently
+    // configured oracle + reviewed escrow; testnet ETH is NOT USD.
+    // No issuer means larger file admission stays disabled.
+    const mediaStakeIssuer=process.env.WEB9000_MEDIA_STAKE_ISSUER||null;
+    if(mediaStakeIssuer&&!process.env.WEB9000_MEDIA_STAKE_AUDIENCE)
+      throw Error('WEB9000_MEDIA_STAKE_AUDIENCE must be pinned alongside a media entitlement issuer');
     media=await createImageGateway({ipfs,host:process.env.WEB9000_MEDIA_HOST||'127.0.0.1',
       port:Number(process.env.WEB9000_MEDIA_PORT||8788),
       manifestFile:path.join(dir,'media-manifest.json'),
       uploadEnabled:process.env.WEB9000_MEDIA_UPLOAD==='1',
       richMediaEnabled:process.env.WEB9000_MEDIA_RICH_UPLOAD==='1',
       trustedProxyAddress:process.env.WEB9000_MEDIA_TRUST_PROXY||null,
+      stakeGrantIssuer:mediaStakeIssuer,
+      stakeGrantAudience:process.env.WEB9000_MEDIA_STAKE_AUDIENCE||'web9000-media-peer',
+      transferLanes:mediaTransferLanes,
       maxTotal:storageMiB*1024*1024});
     console.log('MEDIA GATEWAY',media.host+':'+media.port,'uploads enabled:',media.uploadEnabled);
     console.log('MEDIA BITSWAP POLICY',

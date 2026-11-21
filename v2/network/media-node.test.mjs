@@ -33,7 +33,11 @@ test('opt-in image peer stores genuine content-addressed raw IPFS blocks and ref
   assert.deepEqual(Buffer.from(await image.arrayBuffer()),tiny);
   const invalid=await fetch(url+'/upload',{method:'POST',headers:{'content-type':'image/png'},body:'not an actual png'});
   assert.equal(invalid.status,415);
-  const huge=await fetch(url+'/upload',{method:'POST',headers:{'content-type':'image/png'},body:Buffer.alloc(262145)});
+  const overOrdinary=await fetch(url+'/upload',{method:'POST',
+   headers:{'content-type':'image/png'},body:Buffer.alloc(512*1024+1)});
+  assert.equal(overOrdinary.status,403,'large image needs verified media grant');
+  const huge=await fetch(url+'/upload',{method:'POST',
+   headers:{'content-type':'image/png'},body:Buffer.alloc(1024*1024+1)});
   assert.equal(huge.status,413);
   const health=await(await fetch(url+'/health')).json();assert.equal(health.images,1);
   console.log('PASS independent media node stores real, bounded IPFS raw-block images');
@@ -45,9 +49,9 @@ test('opt-in image peer stores genuine content-addressed raw IPFS blocks and ref
  }
 });
 
-test('explicit opt-in UnixFS media accepts 10 MiB bounded audio/video and supports HTTP seek ranges',async()=>{
+test('explicit opt-in UnixFS media admits ordinary 4 MiB videos and 10 MiB audio with HTTP seek ranges',async()=>{
  assert.equal(MEDIA_LIMITS['audio/mpeg'],10*1024*1024);
- assert.equal(MEDIA_LIMITS['video/mp4'],10*1024*1024);
+ assert.equal(MEDIA_LIMITS['video/mp4'],4*1024*1024);
  const dir=await mkdtemp(join(tmpdir(),'web9000-unixfs-'));
  let peer,ipfs,gateway;
  try{
@@ -125,14 +129,14 @@ test('explicit opt-in UnixFS media accepts 10 MiB bounded audio/video and suppor
    headers:{range:'bytes=999999999-999999999'}})).status,416);
   const invalid=await fetch(origin+'/upload',{method:'POST',
    headers:{'content-type':'video/mp4','x-real-ip':'203.0.113.5'},body:Buffer.from('not an mp4')});
-  assert.equal(invalid.status,429,
-   'a third rich-media upload is refused by the operator daily rate limit');
+  assert.equal(invalid.status,415,
+   'separate video allowance does not consume the audio quota and still checks media signatures');
   const info=await(await fetch(origin+'/health')).json();
   assert.equal(info.files,2);
   assert.equal(info.images,0);
   assert.equal(info.richMediaEnabled,true);
   assert.equal(info.audioLimit,10*1024*1024);
-  assert.equal(info.videoLimit,10*1024*1024);
+  assert.equal(info.videoLimit,4*1024*1024);
   assert.equal(info.richUploadsPerClientPerDay,2);
   const quotaText=await readFile(manifestFile+'.quotas.json','utf8');
   assert.equal(quotaText.includes('203.0.113.5'),false,'stored quota keys do not expose literal client IPs');
@@ -148,8 +152,11 @@ test('explicit opt-in UnixFS media accepts 10 MiB bounded audio/video and suppor
   assert.equal((await fetch(restarted+'/ipfs/'+vm.cid.slice(7),{headers:{range:'bytes=0-1'}})).status,206);
 
   assert.equal((await fetch(restarted+'/upload',{method:'POST',
+   headers:{'content-type':'audio/mpeg','x-real-ip':'203.0.113.5'},body:audio})).status,201,
+   'audio has its own quota separate from videos on this IP');
+  assert.equal((await fetch(restarted+'/upload',{method:'POST',
    headers:{'content-type':'audio/mpeg','x-real-ip':'203.0.113.5'},body:audio})).status,429,
-   'per-client daily quota survives a media peer restart');
+   'the separate per-client daily audio quota survives a peer restart');
   assert.equal((await fetch(restarted+'/upload',{method:'POST',
    headers:{'content-type':'audio/mpeg','x-real-ip':'203.0.113.6'},body:audio})).status,201,
    'trusted reverse-proxy addresses produce independent client quotas');
